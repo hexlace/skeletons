@@ -1,0 +1,4 @@
+control-character-before-text
+hello  world-invisible-inside-text
+# Skeletons:partial s
+# not skeletons:

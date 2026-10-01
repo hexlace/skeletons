@@ -1,0 +1,13 @@
+[package]
+name = "optional-beside-optional"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.assignee]
+type = "text"
+
+[package.metadata.skeletons.options.reviewer]
+type = "text"

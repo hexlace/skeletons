@@ -1,0 +1,15 @@
+[package]
+name = "hidden-marker-control-after-hash-space"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.s]
+type = "set"
+default = ["keep"]
+
+[[package.metadata.skeletons.options.s.values]]
+value = "keep"
+partial = "keep.yml"

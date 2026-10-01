@@ -1,0 +1,4 @@
+jobs:
+steps:
+  # skeletons:partial workflows
+done: true

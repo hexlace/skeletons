@@ -1,0 +1,13 @@
+[package]
+name = "verbatim-grammar-inert"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+verbatim = ["inert.txt"]
+
+[package.metadata.skeletons.options.cadence]
+type = "enum"
+values = ["daily", "weekly", "monthly"]
+default = "weekly"

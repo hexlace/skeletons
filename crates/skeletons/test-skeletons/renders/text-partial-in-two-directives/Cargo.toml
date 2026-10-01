@@ -1,0 +1,21 @@
+[package]
+name = "text-partial-in-two-directives"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.blocks]
+type = "set"
+default = ["note"]
+
+[[package.metadata.skeletons.options.blocks.values]]
+value = "note"
+partial = "note.yml"
+
+[package.metadata.skeletons.options.note]
+type = "text"
+
+[package.metadata.skeletons.options.other]
+type = "text"

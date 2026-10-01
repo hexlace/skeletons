@@ -1,0 +1,12 @@
+[package]
+name = "fill-replacement-not-rescanned"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.literal]
+type = "enum"
+values = ["{{surprise}}", "plain"]
+default = "{{surprise}}"

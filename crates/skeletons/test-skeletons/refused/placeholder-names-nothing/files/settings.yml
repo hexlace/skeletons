@@ -1,0 +1,4 @@
+name: settings
+mode: default
+value: constant
+placeholder: {{cadense}}

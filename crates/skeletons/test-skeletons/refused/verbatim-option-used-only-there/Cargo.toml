@@ -1,0 +1,13 @@
+[package]
+name = "verbatim-option-used-only-there"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+verbatim = ["template.yml"]
+
+[package.metadata.skeletons.options.cadence]
+type = "enum"
+values = ["daily", "weekly", "monthly"]
+default = "weekly"

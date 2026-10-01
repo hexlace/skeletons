@@ -1,0 +1,3 @@
+version: 2
+schedule: {{cadence}}
+mixed: "{{assignee}}" and {{cadence}}

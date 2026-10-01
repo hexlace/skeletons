@@ -1,0 +1,16 @@
+[package]
+name = "verbatim-names-partial-by-tree-path"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+verbatim = ["partials/cargo.yml"]
+
+[package.metadata.skeletons.options.ecosystems]
+type = "set"
+default = ["cargo"]
+
+[[package.metadata.skeletons.options.ecosystems.values]]
+value = "cargo"
+partial = "cargo.yml"

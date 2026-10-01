@@ -1,0 +1,93 @@
+[package]
+name = "skeletons"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+description = "Skeletons — keep your repos from drifting apart. A ritual bundle: it mounts in your project's ritual command line."
+readme = "readme.md"
+# A library bundle, not an application: `command-line-utilities` is for
+# programs a user installs, and this crate has no binary. It is the parts a
+# project's own command line is built from, which is what
+# `command-line-interface` holds.
+categories = ["command-line-interface", "development-tools"]
+# Test skeletons are real crates under this one's own directory, each with a
+# `Cargo.toml` Cargo would otherwise see as packageable content. They exist
+# to be read from a checkout by this crate's own test suite, never to ship in
+# the published package: excluding the whole directory here is the one line
+# that keeps them out, since a directory holding its own `Cargo.toml` is
+# still packaged alongside loose files that sit next to it.
+#
+# `src/behind/captures` is real, captured crates.io sparse-index responses.
+# `behind/index_entries.rs`'s own unit tests read them at compile time
+# (`include_bytes!`); `ritual/tests/` reads them again at runtime, from this
+# same checkout, for the registry-`behind` tests. Neither reader is
+# production code, so this ships to no wearer's build either.
+#
+# `src/workspace/fixtures` is captured `cargo` output and a `cargo metadata`
+# document, read only by `#[cfg(test)]` code in `workspace/`, so it too is
+# left out.
+#
+# Every test that reads one of these, or reads `.docs/` above this directory,
+# is compiled only when `build.rs` finds `test-skeletons/` beside this
+# manifest and sets `skeletons_checkout`; from an unpacked package the rest of
+# the suite runs unchanged.
+exclude = ["/test-skeletons", "/src/behind/captures", "/src/workspace/fixtures"]
+
+[dependencies]
+rituals.workspace = true
+# Reading `[package.metadata.skeletons]` out of a skeleton's own `Cargo.toml`. Real
+# library code, compiled into every build: `check` calls `skeleton::render` for
+# every worn skeleton.
+toml.workspace = true
+# Refusing two names in one skeleton directory that a filesystem ignoring case
+# or Unicode normalization would take as one: see the workspace manifest.
+caseless.workspace = true
+unicode-normalization.workspace = true
+# Refusing a directive hidden behind invisible characters: see the
+# workspace manifest.
+unicode-properties.workspace = true
+# Parsing `cargo metadata`'s JSON (`workspace/schema.rs`) and printing
+# `check --json`'s own document (`check/json.rs`).
+serde.workspace = true
+serde_json.workspace = true
+# Parsing a locked package's version and comparing it against a crates.io
+# index entry.
+semver.workspace = true
+# Decoding a git source's query string in `workspace/pin.rs`.
+form_urlencoded.workspace = true
+# Asking crates.io's sparse index whether a registry-pinned skeleton is behind
+# (`behind/crates_io.rs`). See the workspace dependency comment for why
+# `ureq`, and why `rustls` alone.
+ureq.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+# Disposable directories for unit tests that need a real filesystem: real
+# files, symlinks and read-only directories.
+tempfile.workspace = true
+
+[features]
+# Compiles in the seams that let a test observe or redirect what would
+# otherwise be a real network request or a real wait: `behind::CratesIoIndex`'s
+# `Captured`/`Withheld` variants (read from
+# `SKELETONS_TEST_ONLY_CRATES_IO_INDEX` instead of the real sparse index), the
+# remote-query log (`SKELETONS_TEST_ONLY_REMOTE_LOG`), and the local git
+# timeout (`SKELETONS_TEST_ONLY_LOCAL_GIT_TIMEOUT_SECONDS`, in
+# `git/local_timeout.rs`). This crate's own
+# unit-test build has the same seams without the feature, since they are
+# gated on `any(test, feature = "test-util")`; the feature is for a
+# dependent's tests, and for tests only. Never enabled by `cargo build`/`cargo
+# run` of a command line that mounts this bundle, and never to be enabled
+# outside `[dev-dependencies]` — only `cargo test` unifies it in, and only
+# because `ritual/Cargo.toml` asks for it as a dev-dependency feature (see
+# that manifest's own comment).
+test-util = []
+
+[package.metadata.ritual]
+task = true
+
+[lints]
+workspace = true

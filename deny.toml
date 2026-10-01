@@ -1,0 +1,80 @@
+# cargo-deny: what the dependency tree may hold. CI runs `cargo deny check`
+# on every pull request and every push to `main`, and `cargo deny check
+# advisories` weekly as well, because a new advisory lands against an
+# unchanged lockfile.
+
+[graph]
+# The platforms this workspace supports, Linux and macOS. A dependency that
+# only another platform pulls in (the `windows-*` family, `wasi`) is never
+# built on a supported one, so it is left out of every check below.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+# A feature's dependencies are checked whether or not anything enables it, so
+# an optional dependency cannot arrive unchecked behind one.
+all-features = true
+
+[advisories]
+# Every RustSec advisory fails the check: a vulnerability, an unmaintained
+# crate or an unsound one, anywhere in the tree. An advisory accepted after
+# review goes in `ignore` with the reason it does not apply here.
+unmaintained = "all"
+unsound = "all"
+# A yanked version was withdrawn by its own author, usually for a reason.
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Each licence here is one the tree needs, and each is permissive: none
+# is copyleft, so none reaches into the source of a project that compiles
+# `skeletons` in. What they ask of it is to keep their notices, and Apache-2.0
+# its NOTICE file where a crate has one. Where a crate offers a choice, `MIT` or
+# `Apache-2.0` is taken; the others are here because some crate offers
+# nothing else:
+#
+#   ISC                  — `ring` (with Apache-2.0), `rustls-webpki`, `untrusted`
+#   BSD-3-Clause         — `subtle`
+#   CDLA-Permissive-2.0  — `webpki-roots`, whose content is Mozilla's root
+#                          certificate data
+#   Unicode-3.0          — `unicode-ident` (with MIT or Apache-2.0), for the
+#                          Unicode data tables it is generated from
+#
+# A licence a new dependency brings fails the check until it is read and added
+# here with the crate that needs it.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "ISC",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "Unicode-3.0",
+]
+# An allowed licence nothing uses any more is stale, and fails the check so it
+# comes off the list rather than lingering.
+unused-allowed-license = "deny"
+confidence-threshold = 0.93
+
+[licenses.private]
+# The workspace's own members are checked like any other crate: each declares
+# `license = "MIT"` and is held to it.
+ignore = false
+
+[bans]
+# Two resolved versions of one crate compile twice. That is worth seeing and
+# not always in this workspace's power to fix, since it follows from what
+# dependencies ask for, so it warns rather than fails.
+multiple-versions = "warn"
+# A wildcard version requirement is refused. Path dependencies within the
+# workspace carry a version too, so none of them is exempt.
+wildcards = "deny"
+
+[sources]
+# crates.io only. A git dependency or another registry fails until it is
+# listed here with the reason it is needed.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

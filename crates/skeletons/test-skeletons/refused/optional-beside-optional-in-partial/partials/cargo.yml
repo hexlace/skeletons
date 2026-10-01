@@ -1,0 +1,4 @@
+- package-ecosystem: "cargo"
+  people: ["{{assignee}}", "{{reviewer}}"]
+  assignees: ["{{assignee}}"]
+  reviewers: ["{{reviewer}}"]

@@ -1,0 +1,8 @@
+# `cargo ritual <task>` runs this project's own composed command line, from
+# anywhere inside the checkout. Nothing has to be installed: the alias builds
+# the crate on demand, the way a project-local task runner already does.
+[alias]
+ritual = ["run", "--package", "skeletons-ritual", "--"]
+# `cargo xtask <command>` runs this repository's release automation; see
+# xtask/src/main.rs for the commands.
+xtask = ["run", "--package", "xtask", "--quiet", "--"]

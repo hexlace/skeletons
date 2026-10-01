@@ -1,0 +1,13 @@
+[package]
+name = "unknown-key"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.cadence]
+type = "enum"
+values = ["daily", "weekly"]
+default = "daily"
+surprising = true

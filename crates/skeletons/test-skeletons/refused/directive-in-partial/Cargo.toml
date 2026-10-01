@@ -1,0 +1,19 @@
+[package]
+name = "directive-in-partial"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.workflows]
+type = "set"
+default = ["lint", "test"]
+
+[[package.metadata.skeletons.options.workflows.values]]
+value = "lint"
+partial = "lint.yml"
+
+[[package.metadata.skeletons.options.workflows.values]]
+value = "test"
+partial = "test.yml"

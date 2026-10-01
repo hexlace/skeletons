@@ -1,0 +1,19 @@
+[package]
+name = "hidden-directive-in-partial"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.workflows]
+type = "set"
+default = ["keep", "hidden"]
+
+[[package.metadata.skeletons.options.workflows.values]]
+value = "keep"
+partial = "keep.yml"
+
+[[package.metadata.skeletons.options.workflows.values]]
+value = "hidden"
+partial = "hidden.yml"

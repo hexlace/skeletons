@@ -1,0 +1,8 @@
+[package]
+name = "unknown-key-with-newline"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+"a\nb" = 1

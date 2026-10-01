@@ -1,0 +1,7 @@
+[package]
+name = "nested-manifest-in-partials-directory"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]

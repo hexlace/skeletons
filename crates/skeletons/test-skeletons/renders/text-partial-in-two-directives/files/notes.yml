@@ -1,0 +1,5 @@
+other-a: "{{other}}"
+other-b: "{{other}}"
+other-c: "{{other}}"
+# skeletons:partial blocks
+# skeletons:partial blocks

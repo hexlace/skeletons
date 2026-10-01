@@ -1,0 +1,21 @@
+[package]
+name = "optional-beside-optional-in-partial"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.assignee]
+type = "text"
+
+[package.metadata.skeletons.options.reviewer]
+type = "text"
+
+[package.metadata.skeletons.options.ecosystems]
+type = "set"
+default = ["cargo"]
+
+[[package.metadata.skeletons.options.ecosystems.values]]
+value = "cargo"
+partial = "cargo.yml"

@@ -1,0 +1,7 @@
+ no-break-space line
+​zero-width-space line
+⁠word-joiner line
+　ideographic-space line
+vertical-tab line
+form-feed line
+﻿byte-order-mark line

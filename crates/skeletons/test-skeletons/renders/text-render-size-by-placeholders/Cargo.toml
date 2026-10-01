@@ -1,0 +1,13 @@
+[package]
+name = "text-render-size-by-placeholders"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.narrow]
+type = "text"
+
+[package.metadata.skeletons.options.wide]
+type = "text"

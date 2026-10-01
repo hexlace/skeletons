@@ -1,0 +1,5 @@
+﻿well-formed placeholder: {{cadence}}
+# skeletons:partial anything
+ # skeletons:partial anything
+unclosed: {{ not closed
+no final newline

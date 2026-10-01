@@ -1,0 +1,334 @@
+//! Confirming `sync` may ask git about the repository at all: no
+//! repository-redirecting variable is set, and `root` genuinely sits inside
+//! a non-bare git work tree — the one thing every other question in this
+//! module's siblings (`clean`, `proof`) is asked through.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use crate::git::{self, Locale, RepositoryPrefix};
+use crate::subprocess::{Finished, SubprocessError, Truncated};
+
+use super::abort::{GitQuestion, SyncAbort};
+
+/// A git work tree `sync` may ask about: no redirecting variable is set,
+/// and git itself confirmed `root` sits inside a non-bare work tree. Only
+/// [`open`] constructs one, so every other function in this module's
+/// siblings that takes a `&WorkTree` can trust both properties already
+/// hold.
+#[derive(Debug)]
+pub(crate) struct WorkTree {
+    root: PathBuf,
+    prefix: RepositoryPrefix,
+}
+
+impl WorkTree {
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub(crate) const fn prefix(&self) -> &RepositoryPrefix {
+        &self.prefix
+    }
+
+    /// A git [`Command`] already pointed at this work tree's own root
+    /// (`current_dir`), built by [`git::command`]: every pathspec it is given
+    /// is read literally. [`Self::git_for_pathspec_magic`] is the variant for
+    /// a query that needs pathspec magic.
+    pub(super) fn git(&self, locale: Locale) -> Command {
+        let mut command = git::command(locale);
+        command.current_dir(&self.root);
+        command
+    }
+
+    /// [`Self::git`] for a query that needs pathspec magic
+    /// ([`git::command_for_pathspec_magic`]): the same command, pointed at
+    /// this work tree's own root in the same place, without the global
+    /// `--literal-pathspecs`.
+    pub(super) fn git_for_pathspec_magic(&self, locale: Locale) -> Command {
+        let mut command = git::command_for_pathspec_magic(locale);
+        command.current_dir(&self.root);
+        command
+    }
+}
+
+/// Confirms `root` may be asked about at all: none of the variables in
+/// `REDIRECTING_VARIABLES` (`git/command.rs`) is set (checked via `is_set`, so a test
+/// can hand this any lookup it likes; production passes
+/// `|name| std::env::var_os(name).is_some()`), and git itself reports `root`
+/// sits inside a non-bare work tree.
+pub(crate) fn open(root: &Path, is_set: impl Fn(&str) -> bool) -> Result<WorkTree, SyncAbort> {
+    let redirecting = git::redirecting_variables_set(is_set);
+    if !redirecting.is_empty() {
+        return Err(SyncAbort::RedirectedGit {
+            variables: redirecting,
+        });
+    }
+
+    let mut command = git::command(Locale::Fixed);
+    command
+        .current_dir(root)
+        .args(["rev-parse", "--is-inside-work-tree", "--show-prefix"]);
+    let finished = run_local(command, GitQuestion::WorkTree)?;
+
+    let prefix = classify_rev_parse(
+        finished.success(),
+        finished.stdout(),
+        finished.stderr_head(),
+    )?;
+    Ok(WorkTree {
+        root: root.to_path_buf(),
+        prefix,
+    })
+}
+
+/// The pure classifier behind [`open`]'s own reading of
+/// `rev-parse --is-inside-work-tree --show-prefix`'s answer — split out so a
+/// unit test can drive every captured shape directly, with no process to
+/// spawn.
+fn classify_rev_parse(
+    exit_ok: bool,
+    stdout: Result<&[u8], Truncated>,
+    stderr: &[u8],
+) -> Result<RepositoryPrefix, SyncAbort> {
+    if !exit_ok {
+        let diagnostic = git::diagnostic(stderr);
+        if diagnostic.starts_with("detected dubious ownership in repository at ") {
+            return Err(SyncAbort::DubiousOwnership { diagnostic });
+        }
+        if diagnostic.starts_with("not a git repository") {
+            return Err(SyncAbort::NotAWorkTree);
+        }
+        return Err(SyncAbort::GitFailed {
+            command: "rev-parse",
+            diagnostic,
+        });
+    }
+
+    let stdout = stdout.map_err(|_truncated| SyncAbort::GitOutputTooLarge {
+        command: "rev-parse",
+    })?;
+    let text = String::from_utf8_lossy(stdout);
+    let mut lines = text.lines();
+
+    if lines.next() != Some("true") {
+        return Err(SyncAbort::NotAWorkTree);
+    }
+
+    let Some(prefix_line) = lines.next() else {
+        return Err(SyncAbort::GitFailed {
+            command: "rev-parse",
+            diagnostic: "printed a prefix `skeletons` cannot read: ".to_owned(),
+        });
+    };
+    RepositoryPrefix::parse(prefix_line).ok_or_else(|| SyncAbort::GitFailed {
+        command: "rev-parse",
+        diagnostic: format!("printed a prefix `skeletons` cannot read: {prefix_line}"),
+    })
+}
+
+/// Runs `command`, which is answering `question`, under the shared local
+/// bounds ([`git::run_local`]): a command killed for running past them is
+/// [`SyncAbort::GitTimedOut`], naming the question, and a failure to run it at
+/// all is [`SyncAbort::GitUnavailable`] — the one way this module and its
+/// siblings (`clean`, `proof`) run a bounded, local git process and report
+/// that failure.
+pub(super) fn run_local(command: Command, question: GitQuestion) -> Result<Finished, SyncAbort> {
+    git::run_local(command).map_err(|error| abort_for(&error, question))
+}
+
+/// What a command that could not produce a [`Finished`] means for the
+/// `question` it was answering: killed for running past its bound is a
+/// timeout that names the question, and anything else is that git could not
+/// be run.
+fn abort_for(error: &SubprocessError, question: GitQuestion) -> SyncAbort {
+    if error.is_timed_out() {
+        SyncAbort::GitTimedOut { question }
+    } else {
+        SyncAbort::GitUnavailable {
+            detail: error.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+    use std::time::Duration;
+
+    use crate::claim::ClaimPath;
+    use crate::subprocess::{Limits, Truncated, run};
+    use crate::sync::abort::GitQuestion;
+
+    use super::{RepositoryPrefix, SyncAbort, abort_for, classify_rev_parse};
+
+    #[test]
+    fn a_command_killed_for_running_too_long_is_a_timeout_naming_the_question() {
+        // A real command past a real bound, so the error is the one
+        // `subprocess::run` produces and not a stand-in for it.
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 60"]);
+        let limits = Limits {
+            timeout: Some(Duration::from_millis(100)),
+            stdout_bytes_max: u64::MAX,
+            stderr_bytes_max: u64::MAX,
+        };
+        let error = run(command, &limits).expect_err("a command past its timeout is killed");
+        let question = GitQuestion::Checkout(
+            ClaimPath::from_rendering_path("plain.yml").expect("a well-formed test path"),
+        );
+
+        let abort = abort_for(&error, question.clone());
+
+        let SyncAbort::GitTimedOut { question: named } = abort else {
+            panic!("expected GitTimedOut, got {abort:?}")
+        };
+        assert_eq!(named, question);
+    }
+
+    #[test]
+    fn a_command_that_could_not_be_run_is_git_unavailable_not_a_timeout() {
+        let limits = Limits {
+            timeout: Some(Duration::from_secs(5)),
+            stdout_bytes_max: u64::MAX,
+            stderr_bytes_max: u64::MAX,
+        };
+        let error = run(
+            Command::new("skeletons-check-nonexistent-program-xyz"),
+            &limits,
+        )
+        .expect_err("a missing program fails to spawn");
+
+        let abort = abort_for(&error, GitQuestion::Status);
+
+        assert!(
+            matches!(abort, SyncAbort::GitUnavailable { .. }),
+            "expected GitUnavailable, got {abort:?}"
+        );
+    }
+
+    const NOT_A_WORK_TREE: &[u8] =
+        b"fatal: not a git repository (or any of the parent directories): .git\n";
+    const DUBIOUS_OWNERSHIP: &[u8] = b"\
+        fatal: detected dubious ownership in repository at '<repository>'\n\
+        To add an exception for this directory, call:\n\
+        \n\
+        \tgit config --global --add safe.directory <repository>\n";
+
+    /// The captured fixture is written as a line-continued byte string to
+    /// stay within 100 columns; this pins that doing so kept every captured
+    /// byte, line by line.
+    #[test]
+    fn the_captured_dubious_ownership_fixture_holds_exactly_the_captured_bytes() {
+        assert_eq!(
+            DUBIOUS_OWNERSHIP
+                .split_inclusive(|&byte| byte == b'\n')
+                .collect::<Vec<_>>(),
+            [
+                &b"fatal: detected dubious ownership in repository at '<repository>'\n"[..],
+                b"To add an exception for this directory, call:\n",
+                b"\n",
+                b"\tgit config --global --add safe.directory <repository>\n",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_successful_run_at_the_top_level_reads_the_empty_prefix() {
+        let prefix = classify_rev_parse(true, Ok(b"true\n\n"), b"")
+            .expect("a well-formed answer must parse");
+        assert_eq!(prefix, RepositoryPrefix::parse("").expect("empty prefix"));
+    }
+
+    #[test]
+    fn a_successful_run_in_a_subdirectory_reads_its_own_prefix() {
+        let prefix = classify_rev_parse(true, Ok(b"true\nws/\n"), b"")
+            .expect("a well-formed answer must parse");
+        assert_eq!(prefix, RepositoryPrefix::parse("ws/").expect("ws/ prefix"));
+    }
+
+    #[test]
+    fn a_bare_repository_reads_as_not_a_work_tree() {
+        let error = classify_rev_parse(true, Ok(b"false\n\n"), b"")
+            .expect_err("a bare repository must be refused");
+        assert!(matches!(error, SyncAbort::NotAWorkTree));
+    }
+
+    #[test]
+    fn exit_failure_naming_not_a_git_repository_reads_as_not_a_work_tree() {
+        let error = classify_rev_parse(false, Ok(b""), NOT_A_WORK_TREE)
+            .expect_err("must be refused as not a work tree");
+        assert!(matches!(error, SyncAbort::NotAWorkTree));
+    }
+
+    #[test]
+    fn exit_failure_naming_dubious_ownership_is_read_and_the_diagnostic_kept() {
+        let error = classify_rev_parse(false, Ok(b""), DUBIOUS_OWNERSHIP)
+            .expect_err("must be refused as dubious ownership");
+        let SyncAbort::DubiousOwnership { diagnostic } = error else {
+            panic!("expected DubiousOwnership, got {error:?}")
+        };
+        assert_eq!(
+            diagnostic,
+            "detected dubious ownership in repository at '<repository>'"
+        );
+    }
+
+    #[test]
+    fn an_unrecognised_exit_failure_reads_as_git_failed_naming_rev_parse() {
+        let error = classify_rev_parse(false, Ok(b""), b"fatal: something else entirely\n")
+            .expect_err("must be refused");
+        let SyncAbort::GitFailed {
+            command,
+            diagnostic,
+        } = error
+        else {
+            panic!("expected GitFailed, got {error:?}")
+        };
+        assert_eq!(command, "rev-parse");
+        assert_eq!(diagnostic, "something else entirely");
+    }
+
+    #[test]
+    fn truncated_stdout_reads_as_git_output_too_large() {
+        let error = classify_rev_parse(true, Err(Truncated::for_test(16 * 1024 * 1024)), b"")
+            .expect_err("truncated stdout must be refused");
+        assert!(matches!(
+            error,
+            SyncAbort::GitOutputTooLarge {
+                command: "rev-parse"
+            }
+        ));
+    }
+
+    #[test]
+    fn a_prefix_line_that_fails_to_parse_reads_as_git_failed_naming_it() {
+        let error = classify_rev_parse(true, Ok(b"true\n/leading-slash/\n"), b"")
+            .expect_err("an unparseable prefix must be refused");
+        let SyncAbort::GitFailed {
+            command,
+            diagnostic,
+        } = error
+        else {
+            panic!("expected GitFailed, got {error:?}")
+        };
+        assert_eq!(command, "rev-parse");
+        assert_eq!(
+            diagnostic,
+            "printed a prefix `skeletons` cannot read: /leading-slash/"
+        );
+    }
+
+    #[test]
+    fn a_missing_prefix_line_entirely_reads_as_git_failed() {
+        let error = classify_rev_parse(true, Ok(b"true"), b"")
+            .expect_err("an absent prefix line must be refused");
+        assert!(matches!(
+            error,
+            SyncAbort::GitFailed {
+                command: "rev-parse",
+                ..
+            }
+        ));
+    }
+}

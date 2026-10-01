@@ -1,0 +1,2 @@
+schedule: {{cadence}}
+assignees: ["{{assignee}}"]

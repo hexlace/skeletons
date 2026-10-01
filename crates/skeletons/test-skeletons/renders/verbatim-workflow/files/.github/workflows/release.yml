@@ -1,0 +1,13 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      TOKEN: ${{ secrets.X }}
+    steps:
+      - env:
+          REF: ${{ github.ref }}
+        run: echo "$REF"

@@ -1,0 +1,15 @@
+[package]
+name = "rendered-too-large"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.blocks]
+type = "set"
+default = []
+
+[[package.metadata.skeletons.options.blocks.values]]
+value = "block"
+partial = "block.txt"

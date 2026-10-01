@@ -1,0 +1,38 @@
+[package]
+name = "skeletons-wearer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A command line that mounts the `skeletons` bundle under a different key, for the acceptance tests. Not published."
+# Not a product. Its only job is to be a project's own command line whose
+# dependency is not named `skeletons`, so the acceptance suite can read what a
+# wearer sees there. It is its own package because a package with two binaries
+# cannot be a ritual command line: `cargo run --package` needs one binary to
+# pick, and the framework refuses a command-line package that has more than one.
+publish = false
+
+# Not named `ritual`: this package and `skeletons-ritual` build into one target
+# directory, and two binaries of one name would overwrite each other there.
+[[bin]]
+name = "wearer"
+path = "src/main.rs"
+
+[dependencies]
+rituals.workspace = true
+skeletons.workspace = true
+
+[dev-dependencies]
+# The shared acceptance support under `ritual/tests/support` parses `--json`
+# output as `serde_json::Value`.
+serde_json.workspace = true
+# The acceptance suite's seam, wired the way `skeletons-ritual` wires it: Cargo
+# unifies a package's features across its `[dependencies]` and
+# `[dev-dependencies]` only for a build that activates dev-dependencies, so the
+# `wearer` binary `cargo test` builds carries `test-util`, and a plain build of
+# the workspace resolves `skeletons` without it.
+skeletons = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

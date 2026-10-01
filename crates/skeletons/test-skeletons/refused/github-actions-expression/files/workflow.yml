@@ -1,0 +1,7 @@
+name: build
+on: push
+jobs:
+  build:
+    steps:
+      - env: { OS: "${{ matrix.os }}" }
+        run: echo "$OS"

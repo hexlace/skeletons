@@ -1,0 +1,3 @@
+version: 2
+assignees: ["{{assignee}}"]
+open-pull-requests-limit: 5

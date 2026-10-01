@@ -1,0 +1,166 @@
+[workspace]
+members = [
+    "crates/skeletons",
+    "ritual",
+    "wearer",
+    "xtask",
+]
+resolver = "3"
+
+[workspace.dependencies]
+# Ritual, from crates.io, the way any project that builds on it takes it.
+# `rituals` is what a task needs, and all the bundle depends on; `rituals-core`
+# is ritual's own management bundle, which this repository's command line
+# mounts under `ritual`. The two are released together at one version and must
+# be asked for at that one version: the generated `main.rs` hands a task built
+# against one to a function in the other, and two resolved copies of `rituals`
+# would not share a `Task` type.
+rituals = "0.1.1"
+ritual = { package = "rituals-core", version = "0.1.1" }
+# The `skeletons` bundle, declared once under the key a command line mounts it
+# by. `path` is what a build in this repository uses; `version` is what a
+# published crate's manifest keeps, since crates.io has no path to follow.
+skeletons = { path = "crates/skeletons", version = "0.1.0" }
+# Property-based testing for the text grammars under `crates/skeletons/src/skeleton`:
+# a parser needs inputs no one would think to write by hand. Dev-only, so it
+# adds nothing to what a project depending on `skeletons` compiles. `default-features
+# = false` with `std` alone is the minimal build that runs on the standard
+# library without any of proptest's optional extras, none of which this crate
+# uses.
+proptest = { version = "1.11.0", default-features = false, features = ["std"] }
+# Reading a skeleton's manifest: the ecosystem's own reader for TOML, and Cargo's
+# own lineage for it. The metadata table is walked by hand against it rather
+# than through `serde`'s derive, so every schema refusal can carry a precise,
+# owned reason and the dotted key path a skeleton author wrote — a `Deserialize`
+# impl's own error text is not ours to own. `parse` is the feature that gets
+# a `toml::Table` out of a string in the first place; `serde` is the standard
+# cargo feature name this needs for `toml::Value` to know how to hold
+# arbitrary TOML data — `serde` is a dependency here regardless (below), so
+# naming it adds no new dependency weight of its own.
+toml = { version = "1.1.6", default-features = false, features = ["std", "serde", "parse"] }
+# Parsing `cargo metadata --format-version 1`'s JSON into `skeletons`' own schema
+# slice (`workspace/schema.rs`), following `rituals-compose`'s own precedent
+# for reading the same format. `derive` is `serde_derive`; both are already
+# compiled into every `ritual` binary through `rituals-core` ->
+# `rituals-compose`, so this adds no new package to the workspace's own
+# `Cargo.lock`.
+serde = { version = "1", default-features = false, features = ["std", "derive"] }
+# The JSON `cargo metadata` prints, and the JSON `check --json` prints back.
+# Also already compiled into every `ritual` binary through `rituals-core`.
+# One declaration for every crate here that reads JSON, `xtask` and the
+# acceptance tests included, so no two of them drift apart on a version.
+serde_json = { version = "1", default-features = false, features = ["std"] }
+# `cargo xtask bump` rewrites the version strings in the root manifest and
+# nothing else. A whole-file round trip through a plain TOML parser reformats
+# the file and drops its comments; this crate edits in place, and is the one
+# Cargo's own `add` uses. Already compiled into every `ritual` binary through
+# `rituals-core`, so it adds no package to `Cargo.lock`.
+toml_edit = { version = "0.22", default-features = false, features = [
+    "parse",
+    "display",
+] }
+# Parsing a locked package's version, and comparing crates.io index entries
+# against it. One package, no dependencies of its own.
+semver = { version = "1.0.28", default-features = false, features = ["std"] }
+# Decoding a git source query string (`?branch=a%2Fb`): cargo percent-encodes
+# `/` and other characters in a branch or tag name, and this is the crate
+# cargo's own resolver uses for the same job.
+form_urlencoded = "1.2.2"
+# Building disposable directories and files for `workspace/*`'s and `sync`'s
+# own unit tests (real symlinks, a read-only directory to fail a write
+# into). Dev-only, so it adds nothing to what a project depending on `skeletons`
+# compiles.
+tempfile = "3"
+# Asking crates.io's sparse index whether a registry-pinned skeleton is behind
+# (`behind/crates_io.rs`). Blocking, not async: nothing else in this crate
+# is async, so `reqwest` (which would also pull in `tokio` and `hyper`) has
+# nothing to justify it, and `ureq` is the ecosystem's own blocking client.
+# `default-features = false, features = ["rustls"]` takes TLS through
+# `rustls` alone (`ring` + bundled Mozilla roots via `webpki-roots`) and
+# leaves `gzip` off, since a sparse-index file is a few kilobytes and never
+# worth compressing. `rustls`'s `ring` provider builds a small amount of C
+# through the `cc` crate at compile time, which every Rust toolchain that
+# links anything already has a linker and compiler present for. The bundled
+# root store means a TLS-intercepting corporate proxy reads as
+# `unreachable`, which is `undetermined`, never a wrong "not behind" answer.
+# `git ls-remote`, not a crate, is how a git remote's own tags and branch
+# heads are asked; the CLI honours the running user's own credentials and
+# `insteadOf` rewrites exactly as their own git does, which `gix` would
+# have to reimplement.
+ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
+
+# Deciding whether two entry names in one skeleton directory are one name to a
+# filesystem that ignores case or Unicode normalization: canonical caseless
+# matching, as the Unicode Standard defines it (section 3.13, D145), which
+# is what a default macOS volume applies to every name it stores. The
+# standard library has neither half: no normalization at all, and
+# `char::to_lowercase` is a lowercase mapping rather than case folding, so
+# it leaves `ß`, `ς`, `ſ` and the `ﬁ` ligature as they are where folding,
+# and a default macOS volume, conflate them with `ss`, `σ`, `s` and `fi`.
+# Both crates are unicode-rs's own. `caseless` supplies full default case
+# folding and has no features to choose; `unicode-normalization` supplies
+# the decomposition either side of it, and needs nothing beyond `alloc` for
+# that — `caseless` asks for its default `std` feature itself.
+caseless = "0.2.2"
+unicode-normalization = { version = "0.1.25", default-features = false }
+
+# Refusing a `# skeletons:` line hidden behind invisible characters: a line that
+# reads as a directive once its leading whitespace and format characters are
+# set aside, and not once only its spaces and tabs are. `char::is_whitespace`
+# covers the whitespace; the standard library has no general category at all,
+# and format characters (category Cf: the zero-width space, the word joiner,
+# the byte-order mark and the rest) are a set Unicode still adds to, so it is
+# read from the Unicode data rather than written out here. unicode-rs's own
+# crate, alongside the two above, with no dependencies of its own;
+# `general-category` is the one half this needs, and `emoji`, the other
+# default, is left out.
+unicode-properties = { version = "0.1.4", default-features = false, features = ["general-category"] }
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# The oldest toolchain the workspace builds and passes its tests on: what the
+# code uses decides it, and CI checks it with the `msrv` job. Raising it is not a
+# breaking change and lands in a minor release, whenever a newer language or
+# library feature is worth using.
+rust-version = "1.85"
+# MIT alone, rather than MIT OR Apache-2.0: what the Apache half would add is a
+# patent grant, and there is no patent surface here for it to cover. Permissive
+# at all because the bundle exists to be compiled into other projects' own
+# command lines, and copyleft terms would reach into every one of them.
+license = "MIT"
+repository = "https://github.com/hexlace/skeletons"
+keywords = ["drift", "config", "cargo", "rituals", "cli"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "warn"
+print_stderr = "warn"
+missing_errors_doc = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+# Line tables are kept so that a release backtrace carries file and line, not only
+# function names. `strip` has to stay off for that to be true: the line tables live
+# in `.debug_line`, which `strip = "debuginfo"` removes, so that setting cancels
+# `debug = "line-tables-only"` and leaves a binary identical to `debug = false`.
+#
+# The cost is binary size, mostly the standard library's own debug sections: a
+# fixed overhead rather than one that grows with the code. A published crate's
+# manifest carries no profile from this one, so only builds made from a checkout
+# pay it.
+debug = "line-tables-only"
+strip = "none"

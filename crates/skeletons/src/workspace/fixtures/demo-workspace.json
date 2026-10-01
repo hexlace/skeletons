@@ -1,0 +1,162 @@
+{
+  "packages": [
+    {
+      "name": "skeleton-crate",
+      "version": "0.2.0",
+      "id": "path+file:///WORKSPACE/skeleton-crate#0.2.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "skeleton_crate",
+          "src_path": "/WORKSPACE/skeleton-crate/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/WORKSPACE/skeleton-crate/Cargo.toml",
+      "metadata": {
+        "skeletons": {
+          "options": {
+            "cadence": {
+              "type": "enum",
+              "values": [
+                "daily",
+                "weekly"
+              ],
+              "default": "weekly"
+            }
+          }
+        }
+      },
+      "publish": [],
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    },
+    {
+      "name": "wearer",
+      "version": "0.1.0",
+      "id": "path+file:///WORKSPACE/wearer#0.1.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [
+        {
+          "name": "skeleton-crate",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": "a-skeleton",
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/WORKSPACE/skeleton-crate"
+        }
+      ],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "wearer",
+          "src_path": "/WORKSPACE/wearer/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/WORKSPACE/wearer/Cargo.toml",
+      "metadata": {
+        "skeletons": {
+          "a-skeleton": {
+            "cadence": "daily"
+          }
+        }
+      },
+      "publish": [],
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    }
+  ],
+  "workspace_members": [
+    "path+file:///WORKSPACE/wearer#0.1.0",
+    "path+file:///WORKSPACE/skeleton-crate#0.2.0"
+  ],
+  "workspace_default_members": [
+    "path+file:///WORKSPACE/wearer#0.1.0",
+    "path+file:///WORKSPACE/skeleton-crate#0.2.0"
+  ],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///WORKSPACE/skeleton-crate#0.2.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      },
+      {
+        "id": "path+file:///WORKSPACE/wearer#0.1.0",
+        "dependencies": [
+          "path+file:///WORKSPACE/skeleton-crate#0.2.0"
+        ],
+        "deps": [
+          {
+            "name": "a_skeleton",
+            "pkg": "path+file:///WORKSPACE/skeleton-crate#0.2.0",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          }
+        ],
+        "features": []
+      }
+    ],
+    "root": null
+  },
+  "target_directory": "/WORKSPACE/target",
+  "build_directory": "/WORKSPACE/target",
+  "version": 1,
+  "workspace_root": "/WORKSPACE",
+  "metadata": null
+}

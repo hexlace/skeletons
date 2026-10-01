@@ -1,0 +1,5 @@
+[tools]
+rust = "1.95.0"
+# The version CI's `deny` job installs and checks by checksum, so the gate's
+# `cargo deny --locked check` runs the same cargo-deny locally.
+"github:EmbarkStudios/cargo-deny" = "0.20.2"

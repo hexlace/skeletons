@@ -1,0 +1,4 @@
+jobs:
+  stage: build
+# skeletons:partial workflows
+# skeletons:partial workflows

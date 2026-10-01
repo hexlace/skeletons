@@ -1,0 +1,4 @@
+build:
+  steps:
+    - env: { OS: "${{ matrix.os }}" }
+      run: echo "$OS"

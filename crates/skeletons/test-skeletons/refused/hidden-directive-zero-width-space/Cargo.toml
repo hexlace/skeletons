@@ -1,0 +1,15 @@
+[package]
+name = "hidden-directive-zero-width-space"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.workflows]
+type = "set"
+default = ["keep"]
+
+[[package.metadata.skeletons.options.workflows.values]]
+value = "keep"
+partial = "keep.yml"

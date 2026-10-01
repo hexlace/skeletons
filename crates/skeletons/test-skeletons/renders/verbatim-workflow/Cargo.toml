@@ -1,0 +1,13 @@
+[package]
+name = "verbatim-workflow"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+verbatim = [".github/workflows/release.yml"]
+
+[package.metadata.skeletons.options.cadence]
+type = "enum"
+values = ["daily", "weekly", "monthly"]
+default = "weekly"

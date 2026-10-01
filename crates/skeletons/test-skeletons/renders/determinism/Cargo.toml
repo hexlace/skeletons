@@ -1,0 +1,23 @@
+[package]
+name = "determinism"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.workflows]
+type = "set"
+default = ["a"]
+
+[[package.metadata.skeletons.options.workflows.values]]
+value = "a"
+partial = "a.yml"
+
+[[package.metadata.skeletons.options.workflows.values]]
+value = "b"
+partial = "b.yml"
+
+[[package.metadata.skeletons.options.workflows.values]]
+value = "c"
+partial = "c.yml"

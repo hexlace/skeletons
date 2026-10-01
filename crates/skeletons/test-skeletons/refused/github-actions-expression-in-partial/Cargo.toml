@@ -1,0 +1,13 @@
+[package]
+name = "github-actions-expression-in-partial"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons.options.workflows]
+type = "set"
+default = ["build"]
+
+[[package.metadata.skeletons.options.workflows.values]]
+value = "build"
+partial = "build.yml"

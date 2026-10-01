@@ -1,0 +1,4 @@
+jobs:
+  stage: build
+#​ skeletons:partial s
+# skeletons:partial s

@@ -1,0 +1,14 @@
+[package]
+name = "enum-without-default-beside-text"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+
+[package.metadata.skeletons.options.assignee]
+type = "text"
+
+[package.metadata.skeletons.options.cadence]
+type = "enum"
+values = ["daily", "weekly"]

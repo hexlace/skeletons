@@ -1,0 +1,49 @@
+[package]
+name = "skeletons-ritual"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "This repository's own ritual command line, for working on `skeletons`. Not published."
+# Not a product. `skeletons` ships as a bundle for a project's own command line, and
+# this is that command line for this project: it exists so `skeletons` is worked on
+# the way it is worn. `false` keeps it off crates.io. `cargo package` still
+# packages and builds it, which checks that it builds from its package alone
+# against the bundle's, as a project's own command line would.
+publish = false
+
+[[bin]]
+name = "ritual"
+path = "src/main.rs"
+
+[dependencies]
+rituals.workspace = true
+ritual.workspace = true
+skeletons.workspace = true
+
+[dev-dependencies]
+# The integration tests for `skeletons check`/`skeletons sync` under
+# `tests/` run the built binary and read its `--json` output back. The
+# shape of that output is decided and versioned (`format_version`, in
+# `crates/skeletons/src/check/json.rs` and `.docs/wearing.md`); tests still
+# parse it as `serde_json::Value` and read facts through a small number of
+# named accessor helpers, kept in one place, so the shape stays in one
+# place too rather than being asserted on scattered raw text. Not needed by
+# anything this crate ships.
+serde_json.workspace = true
+# Re-declaring `skeletons` here, with its `test-util` feature, is what lets the
+# integration tests use the test-only hooks (`SKELETONS_TEST_ONLY_*`): Cargo
+# unifies a package's features across its `[dependencies]` and
+# `[dev-dependencies]` entries for any build that activates dev-dependencies, so
+# the `ritual` binary `cargo test` builds (the one `CARGO_BIN_EXE_ritual` points
+# `tests/` at) carries `skeletons`' `test-util` feature, while
+# `cargo build`/`cargo run` of that same binary — a real project's own command
+# line — never activates a dev-dependency and so never does.
+skeletons = { workspace = true, features = ["test-util"] }
+
+[package.metadata.ritual]
+tasks = ["ritual", "skeletons"]
+
+[lints]
+workspace = true

@@ -1,0 +1,26 @@
+# A test's `.expect("…")` states a fact about its own fixture, and a failed
+# expectation is the test failing, which is what a test is for. This allows it
+# in `#[test]` functions and `#[cfg(test)]` modules only: production code, and a
+# helper in `tests/` outside a `#[test]` function, are still held to the
+# workspace lints, which refuse `expect`.
+allow-expect-in-tests = true
+# Same reasoning, for `panic!` reached through `.unwrap_or_else(|error| panic!(...))`:
+# an acceptance test that renders under an unexpected condition should fail
+# loudly with the condition in its message, and that failure is the test
+# doing its job, not production code stopping the program. `#[test]`
+# functions and `#[cfg(test)]` modules only.
+allow-panic-in-tests = true
+
+# A render must produce the same bytes every time, for the same inputs.
+# `HashMap`/`HashSet` iterate in an order that changes from one process to
+# the next, which is exactly the kind of thing that would let the same skeleton
+# and the same choices render different bytes on different runs. Every
+# collection `skeletons` carries is ordered (`Vec` in declared or path order,
+# `BTreeMap`/`BTreeSet` where a set or a map is the right shape) instead.
+# Reaching for a hash-ordered collection is a clippy error that must be
+# argued past with an `#[expect]` and a reason: the wrong way is loud, not
+# merely discouraged.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "iteration order changes from one process to the next; use BTreeMap" },
+    { path = "std::collections::HashSet", reason = "iteration order changes from one process to the next; use BTreeSet" },
+]

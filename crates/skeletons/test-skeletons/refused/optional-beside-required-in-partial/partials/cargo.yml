@@ -1,0 +1,2 @@
+- package-ecosystem: "cargo"
+  mixed: "{{assignee}}" and {{cadence}}

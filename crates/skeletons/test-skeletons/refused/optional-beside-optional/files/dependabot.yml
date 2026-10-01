@@ -1,0 +1,4 @@
+version: 2
+people: ["{{assignee}}", "{{reviewer}}"]
+reviewers: ["{{reviewer}}"]
+assignees: ["{{assignee}}"]

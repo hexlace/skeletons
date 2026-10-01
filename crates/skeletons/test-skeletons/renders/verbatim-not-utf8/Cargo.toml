@@ -1,0 +1,8 @@
+[package]
+name = "verbatim-not-utf8"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.skeletons]
+verbatim = ["blob.bin"]

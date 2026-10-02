@@ -1461,6 +1461,22 @@ and → `a_crate_name_is_held_to_the_grammar_a_key_is_and_is_refused_as_a_crate_
 A key outside it can still be written by hand. The crate name and the key are
 two types sharing the one grammar, so one cannot be passed for the other.
 
+**A key that names a crate the compiler provides is refused.** `std`, `core`,
+`alloc`, `proc_macro` and `test` are crates `rustc` supplies to every build, and
+a dependency renamed to one shadows it in the command line's test build: `std`
+replaces the standard library's prelude and `test` the harness's
+`test_main_static`, so `cargo check --tests` then fails in `rustc`'s words, which
+never mention skeletons, after `sync` and `check` have both passed. The key is
+compared as `rustc` names it, with `-` and `_` the same, so `proc-macro` is
+refused as `proc_macro` is, whether it is typed or defaulted from a crate's
+name (`crates/skeletons/src/wear/request.rs` →
+`the_crates_the_compiler_provides_are_refused_as_keys_explicit_or_defaulted`,
+and `ritual/tests/wear_refusals.rs` →
+`a_key_that_names_a_crate_the_compiler_provides_is_refused_and_nothing_changes`).
+A crate of that name is fine under another key
+(`crates/skeletons/src/wear/request.rs` →
+`a_crate_named_for_the_compiler_is_a_fine_crate_under_another_key`).
+
 **The table goes where `toml_edit` puts it.** The empty table is written in
 place, so every comment and blank line the wearer wrote stays, after the last
 `[package…]` table with one blank line around it. That placement is

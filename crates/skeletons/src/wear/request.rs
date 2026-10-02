@@ -19,6 +19,15 @@ use crate::workspace::{RESERVED_WEARING_KEYS, underscored};
 /// crate's name can be.
 pub(crate) const KEY_BYTES_MAX: usize = 64;
 
+/// The crates `rustc` provides to every build, as it names them (with `_`).
+///
+/// A dependency under one of these keys shadows the compiler's crate in the
+/// command line's test build: `std` replaces the standard library's prelude and
+/// `test` the harness's `test_main_static`, and the build then fails in
+/// `rustc`'s words, which never mention skeletons. `wear` refuses the key
+/// before writing anything instead.
+const COMPILER_CRATES: [&str; 5] = ["std", "core", "alloc", "proc_macro", "test"];
+
 /// A dependency key `wear` will hand to `cargo add`: an ASCII letter or `_`,
 /// then ASCII letters, digits, `-` and `_`, at most [`KEY_BYTES_MAX`] bytes.
 ///
@@ -160,7 +169,8 @@ impl Request {
     ///
     /// Returns [`WearRefusal`] when the crate name is not a [`CrateName`], an
     /// explicit key is not a [`Key`], or the key is one
-    /// `[package.metadata.skeletons]` keeps for a skeleton's own declarations.
+    /// `[package.metadata.skeletons]` keeps for a skeleton's own declarations,
+    /// or names, as `rustc` does, a crate the compiler provides.
     pub(crate) fn new(
         skeleton: &str,
         key: Option<&str>,
@@ -182,6 +192,11 @@ impl Request {
         };
         if RESERVED_WEARING_KEYS.contains(&key.as_str()) {
             return Err(WearRefusal::KeyReserved {
+                key: key.as_str().to_owned(),
+            });
+        }
+        if COMPILER_CRATES.contains(&key.underscored().as_str()) {
+            return Err(WearRefusal::KeyShadowsCompiler {
                 key: key.as_str().to_owned(),
             });
         }
@@ -377,6 +392,50 @@ mod tests {
             };
             assert_eq!(request("tidy", Some(reserved)), Err(refusal.clone()));
             assert_eq!(request(reserved, None), Err(refusal));
+        }
+    }
+
+    #[test]
+    fn the_crates_the_compiler_provides_are_refused_as_keys_explicit_or_defaulted() {
+        // A dependency under one of these keys shadows the compiler's crate in
+        // the test build. The refusal reads the key as `rustc` does, so
+        // `proc-macro` is `proc_macro`, and a crate called `std` defaults to
+        // the key `std`.
+        for (typed, shown) in [
+            ("std", "std"),
+            ("core", "core"),
+            ("alloc", "alloc"),
+            ("proc_macro", "proc_macro"),
+            ("proc-macro", "proc-macro"),
+            ("test", "test"),
+        ] {
+            let refusal = WearRefusal::KeyShadowsCompiler {
+                key: shown.to_owned(),
+            };
+            assert_eq!(request("tidy", Some(typed)), Err(refusal.clone()));
+            assert_eq!(request(typed, None), Err(refusal));
+        }
+    }
+
+    #[test]
+    fn a_crate_named_for_the_compiler_is_a_fine_crate_under_another_key() {
+        for name in ["std", "core", "alloc", "proc-macro", "test"] {
+            assert!(request(name, Some("tidy")).is_ok(), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_near_miss_of_a_compiler_crate_is_accepted_as_a_key() {
+        for near in [
+            "stdx",
+            "tests",
+            "cores",
+            "allocs",
+            "proc_macros",
+            "procmacro",
+            "_std",
+        ] {
+            assert!(request("tidy", Some(near)).is_ok(), "{near}");
         }
     }
 

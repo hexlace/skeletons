@@ -253,3 +253,44 @@ fn a_dependency_whose_wearing_is_refused_is_sent_to_check_and_nothing_changes() 
     );
     Ok(())
 }
+
+#[test]
+fn a_key_that_names_a_crate_the_compiler_provides_is_refused_and_nothing_changes() -> TestOutcome {
+    // `std`, `test` and `proc-macro` are crates rustc supplies to every
+    // build, so a dependency renamed to one of them would shadow, or be
+    // shadowed by, the compiler's own. `proc-macro` is typed with its hyphen
+    // and is the compiler's `proc_macro`: the two spellings are one name to
+    // rustc, so the refusal must see through the hyphen. Each is refused
+    // before `cargo add` runs, naming the key, and the files stay as they were.
+    let fixture = fixture_for_wearing("")?;
+    let before = ManifestAndLockfile::read(&fixture, "Cargo.toml")?;
+    let path = skeleton_path("passthrough-plain")?;
+
+    for key in ["std", "test", "proc-macro"] {
+        let report = fixture.run(&[
+            "skeletons",
+            "wear",
+            "passthrough-plain",
+            key,
+            "--path",
+            &path,
+        ])?;
+
+        assert_ne!(report.exit_code, 0, "key {key}; stdout: {}", report.stdout);
+        assert_refused_with_line(
+            &report,
+            &format!(
+                "`{key}` cannot be worn as a dependency key: it names a crate the compiler \
+                 provides; give the `wear` task another key as its second argument"
+            ),
+        );
+        assert_nothing_was_undone(&report);
+        assert_eq!(
+            ManifestAndLockfile::read(&fixture, "Cargo.toml")?,
+            before,
+            "a wear refused for the key `{key}` must leave the manifest and Cargo.lock \
+             byte-identical"
+        );
+    }
+    Ok(())
+}

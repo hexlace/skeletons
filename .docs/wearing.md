@@ -832,7 +832,10 @@ key Cargo would then refuse could leave a broken manifest. A key outside this
 grammar is refused before anything is written, and can still be written by hand.
 `options` and `verbatim` are refused as keys, whether typed or defaulted from a
 crate of that name (see [The wearing table](#the-wearing-table)): wear such a
-crate under another key.
+crate under another key. So are `std`, `core`, `alloc`, `proc_macro` and `test`
+(with `-` and `_` the same), the crates the compiler provides: a dependency under
+one of those keys shadows the compiler's crate in the command line's test build,
+which then fails in `rustc`'s words and not ours.
 
 **Where it writes.** `wear` is told which package built the command line it runs
 in, and writes into that package's manifest and the workspace's `Cargo.lock`:
@@ -887,11 +890,13 @@ and, like every message in this document, prints text from outside escaped.
   ```text
   `Bad Name` is not a crate name wear can add: a name starts with an ASCII letter or `_`, continues with ASCII letters, digits, `-` and `_`, and is at most 64 bytes; give the `wear` task the crate's name as its manifest spells it
   ```
-- the key is not in the grammar, or is `options` or `verbatim`:
+- the key is not in the grammar, is `options` or `verbatim`, or names a crate the
+  compiler provides:
 
   ```text
   `x y` cannot be a dependency key: a key starts with an ASCII letter or `_`, continues with ASCII letters, digits, `-` and `_`, and is at most 64 bytes; give the `wear` task another key as its second argument
   `options` cannot be worn as a dependency key: `options` and `verbatim` under [package.metadata.skeletons] belong to a skeleton's own declaration; give the `wear` task another key as its second argument
+  `std` cannot be worn as a dependency key: it names a crate the compiler provides; give the `wear` task another key as its second argument
   ```
 - the workspace cannot be read, which is `check`'s abort for the same four
   causes (see [Refusals](#refusals)). `cargo metadata` is run `--locked`, so a

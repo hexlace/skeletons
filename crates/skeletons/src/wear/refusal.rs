@@ -48,6 +48,9 @@ pub(crate) enum WearRefusal {
     KeyInvalid { key: String },
     /// The key is one a skeleton keeps for its own declarations.
     KeyReserved { key: String },
+    /// The key, as `rustc` names it, is a crate the compiler provides to every
+    /// build, which a dependency under that key would shadow.
+    KeyShadowsCompiler { key: String },
     /// The package the command line was built from is not a member of the
     /// workspace `wear` ran in.
     OutsideItsProject { package: String, root: String },
@@ -124,6 +127,7 @@ impl WearRefusal {
             Self::CrateNameInvalid { crate_name } => crate_name_invalid_message(crate_name),
             Self::KeyInvalid { key } => key_invalid_message(key),
             Self::KeyReserved { key } => key_reserved_message(key),
+            Self::KeyShadowsCompiler { key } => key_shadows_compiler_message(key),
             Self::OutsideItsProject { package, root } => outside_its_project_message(package, root),
             Self::AlreadyWorn {
                 package,
@@ -205,6 +209,14 @@ fn key_reserved_message(key: &str) -> String {
         "`{}` cannot be worn as a dependency key: `options` and `verbatim` under \
          [package.metadata.skeletons] belong to a skeleton's own declaration; give the `wear` \
          task another key as its second argument",
+        Escaped(key)
+    )
+}
+
+fn key_shadows_compiler_message(key: &str) -> String {
+    format!(
+        "`{}` cannot be worn as a dependency key: it names a crate the compiler provides; give \
+         the `wear` task another key as its second argument",
         Escaped(key)
     )
 }
@@ -320,27 +332,28 @@ mod tests {
     /// How many kinds of [`WearRefusal`] there are. The match in [`kind`] has
     /// no wildcard, so a kind added without an arm does not compile, and
     /// [`samples`] must then cover it.
-    const KINDS: usize = 17;
+    const KINDS: usize = 18;
 
     const fn kind(refusal: &WearRefusal) -> usize {
         match refusal {
             WearRefusal::CrateNameInvalid { .. } => 0,
             WearRefusal::KeyInvalid { .. } => 1,
             WearRefusal::KeyReserved { .. } => 2,
-            WearRefusal::OutsideItsProject { .. } => 3,
-            WearRefusal::AlreadyWorn { .. } => 4,
-            WearRefusal::DependsWithoutWearing { .. } => 5,
-            WearRefusal::DependsWithRefusedWearing { .. } => 6,
-            WearRefusal::KeyTaken { .. } => 7,
-            WearRefusal::CargoAddUnavailable { .. } => 8,
-            WearRefusal::CargoAddFailed { .. } => 9,
-            WearRefusal::NotASkeleton { .. } => 10,
-            WearRefusal::ManifestUnreadable { .. } => 11,
-            WearRefusal::ParentNotATable { .. } => 12,
-            WearRefusal::TableWithoutDependency { .. } => 13,
-            WearRefusal::TableDefect { .. } => 14,
-            WearRefusal::NotConfirmed { .. } => 15,
-            WearRefusal::NotReported { .. } => 16,
+            WearRefusal::KeyShadowsCompiler { .. } => 3,
+            WearRefusal::OutsideItsProject { .. } => 4,
+            WearRefusal::AlreadyWorn { .. } => 5,
+            WearRefusal::DependsWithoutWearing { .. } => 6,
+            WearRefusal::DependsWithRefusedWearing { .. } => 7,
+            WearRefusal::KeyTaken { .. } => 8,
+            WearRefusal::CargoAddUnavailable { .. } => 9,
+            WearRefusal::CargoAddFailed { .. } => 10,
+            WearRefusal::NotASkeleton { .. } => 11,
+            WearRefusal::ManifestUnreadable { .. } => 12,
+            WearRefusal::ParentNotATable { .. } => 13,
+            WearRefusal::TableWithoutDependency { .. } => 14,
+            WearRefusal::TableDefect { .. } => 15,
+            WearRefusal::NotConfirmed { .. } => 16,
+            WearRefusal::NotReported { .. } => 17,
         }
     }
 
@@ -354,6 +367,7 @@ mod tests {
             },
             WearRefusal::KeyInvalid { key: poison() },
             WearRefusal::KeyReserved { key: poison() },
+            WearRefusal::KeyShadowsCompiler { key: poison() },
             WearRefusal::OutsideItsProject {
                 package: poison(),
                 root: poison(),
@@ -475,6 +489,17 @@ mod tests {
             "`options` cannot be worn as a dependency key: `options` and `verbatim` under \
              [package.metadata.skeletons] belong to a skeleton's own declaration; give the \
              `wear` task another key as its second argument"
+        );
+    }
+
+    #[test]
+    fn a_key_that_shadows_the_compiler_says_it_names_a_crate_the_compiler_provides() {
+        assert_eq!(
+            only(&WearRefusal::KeyShadowsCompiler {
+                key: "proc-macro".to_owned()
+            }),
+            "`proc-macro` cannot be worn as a dependency key: it names a crate the compiler \
+             provides; give the `wear` task another key as its second argument"
         );
     }
 

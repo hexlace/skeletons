@@ -26,7 +26,9 @@ pub(crate) fn find_declared<'a>(
         .find(|dependency| declared_key(dependency) == key)
 }
 
-fn declared_key(dependency: &Dependency) -> &str {
+/// The key `dependency` is declared under: its `rename`, or its own crate name
+/// when it has none.
+pub(super) fn declared_key(dependency: &Dependency) -> &str {
     dependency.rename.as_deref().unwrap_or(&dependency.name)
 }
 

@@ -38,8 +38,6 @@ use crate::check::{AbortingCommand, WEARS_NOTHING_LINE, abort_message};
 use crate::survey::survey;
 use crate::work_tree;
 use crate::work_tree::abort::WorkTreeAbort;
-use crate::work_tree::clean::{self, Cleanliness};
-use crate::work_tree::message::{dirty_summary, report_dirty};
 use crate::work_tree::writing_command::WritingCommand;
 use crate::workspace::{self, Network};
 
@@ -141,20 +139,7 @@ fn prove_writes(
     // redirecting variable set. Tested by
     // `ritual/tests/sync_worktree.rs` →
     // `sync_in_a_pre_commit_hook_with_every_bone_matching_needs_no_git_and_exits_zero`.
-    let opened_work_tree = work_tree::open(root, |name| std::env::var_os(name).is_some())
-        .map_err(|abort| aborted(&abort, root))?;
-
-    let clean =
-        match clean::check_clean(&opened_work_tree).map_err(|abort| aborted(&abort, root))? {
-            Cleanliness::Clean(clean) => clean,
-            Cleanliness::Dirty(dirty) => {
-                report_dirty(&dirty);
-                return Err(Failure::new(dirty_summary(
-                    dirty.len(),
-                    WritingCommand::Sync,
-                )));
-            }
-        };
+    let (opened_work_tree, clean) = work_tree::open_clean(root, WritingCommand::Sync)?;
 
     let proven_writes = match proof::prove(&opened_work_tree, &clean, writes)
         .map_err(|abort| aborted(&abort, root))?

@@ -551,6 +551,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
+ "toml_edit",
  "unicode-normalization",
  "unicode-properties",
  "ureq",

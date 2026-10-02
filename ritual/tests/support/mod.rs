@@ -73,6 +73,7 @@ pub(crate) mod recorded_processes;
 pub(crate) mod shell_quote;
 pub(crate) mod slow_filter;
 pub(crate) mod sync;
+pub(crate) mod wear;
 
 /// Every environment variable that redirects which repository, work tree,
 /// index, object store or attribute source git answers about — the same

@@ -12,14 +12,6 @@ pub(crate) enum WritingCommand {
     /// `sync`: replaces files with what the worn skeletons ship.
     Sync,
     /// `wear`: changes the command line's own manifest and `Cargo.lock`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the `wear` task is the only constructor and has not landed; remove this \
-                      expectation when it does"
-        )
-    )]
     Wear,
 }
 
@@ -35,11 +27,10 @@ impl WritingCommand {
     /// The remedy every message that ends by asking for another run gives.
     ///
     /// It names the command as a task and nothing before it. The task is told
-    /// neither the key it is mounted under nor how its command line is reached
-    /// (<https://github.com/hexlace/ritual/issues/6>), so the remedy names only
-    /// the subcommand, which the wearer recognises on their own command line.
-    /// It says "task" because a bare `sync` is also a shell command that
-    /// flushes buffers, prints nothing and exits 0.
+    /// neither the key it is mounted under nor how its command line is reached,
+    /// so the remedy names only the subcommand, which the wearer recognises on
+    /// their own command line. It says "task" because a bare `sync` is also a
+    /// shell command that flushes buffers, prints nothing and exits 0.
     pub(crate) const fn run_again(self) -> &'static str {
         match self {
             Self::Sync => "run the `sync` task again",

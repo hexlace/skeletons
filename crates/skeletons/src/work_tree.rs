@@ -16,10 +16,15 @@ pub(crate) mod writing_command;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use rituals::Failure;
+
 use crate::git::{self, Locale, RepositoryPrefix};
 use crate::subprocess::{Finished, SubprocessError, Truncated};
 
 use abort::{GitQuestion, WorkTreeAbort};
+use clean::{CleanWorkTree, Cleanliness};
+use message::{abort_message, dirty_summary, report_dirty};
+use writing_command::WritingCommand;
 
 /// A git work tree a writing command may ask about: no redirecting variable
 /// is set, and git itself confirmed `root` sits inside a non-bare work tree.
@@ -90,6 +95,30 @@ pub(crate) fn open(root: &Path, is_set: impl Fn(&str) -> bool) -> Result<WorkTre
         root: root.to_path_buf(),
         prefix,
     })
+}
+
+/// Opens the work tree `root` sits in and confirms the whole of it is clean,
+/// for `command` to write into, and hands back both the work tree and the
+/// witness that it was clean.
+///
+/// This is the one place the two questions are asked together and the one
+/// place their refusals are worded: every git question that could not be asked
+/// is the abort's message, and a tree with anything uncommitted in it has each
+/// dirty path reported on its own line before the failure that counts them.
+/// Both are in `command`'s own words.
+pub(crate) fn open_clean(
+    root: &Path,
+    command: WritingCommand,
+) -> Result<(WorkTree, CleanWorkTree), Failure> {
+    let aborted = |abort| Failure::new(abort_message(&abort, root, command));
+    let opened = open(root, |name| std::env::var_os(name).is_some()).map_err(aborted)?;
+    match clean::check_clean(&opened).map_err(aborted)? {
+        Cleanliness::Clean(clean) => Ok((opened, clean)),
+        Cleanliness::Dirty(dirty) => {
+            report_dirty(&dirty);
+            Err(Failure::new(dirty_summary(dirty.len(), command)))
+        }
+    }
 }
 
 /// The pure classifier behind [`open`]'s own reading of

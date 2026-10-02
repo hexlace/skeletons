@@ -176,12 +176,16 @@ fn behind_clause(behind: usize, undetermined: usize) -> Option<String> {
 
 /// Which command aborted — the two places [`abort_message`]'s own text
 /// differs by which one is running: the lockfile remedy names the command
-/// that failed, and a `cargo metadata` failure is worded differently for
-/// `sync`, which passes `--offline` and so has its own reason to name.
+/// that failed, and says what that command does with the lockfile, and a
+/// `cargo metadata` failure is worded differently for `sync`, which passes
+/// `--offline` and so has its own reason to name. `wear` reads the workspace
+/// `--locked` with the network allowed, as `check` does, so its
+/// `cargo metadata` failure is worded as `check`'s is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AbortingCommand {
     Check,
     Sync,
+    Wear,
 }
 
 impl AbortingCommand {
@@ -189,8 +193,29 @@ impl AbortingCommand {
         match self {
             Self::Check => "check",
             Self::Sync => "sync",
+            Self::Wear => "wear",
         }
     }
+}
+
+/// The lockfile abort's message: why the command could not go on with the
+/// lockfile as it is, and the remedy that runs it again.
+///
+/// `check` and `sync` read the lockfile and never write it; `wear` writes it,
+/// but only to add the skeleton, so a lockfile that is already stale would
+/// have more rewritten than the skeleton.
+fn lockfile_message(command: AbortingCommand) -> String {
+    let reason = match command {
+        AbortingCommand::Check | AbortingCommand::Sync => {
+            "`skeletons` reads it without ever writing it"
+        }
+        AbortingCommand::Wear => "wear changes it only to add the skeleton",
+    };
+    format!(
+        "Cargo.lock is missing or out of date, and {reason}; run `cargo update --workspace`, \
+         then run the `{}` task again",
+        command.name()
+    )
 }
 
 /// The `kind` and message for an abort — shared between the stderr `Failure`
@@ -201,15 +226,7 @@ pub(crate) fn abort_message(
     command: AbortingCommand,
 ) -> (&'static str, String) {
     match error {
-        ReadWorkspaceError::Lockfile => (
-            "lockfile",
-            format!(
-                "Cargo.lock is missing or out of date, and `skeletons` reads it without ever writing \
-                 it; run `cargo update --workspace`, then run the `{}` task \
-                 again",
-                command.name()
-            ),
-        ),
+        ReadWorkspaceError::Lockfile => ("lockfile", lockfile_message(command)),
         ReadWorkspaceError::CargoMetadataFailed { stderr } => {
             // Cargo's stderr runs to several lines. It is escaped, not cut to
             // its first line, so the message keeps all of cargo's words and
@@ -218,7 +235,9 @@ pub(crate) fn abort_message(
             (
                 "cargo-metadata-failed",
                 match command {
-                    AbortingCommand::Check => format!("cargo metadata --locked failed: {stderr}"),
+                    AbortingCommand::Check | AbortingCommand::Wear => {
+                        format!("cargo metadata --locked failed: {stderr}")
+                    }
                     AbortingCommand::Sync => format!(
                         "cargo metadata --locked --offline failed (sync makes no network \
                          request): {stderr}"
@@ -430,7 +449,11 @@ mod tests {
         );
 
         for error in &errors {
-            for command in [AbortingCommand::Check, AbortingCommand::Sync] {
+            for command in [
+                AbortingCommand::Check,
+                AbortingCommand::Sync,
+                AbortingCommand::Wear,
+            ] {
                 let (_kind, message) = abort_message(error, command);
                 let what = format!("{error:?} under {command:?}");
                 if matches!(error, ReadWorkspaceError::Lockfile) {
@@ -463,6 +486,34 @@ mod tests {
         assert_eq!(sync_kind, "lockfile");
         assert_eq!(check_message, expected("check"));
         assert_eq!(sync_message, expected("sync"));
+    }
+
+    #[test]
+    fn the_wear_lockfile_remedy_says_wear_changes_it_only_to_add_the_skeleton() {
+        // `wear` writes `Cargo.lock`, so the words every other command uses,
+        // that the lockfile is read and never written, would be untrue of it.
+        let (kind, message) = abort_message(&ReadWorkspaceError::Lockfile, AbortingCommand::Wear);
+
+        assert_eq!(kind, "lockfile");
+        assert_eq!(
+            message,
+            "Cargo.lock is missing or out of date, and wear changes it only to add the \
+             skeleton; run `cargo update --workspace`, then run the `wear` task again"
+        );
+    }
+
+    #[test]
+    fn a_wear_cargo_failure_is_worded_as_checks_is() {
+        // `wear` reads `--locked` with the network allowed, which is what
+        // `check` does, so the two name the same command.
+        let error = ReadWorkspaceError::CargoMetadataFailed {
+            stderr: "error: no manifest".to_owned(),
+        };
+
+        assert_eq!(
+            abort_message(&error, AbortingCommand::Wear),
+            abort_message(&error, AbortingCommand::Check)
+        );
     }
 
     #[test]

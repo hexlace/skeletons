@@ -41,6 +41,10 @@ rituals.workspace = true
 # Ritual's metadata reader and `rollback`, which `wear` writes through: see the
 # workspace manifest.
 rituals-compose.workspace = true
+# Writing the wearing table into the command line's manifest in place, keeping
+# every comment and blank line the wearer wrote there (`wear/table.rs`). The
+# same 0.22 that `rituals-compose` already compiles, so no new package arrives.
+toml_edit.workspace = true
 # Reading `[package.metadata.skeletons]` out of a skeleton's own `Cargo.toml`. Real
 # library code, compiled into every build: `check` calls `skeleton::render` for
 # every worn skeleton.

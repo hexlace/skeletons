@@ -1462,6 +1462,33 @@ regenerates it, and refusing it would shut out every project that ignores its
 lockfile (`ritual/tests/wear_refusals.rs` →
 `a_lockfile_that_git_ignores_and_does_not_track_is_worn_and_then_synced`).
 
+Last of the checks before a write, `wear` asks the operating system whether it
+can open the manifest, and `Cargo.lock` when there is one, for writing in place.
+`cargo add` writes through a temporary file and a rename, so it succeeds on a
+read-only file, while `wear`'s table write and `rollback`'s restore both write in
+place and would both fail, leaving the dependency added: neither a worn project
+nor the files as they were. The question is an open for append, which creates
+nothing, truncates nothing and writes no byte, rather than a read of the
+permission bits, so an access control list, an immutable flag and a read-only
+mount answer as they would for the real write, and a process that can write any
+file passes, which is right because it can also restore. A missing `Cargo.lock`
+is the `--locked` read's to refuse
+(`crates/skeletons/src/wear/writable.rs` →
+`a_path_that_cannot_be_opened_for_writing_is_refused_for_either_file_whoever_runs_it`,
+and `ritual/tests/wear_refusals.rs` →
+`a_read_only_manifest_is_refused_before_anything_is_written` and →
+`a_read_only_lockfile_is_refused_before_anything_is_written`).
+
+Every path inside the project that `wear` puts in a message is relative to the
+workspace root (the root itself is shown whole, and what Cargo or git print in
+their own words is theirs). `rollback` prints a path exactly as it is handed it,
+so `wear` moves the process into the workspace root and hands `rollback` the
+two files as relative to it. Nothing inside the rollback run depends on the
+working directory: `cargo add`, the read back and every `git` question are given
+the directory they run in, which is where the command was run, so a relative
+`--path` still means what the wearer typed
+(`crates/skeletons/src/wear.rs` → `enter_the_workspace_root`).
+
 **Everything the workspace already answers is refused before `cargo add` runs.**
 The workspace is read `--locked` first, so a stale lockfile is refused before
 `cargo add` could rewrite more of it than the skeleton, and what that read holds

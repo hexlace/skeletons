@@ -997,6 +997,20 @@ and, like every message in this document, prints text from outside escaped.
   regenerates it, and refusing it would shut out projects that ignore their
   lockfile. (One that is untracked and not ignored shows in `git status`, and
   is refused above as an uncommitted change.)
+- the manifest, or a `Cargo.lock` that exists, cannot be written in place. Cargo
+  writes through a temporary file and a rename, so `cargo add` succeeds on a
+  read-only file, but `wear` writes the wearing table in place and its undo
+  restores in place, so either would fail with the dependency already added.
+  `wear` asks the operating system, before anything is written, whether it can
+  open each file for writing (without creating it, truncating it or writing a
+  byte), so permissions, an access control list, an immutable flag and a
+  read-only mount all answer as they would for the real write. A process that
+  can write any file passes, and can then also restore. A missing `Cargo.lock`
+  is not refused here; the `--locked` read above refuses it:
+
+  ```text
+  ritual/Cargo.toml cannot be written in place, so wear wrote nothing: wear changes it in place, and the operating system refused to open it for writing: Permission denied (os error 13); make it writable, then run the `wear` task again
+  ```
 
 **It undoes what it did when it fails after `cargo add`.** Both writes go
 through ritual's rollback, which records the manifest and `Cargo.lock` before
@@ -1028,8 +1042,9 @@ These are the failures that come after the first change:
   resolved is one another entry already wears under its package name, which no
   check before the write could see (the already-worn message above).
 
-When the undo itself fails, the message names every path that was not put back
-and says to check it before running the `wear` task again:
+When the undo itself fails, the message names every path that was not put back,
+relative to the workspace root as every other path `wear` shows is, and says to
+check it before running the `wear` task again:
 
 ```text
 <the failure>; ritual put the project back except for ritual/Cargo.toml — check it before running the `wear` task again

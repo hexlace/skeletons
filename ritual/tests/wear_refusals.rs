@@ -16,6 +16,8 @@
 
 mod support;
 
+use std::os::unix::fs::PermissionsExt as _;
+
 use support::wear::{
     ManifestAndLockfile, assert_nothing_was_undone, assert_refused_and_untouched,
     assert_refused_with_line, commit_everything, fixture_for_wearing, git_step,
@@ -574,4 +576,91 @@ fn a_manifest_that_git_does_not_track_is_refused_as_an_uncommitted_change() -> T
 fn a_lockfile_that_git_does_not_track_is_refused_as_an_uncommitted_change() -> TestOutcome {
     // Pins behaviour that already holds, as above, for `Cargo.lock`.
     assert_an_untracked_file_is_an_uncommitted_change("Cargo.lock")
+}
+
+// ---------------------------------------------------------------------
+// Read-only files: `wear` has to write both, and a file it cannot write is
+// a refusal before anything changes, not a failure part-way.
+// ---------------------------------------------------------------------
+
+#[expect(
+    clippy::print_stderr,
+    reason = "a test that cannot establish its premise says so rather than passing silently"
+)]
+fn print_skip(reason: &str) {
+    eprintln!("skipped: {reason}");
+}
+
+/// Makes `relative` read-only, runs `wear`, and asserts the refusal is one
+/// line that names `relative` as the workspace shows it (never an absolute
+/// path), ends with how to run `wear` again, and leaves both files as they
+/// were.
+///
+/// A process that can write a 0o444 file anyway (a superuser) cannot show
+/// this, so there the scenario says `skipped:` on stderr, where CI's job
+/// summary collects it, and passes.
+fn assert_a_read_only_file_is_refused(relative: &str) -> TestOutcome {
+    let fixture = fixture_for_wearing("")?;
+    let before = ManifestAndLockfile::read(&fixture, "Cargo.toml")?;
+    let path = fixture.root().join(relative);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444))?;
+    let restore = || std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644));
+
+    // Only a refusal on permission establishes the premise; any other
+    // failure of the probe fails the test.
+    match std::fs::OpenOptions::new().write(true).open(&path) {
+        Ok(_) => {
+            restore()?;
+            print_skip("this process can write a 0o444 file");
+            return Ok(());
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
+        Err(error) => {
+            restore()?;
+            return Err(error.into());
+        }
+    }
+
+    let report = wear_passthrough_plain(&fixture);
+    restore()?;
+    let report = report?;
+
+    assert_ne!(
+        report.exit_code, 0,
+        "wear must refuse a read-only {relative}; stdout was: {}",
+        report.stdout
+    );
+    let line = the_single_refusal_line(&report);
+    assert!(
+        line.contains(relative),
+        "the refusal must name {relative}; it was: {line}"
+    );
+    let root = fixture.root().to_str().ok_or("path must be UTF-8")?;
+    assert!(
+        !report.stderr.contains(root),
+        "the refusal must name the file relative to the workspace root, never an absolute path; \
+         stderr was: {}",
+        report.stderr
+    );
+    assert!(
+        line.ends_with("then run the `wear` task again"),
+        "the refusal must end by saying to run `wear` again; it was: {line}"
+    );
+    assert_nothing_was_undone(&report);
+    assert_eq!(
+        ManifestAndLockfile::read(&fixture, "Cargo.toml")?,
+        before,
+        "a refused wear must leave the manifest and Cargo.lock byte-identical"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_read_only_manifest_is_refused_before_anything_is_written() -> TestOutcome {
+    assert_a_read_only_file_is_refused("Cargo.toml")
+}
+
+#[test]
+fn a_read_only_lockfile_is_refused_before_anything_is_written() -> TestOutcome {
+    assert_a_read_only_file_is_refused("Cargo.lock")
 }

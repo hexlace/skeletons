@@ -2,7 +2,8 @@
 # expectation is the test failing, which is what a test is for. This allows it
 # in `#[test]` functions and `#[cfg(test)]` modules only: production code, and a
 # helper in `tests/` outside a `#[test]` function, are still held to the
-# workspace lints, which refuse `expect`.
+# workspace lints. Those set `expect_used` to `warn`, and CI's clippy job runs
+# with `-D warnings`, which turns that warning into a refusal.
 allow-expect-in-tests = true
 # Same reasoning, for `panic!` reached through `.unwrap_or_else(|error| panic!(...))`:
 # an acceptance test that renders under an unexpected condition should fail

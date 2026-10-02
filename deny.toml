@@ -55,6 +55,9 @@ allow = [
 # An allowed licence nothing uses any more is stale, and fails the check so it
 # comes off the list rather than lingering.
 unused-allowed-license = "deny"
+# A licence file's text is identified by how closely it matches a known
+# licence's. A text that matches less closely than this is not taken for that
+# licence.
 confidence-threshold = 0.93
 
 [licenses.private]

@@ -1041,6 +1041,16 @@ These are the failures that come after the first change:
   or could not be run at all (``running `cargo add` failed: …``).
 - the crate Cargo added has no `[package.metadata.skeletons]` table, so it is no
   skeleton. Only the read back can tell, for a source Cargo resolves itself.
+- Cargo declared the dependency under another spelling of the key, because
+  crates.io spells the crate that way (`cargo add --dev serde-json` writes
+  `serde_json`). The key typed then names no dependency, and rollback has
+  already removed what was added, so the one remedy is to give the task the
+  crate as crates.io spells it. This is found in the manifest Cargo left, never
+  in what Cargo said, and before the table is written:
+
+  ```text
+  crates.io spells the crate `serde_json`, so Cargo added it under that key and not as `serde-json`; give the `wear` task `serde_json`, as crates.io spells it; ritual put the project back as it found it
+  ```
 - the manifest could not be read to add the table to (`wear could not read
   <manifest> to add the wearing table: …`), or the edited manifest is not the
   original plus one empty table (`wear could not add

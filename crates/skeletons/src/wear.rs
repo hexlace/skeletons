@@ -19,6 +19,7 @@ mod message;
 mod prospect;
 mod refusal;
 mod request;
+mod respelling;
 mod source;
 mod table;
 #[cfg(test)]
@@ -313,12 +314,16 @@ mod tests {
 
     impl Project {
         fn new(key: Option<&str>) -> Self {
+            Self::requesting("tidy", key)
+        }
+
+        fn requesting(skeleton: &str, key: Option<&str>) -> Self {
             let directory = tempfile::tempdir().expect("a temporary directory");
             let manifest_path = directory.path().join("Cargo.toml");
             let lockfile_path = directory.path().join("Cargo.lock");
             std::fs::write(&manifest_path, MANIFEST).expect("write the manifest");
             std::fs::write(&lockfile_path, LOCKFILE).expect("write the lockfile");
-            let request = Request::new("tidy", key, Source::Registry).expect("a valid request");
+            let request = Request::new(skeleton, key, Source::Registry).expect("a valid request");
             let prepared = Prepared {
                 request,
                 directory: directory.path().to_path_buf(),
@@ -512,6 +517,64 @@ mod tests {
             failure
                 .to_string()
                 .starts_with("Cargo.toml already has a [package.metadata.skeletons.tidy] table"),
+            "{failure}"
+        );
+        assert_eq!(project.manifest(), MANIFEST);
+        assert_eq!(project.lockfile(), LOCKFILE);
+    }
+
+    #[test]
+    fn a_dependency_cargo_added_under_another_spelling_is_refused_and_both_files_come_back() {
+        // `cargo add --dev serde-json` writes `serde_json`, the spelling
+        // crates.io has, and not the key typed. The stand-in writes the
+        // respelt key. The key then names no dependency, so the refusal is
+        // about the crate, before any table is written, and says what works
+        // once both files are back as they were.
+        let project = Project::requesting("serde-json", None);
+        let directory = project.directory.path().to_path_buf();
+        let adding_it_respelt = move || -> Outcome {
+            let respelt = format!("{MANIFEST}\n[dev-dependencies]\nserde_json = \"1\"\n");
+            std::fs::write(directory.join("Cargo.toml"), respelt)
+                .and_then(|()| std::fs::write(directory.join("Cargo.lock"), ADDED_LOCKFILE))
+                .map_err(|error| Failure::new("the stand-in failed").caused_by(error))
+        };
+
+        let failure = run(&project, adding_it_respelt, || {
+            panic!("nothing is read back after the respelling is refused")
+        })
+        .expect_err("a respelt dependency must be refused");
+
+        assert_eq!(
+            failure.to_string(),
+            "crates.io spells the crate `serde_json`, so Cargo added it under that key and not \
+             as `serde-json`; give the `wear` task `serde_json`, as crates.io spells it; ritual \
+             put the project back as it found it"
+        );
+        assert_eq!(project.manifest(), MANIFEST);
+        assert_eq!(project.lockfile(), LOCKFILE);
+    }
+
+    #[test]
+    fn a_dependency_added_under_exactly_the_key_is_not_taken_for_a_respelling() {
+        // The same name typed with a hyphen, and written with the hyphen: no
+        // translation happened, so the run reaches what it always reached.
+        let project = Project::requesting("tidy-x", None);
+        let directory = project.directory.path().to_path_buf();
+        let adding_it_as_typed = move || -> Outcome {
+            let added = format!("{MANIFEST}\n[dev-dependencies]\ntidy-x = \"1\"\n");
+            std::fs::write(directory.join("Cargo.toml"), added)
+                .and_then(|()| std::fs::write(directory.join("Cargo.lock"), ADDED_LOCKFILE))
+                .map_err(|error| Failure::new("the stand-in failed").caused_by(error))
+        };
+        let workspace = workspace_of(vec![not_a_skeleton("Cargo.toml", "tidy-x", "tidy-x")]);
+
+        let failure = run(&project, adding_it_as_typed, reading_back(workspace))
+            .expect_err("a crate that is no skeleton must be refused");
+
+        assert!(
+            failure
+                .to_string()
+                .starts_with("tidy-x 0.1.0 is not a skeleton"),
             "{failure}"
         );
         assert_eq!(project.manifest(), MANIFEST);

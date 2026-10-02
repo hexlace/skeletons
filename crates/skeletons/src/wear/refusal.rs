@@ -100,6 +100,10 @@ pub(crate) enum WearRefusal {
         table: String,
         key: String,
     },
+    /// `cargo add` declared the dependency under `spelled`, the spelling
+    /// crates.io has for the crate, and not under the key it was given, which
+    /// is one name to `rustc`.
+    CrateSpelledDifferently { key: String, spelled: String },
     /// The wearing table written differs from the one meant, or changes
     /// something else in the manifest, for the reason `detail` gives.
     //
@@ -178,6 +182,9 @@ impl WearRefusal {
                 table,
                 key,
             } => table_at_other_spelling_message(manifest, table, key),
+            Self::CrateSpelledDifferently { key, spelled } => {
+                crate_spelled_differently_message(key, spelled)
+            }
             Self::TableDefect {
                 manifest,
                 key,
@@ -315,6 +322,14 @@ fn table_at_other_spelling_message(manifest: &str, table: &str, key: &str) -> St
     )
 }
 
+fn crate_spelled_differently_message(key: &str, spelled: &str) -> String {
+    let (key, spelled) = (Escaped(key), Escaped(spelled));
+    format!(
+        "crates.io spells the crate `{spelled}`, so Cargo added it under that key and not as \
+         `{key}`; give the `wear` task `{spelled}`, as crates.io spells it"
+    )
+}
+
 fn table_defect_message(manifest: &str, key: &str, detail: &str) -> String {
     let (manifest, key, detail) = (Escaped(manifest), Escaped(key), Escaped(detail));
     format!(
@@ -353,7 +368,7 @@ mod tests {
     /// How many kinds of [`WearRefusal`] there are. The match in [`kind`] has
     /// no wildcard, so a kind added without an arm does not compile, and
     /// [`samples`] must then cover it.
-    const KINDS: usize = 19;
+    const KINDS: usize = 20;
 
     const fn kind(refusal: &WearRefusal) -> usize {
         match refusal {
@@ -373,9 +388,10 @@ mod tests {
             WearRefusal::ParentNotATable { .. } => 13,
             WearRefusal::TableWithoutDependency { .. } => 14,
             WearRefusal::TableAtOtherSpelling { .. } => 15,
-            WearRefusal::TableDefect { .. } => 16,
-            WearRefusal::NotConfirmed { .. } => 17,
-            WearRefusal::NotReported { .. } => 18,
+            WearRefusal::CrateSpelledDifferently { .. } => 16,
+            WearRefusal::TableDefect { .. } => 17,
+            WearRefusal::NotConfirmed { .. } => 18,
+            WearRefusal::NotReported { .. } => 19,
         }
     }
 
@@ -437,6 +453,10 @@ mod tests {
                 manifest: poison(),
                 table: poison(),
                 key: poison(),
+            },
+            WearRefusal::CrateSpelledDifferently {
+                key: poison(),
+                spelled: poison(),
             },
             WearRefusal::TableDefect {
                 manifest: poison(),
@@ -680,6 +700,18 @@ mod tests {
             "Cargo.toml already has a [package.metadata.skeletons.ab_cd] table, which is \
              `ab-cd` to rustc; remove [package.metadata.skeletons.ab_cd], which names no \
              dependency, then run the `wear` task again"
+        );
+    }
+
+    #[test]
+    fn a_crate_crates_io_spells_differently_says_to_give_it_as_spelled() {
+        assert_eq!(
+            only(&WearRefusal::CrateSpelledDifferently {
+                key: "serde-json".to_owned(),
+                spelled: "serde_json".to_owned(),
+            }),
+            "crates.io spells the crate `serde_json`, so Cargo added it under that key and not \
+             as `serde-json`; give the `wear` task `serde_json`, as crates.io spells it"
         );
     }
 

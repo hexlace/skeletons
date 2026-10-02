@@ -19,6 +19,7 @@ use toml_edit::{DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
 use super::refusal::{Parent, WearRefusal};
 use super::request::Key;
+use super::respelling;
 
 /// The tables a wearing table sits under, from the outermost in.
 const PARENTS: [Parent; 3] = [Parent::Package, Parent::Metadata, Parent::Skeletons];
@@ -199,7 +200,8 @@ fn put_empty_table(table: &mut toml::Table, key: &Key) -> Option<()> {
 ///
 /// # Errors
 ///
-/// Returns a failure saying why the manifest could not be read, why the
+/// Returns a failure saying why the manifest could not be read, that `cargo
+/// add` declared the dependency under another spelling of the key, why the
 /// table could not be added, or why the file could not be written.
 pub(crate) fn write(
     changes: &mut Changes,
@@ -214,6 +216,15 @@ pub(crate) fn write(
         }
         .into_failure()
     })?;
+    // Before the table goes in: a key `cargo add` respelt has no dependency
+    // to be a table for, and the refusal is about the dependency.
+    if let Some(spelled) = respelling::respelt_key(&before, key) {
+        return Err(WearRefusal::CrateSpelledDifferently {
+            key: key.as_str().to_owned(),
+            spelled,
+        }
+        .into_failure());
+    }
     let after = with_empty_wearing_table(&before, key)
         .map_err(|refusal| refusal.into_refusal(manifest, key).into_failure())?;
     changes.write(manifest_path, after)

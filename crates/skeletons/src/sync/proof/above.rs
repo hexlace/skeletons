@@ -21,9 +21,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::claim::ClaimPath;
 use crate::git::{self, Locale};
 
-use super::{AboveEntry, Why, run_ls_files};
+use super::{AboveEntry, Why, why_unusable};
 use crate::work_tree::WorkTree;
 use crate::work_tree::abort::{GitQuestion, WorkTreeAbort};
+use crate::work_tree::index_records::run_ls_files;
 
 /// For each of `writes`, the refusal that follows from an index entry at a
 /// directory above it, or `None` when git tracks nothing at any of them.
@@ -75,7 +76,7 @@ fn ask_about(work_tree: &WorkTree, directory: &ClaimPath) -> Result<Option<Why>,
     ls_files.args(git::pathspec_exactly_ignoring_case(directory));
     Ok(
         match run_ls_files(ls_files, GitQuestion::IndexAbove(directory.clone()))? {
-            Err(why) => Some(why),
+            Err(unusable) => Some(why_unusable(unusable)),
             Ok(records) => records.first().map(|record| Why::TrackedAbove {
                 git_path: String::from_utf8_lossy(&record.path).into_owned(),
                 entry: AboveEntry::from_mode(&record.mode),

@@ -962,12 +962,11 @@ and, like every message in this document, prints text from outside escaped.
   `sync` asks (see [Sync](#sync)), with the whole tree counted, asked last so a
   request that is wrong is refused as wrong whether or not the tree is clean.
   The per-path lines are `sync`'s, on stdout, then the summary on stderr, worded
-  for `wear`. `wear` makes no per-path proof, since the only files it changes
-  are the manifest and the lockfile:
+  for `wear`:
 
   ```text
   ritual/Cargo.toml has uncommitted changes
-  the working tree has 1 uncommitted change, so wear wrote nothing: it writes only into a clean working tree, where git holds everything it changes; commit, stash or move it, then run the `wear` task again
+  the working tree has 1 uncommitted change, so wear wrote nothing: it writes only into a clean working tree, where git holds the manifest it changes and any Cargo.lock git tracks; commit, stash or move it, then run the `wear` task again
   ```
 
   Outside git it reads `/path/to/workspace is not inside a git work tree, so
@@ -976,6 +975,28 @@ and, like every message in this document, prints text from outside escaped.
   for `sync`, `` run the `wear` task outside a git hook (the `check` task works
   inside one)`` in the lines about a redirecting variable, and `` run the `wear`
   task again`` in the timed-out ones.
+- the manifest or `Cargo.lock` is a file git cannot hand back. A clean work tree
+  says nothing about a file git is told not to read, so after it `wear` asks
+  git's index about the two files, as `sync` does for every path it writes. The
+  manifest has to be tracked and read from the work tree, and so does a
+  `Cargo.lock` that git tracks; one marked skip-worktree or assume-unchanged,
+  or both, is refused with `sync`'s line for it, worded for `wear`:
+
+  ```text
+  ritual/Cargo.toml is marked skip-worktree in git's index, so git does not read its bytes from the work tree and would ignore what wear wrote there: run `git update-index --no-skip-worktree -- ritual/Cargo.toml`, then run the `wear` task again
+  ```
+
+  A manifest git does not track, which a `.gitignore` rule can leave out of
+  `git status`, is refused too, with the command that tracks it:
+
+  ```text
+  ritual/Cargo.toml is not tracked by git, so wear wrote nothing: git could not give back what wear changes in it; run `git add -- ritual/Cargo.toml` (`git add -f -- ritual/Cargo.toml` if a .gitignore rule matches it) and commit, then run the `wear` task again
+  ```
+
+  An ignored or untracked `Cargo.lock` is allowed: git never held it, Cargo
+  regenerates it, and refusing it would shut out projects that ignore their
+  lockfile. (One that is untracked and not ignored shows in `git status`, and
+  is refused above as an uncommitted change.)
 
 **It undoes what it did when it fails after `cargo add`.** Both writes go
 through ritual's rollback, which records the manifest and `Cargo.lock` before

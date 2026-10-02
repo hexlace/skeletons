@@ -1,5 +1,8 @@
 //! Parsing `git ls-files -v --stage -z`'s own output — one record per index
-//! entry, `<tag> SP <mode> SP <oid> SP <stage> TAB <path> NUL`.
+//! entry, `<tag> SP <mode> SP <oid> SP <stage> TAB <path> NUL` — and reading
+//! the one letter that says whether git looks at the file in the work tree.
+//! `sync` proves every path it writes against these records, and `wear` the
+//! two files it changes.
 
 use crate::git::ObjectId;
 
@@ -22,7 +25,28 @@ pub(crate) enum IndexTag {
     Unmerged,
 }
 
+/// Which flag hides a present file from git.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HiddenFlag {
+    SkipWorktree,
+    AssumeUnchanged,
+    Both,
+}
+
 impl IndexTag {
+    /// The flag that makes git not read this entry's file from the work tree,
+    /// or `None` for an entry git does read (tracked, or unmerged). Asked of
+    /// the tag so that the three hiding letters are read in one place for
+    /// every command that refuses a hidden file.
+    pub(crate) const fn hiding_flag(self) -> Option<HiddenFlag> {
+        match self {
+            Self::SkipWorktree => Some(HiddenFlag::SkipWorktree),
+            Self::AssumeUnchanged => Some(HiddenFlag::AssumeUnchanged),
+            Self::SkipWorktreeAndAssumeUnchanged => Some(HiddenFlag::Both),
+            Self::Tracked | Self::Unmerged => None,
+        }
+    }
+
     const fn from_byte(letter: u8) -> Option<Self> {
         match letter {
             b'H' => Some(Self::Tracked),
@@ -144,7 +168,26 @@ fn parse_one_index_record(record: &[u8]) -> Result<IndexRecord, MalformedIndexRe
 mod tests {
     use proptest::prelude::*;
 
-    use super::{IndexTag, parse_ls_files_tagged};
+    use super::{HiddenFlag, IndexTag, parse_ls_files_tagged};
+
+    #[test]
+    fn each_tag_that_hides_a_file_names_its_flag_and_the_others_name_none() {
+        // Every tag, so a new one cannot be left out: the three letters that
+        // make git look away name the flag that does, and tracked and
+        // unmerged entries are ones git reads.
+        for (tag, expected) in [
+            (IndexTag::Tracked, None),
+            (IndexTag::SkipWorktree, Some(HiddenFlag::SkipWorktree)),
+            (IndexTag::AssumeUnchanged, Some(HiddenFlag::AssumeUnchanged)),
+            (
+                IndexTag::SkipWorktreeAndAssumeUnchanged,
+                Some(HiddenFlag::Both),
+            ),
+            (IndexTag::Unmerged, None),
+        ] {
+            assert_eq!(tag.hiding_flag(), expected, "{tag:?}");
+        }
+    }
 
     #[test]
     fn empty_input_parses_to_no_entries() {

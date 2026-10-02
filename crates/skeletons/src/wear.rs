@@ -14,6 +14,7 @@
 
 mod cargo_add;
 mod confirm;
+mod hand_back;
 mod message;
 mod prospect;
 mod refusal;
@@ -108,6 +109,8 @@ struct CommandLineCrate {
     /// `manifest_path` as a message shows it: relative to the workspace root.
     manifest_shown: String,
     lockfile_path: PathBuf,
+    /// `lockfile_path` as a message shows it: relative to the workspace root.
+    lockfile_shown: String,
 }
 
 /// Everything `wear` can refuse before it writes anything.
@@ -118,8 +121,11 @@ struct CommandLineCrate {
 /// follows, is never the one to rewrite it. What that read holds then answers
 /// every refusal that is about the request and the manifest as they stand
 /// ([`prospect::check`]), so none of them waits for `cargo add` to have run.
-/// The work tree is asked last, so a request that is wrong is refused as wrong
-/// whether or not the tree is clean.
+/// The crate it writes into is located before the work tree is asked, because
+/// git is asked about that crate's own manifest. The work tree is asked last,
+/// so a request that is wrong is refused as wrong whether or not the tree is
+/// clean, and the two files are then proven ones git can hand back
+/// ([`hand_back::check`]).
 fn prepare(command_line: &CommandLine, request: Request) -> Result<Prepared, Failure> {
     let directory = std::env::current_dir().map_err(|error| {
         Failure::new("could not read the current working directory").caused_by(error)
@@ -128,13 +134,15 @@ fn prepare(command_line: &CommandLine, request: Request) -> Result<Prepared, Fai
     let prospect =
         workspace::read_prospect(&directory, package).map_err(|error| aborted(&error))?;
     prospect::check(&request, &prospect, package).map_err(WearRefusal::into_failure)?;
+    let command_line_crate = locate_command_line_crate(command_line, &directory)?;
     // `wear` changes the manifest and `Cargo.lock` in place, so git is the only
     // undo for a change `rollback` could not take back; whole-tree dirt counts,
     // as it does for `sync`, because the person's own uncommitted edits to those
-    // two files would otherwise be mixed into what `wear` wrote. The witness is
-    // not needed: `wear` proves nothing per path.
-    let (_work_tree, _clean) = work_tree::open_clean(&prospect.workspace.root, WRITING)?;
-    let command_line_crate = locate_command_line_crate(command_line, &directory)?;
+    // two files would otherwise be mixed into what `wear` wrote. A clean tree
+    // says nothing about a file git is told not to read, so the two files are
+    // then asked of git's index, as `sync` asks of every path it writes.
+    let (work_tree, clean) = work_tree::open_clean(&prospect.workspace.root, WRITING)?;
+    hand_back::check(&work_tree, &clean, &command_line_crate)?;
     Ok(Prepared {
         request,
         directory,
@@ -158,6 +166,7 @@ fn locate_command_line_crate(
     let package = command_line.identity().package_name();
     let document = metadata::fetch(directory)?;
     let project = document.locate_project(package)?;
+    let lockfile_path = project.workspace_root().join("Cargo.lock");
     Ok(CommandLineCrate {
         package: package.to_owned(),
         manifest_path: project.manifest_path().to_path_buf(),
@@ -165,7 +174,8 @@ fn locate_command_line_crate(
             project.workspace_root(),
             project.manifest_path(),
         ),
-        lockfile_path: project.workspace_root().join("Cargo.lock"),
+        lockfile_path: lockfile_path.clone(),
+        lockfile_shown: workspace::relative_to_root(project.workspace_root(), &lockfile_path),
     })
 }
 
@@ -259,6 +269,7 @@ mod tests {
                     manifest_path,
                     manifest_shown: "Cargo.toml".to_owned(),
                     lockfile_path,
+                    lockfile_shown: "Cargo.lock".to_owned(),
                 },
             };
             Self {

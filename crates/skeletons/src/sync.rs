@@ -23,7 +23,6 @@
 //! is reported as changed, with its path, and never a panic.
 
 mod fold_variant;
-mod index_entry;
 mod message;
 mod proof;
 #[cfg(test)]

@@ -11,8 +11,9 @@ pub(crate) enum GitQuestion {
     WorkTree,
     /// Whether the whole work tree is clean.
     Status,
-    /// What git's index holds for one claimed path.
-    IndexEntry(ClaimPath),
+    /// What git's index holds for one path, as a message shows it: a claimed
+    /// path for `sync`, the manifest or lockfile for `wear`.
+    IndexEntry(String),
     /// What git's index tracks at one directory above a claim.
     IndexAbove(ClaimPath),
     /// Which paths git's index lists at the depth of the writes.

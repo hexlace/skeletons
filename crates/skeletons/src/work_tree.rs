@@ -10,6 +10,8 @@
 
 pub(crate) mod abort;
 pub(crate) mod clean;
+pub(crate) mod index_entry;
+pub(crate) mod index_records;
 pub(crate) mod message;
 pub(crate) mod writing_command;
 

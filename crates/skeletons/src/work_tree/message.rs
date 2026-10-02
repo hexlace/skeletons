@@ -1,16 +1,20 @@
 //! What a writing command says when it cannot ask git about the work tree,
-//! or when git says the work tree is not clean.
+//! or when git says the work tree is not clean, or that git does not read a
+//! file the command writes.
 //!
 //! `sync` and `wear` refuse on the same questions in the same shapes, so the
 //! messages live here once and each takes the [`WritingCommand`] that is
 //! asking: it supplies the command's name, what it would write over and the
 //! remedy that runs it again. Nothing here names a command itself.
 
+mod hidden;
 mod timed_out;
 
 use std::path::Path;
 
 use rituals::report as write_report;
+
+pub(crate) use hidden::hidden_from_work_tree_line;
 
 use super::abort::WorkTreeAbort;
 use super::clean::{Dirt, DirtyPath};
@@ -127,8 +131,8 @@ fn dirt_phrase(dirt: Dirt) -> &'static str {
 
 /// `` the working tree has {n} uncommitted {change|changes}, so {command}
 /// wrote nothing: it writes only into a clean working tree, where git holds
-/// {everything it could replace|everything it changes}; commit, stash or move
-/// {it|them}, then run the `{command}` task again ``.
+/// {everything it could replace|the manifest it changes and any Cargo.lock git
+/// tracks}; commit, stash or move {it|them}, then run the `{command}` task again ``.
 pub(crate) fn dirty_summary(count: usize, command: WritingCommand) -> String {
     format!(
         "the working tree has {count} uncommitted {}, so {} wrote nothing: it \
@@ -309,8 +313,8 @@ mod tests {
         assert_eq!(
             dirty_summary(1, WritingCommand::Wear),
             "the working tree has 1 uncommitted change, so wear wrote nothing: it writes only \
-             into a clean working tree, where git holds everything it changes; commit, stash \
-             or move it, then run the `wear` task again"
+             into a clean working tree, where git holds the manifest it changes and any \
+             Cargo.lock git tracks; commit, stash or move it, then run the `wear` task again"
         );
     }
 
@@ -319,8 +323,8 @@ mod tests {
         assert_eq!(
             dirty_summary(2, WritingCommand::Wear),
             "the working tree has 2 uncommitted changes, so wear wrote nothing: it writes only \
-             into a clean working tree, where git holds everything it changes; commit, stash \
-             or move them, then run the `wear` task again"
+             into a clean working tree, where git holds the manifest it changes and any \
+             Cargo.lock git tracks; commit, stash or move them, then run the `wear` task again"
         );
     }
 

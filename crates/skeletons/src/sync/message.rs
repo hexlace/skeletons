@@ -16,6 +16,7 @@ use super::write::{
     CollisionAt, CommitCause, CommitFailure, Committed, Leftover, LeftoverReason, StagingRelation,
     TargetChange, WriteFailure,
 };
+use crate::work_tree::message::hidden_from_work_tree_line;
 use crate::work_tree::writing_command::WritingCommand;
 
 /// Reports every refusal on stdout, each as `refused: <message>` — the same
@@ -92,7 +93,7 @@ fn unproven_line(unproven: &Unproven) -> String {
         ),
         Why::TrackedButAbsent { git_path } => tracked_but_absent_line(&unproven.path, git_path),
         Why::HiddenFromWorkTree { flag } => {
-            hidden::hidden_from_work_tree_line(&unproven.path, *flag)
+            hidden_from_work_tree_line(unproven.path.as_str(), *flag, WritingCommand::Sync)
         }
         Why::TrackedAbove { git_path, entry } => {
             hidden::tracked_above_line(&unproven.path, git_path, entry)

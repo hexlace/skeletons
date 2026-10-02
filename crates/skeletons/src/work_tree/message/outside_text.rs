@@ -103,7 +103,7 @@ fn question_samples() -> Vec<GitQuestion> {
     vec![
         GitQuestion::WorkTree,
         GitQuestion::Status,
-        GitQuestion::IndexEntry(claim(POISON)),
+        GitQuestion::IndexEntry(POISON.to_owned()),
         GitQuestion::IndexAbove(claim(POISON)),
         GitQuestion::IndexListing,
         GitQuestion::Checkout(claim(POISON)),

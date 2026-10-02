@@ -18,11 +18,12 @@ use crate::survey::poison::{
     POISON, POISON_FOLDED, assert_escaped_once, assert_every_kind, claim, poison,
 };
 use crate::sync::fold_variant::{FoldVariant, fold_variants};
-use crate::sync::proof::{AboveEntry, HiddenFlag, Unproven, Why};
+use crate::sync::proof::{AboveEntry, Unproven, Why};
 use crate::sync::write::{
     CollisionAt, CommitCause, CommitFailure, Leftover, LeftoverReason, StagingRelation,
     TargetChange, WriteFailure,
 };
+use crate::work_tree::index_entry::HiddenFlag;
 
 // ---------------------------------------------------------------------------
 // Unproven paths

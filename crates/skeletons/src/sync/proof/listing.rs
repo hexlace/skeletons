@@ -58,7 +58,7 @@ pub(super) fn index_listing(
 }
 
 /// The pure classifier behind [`index_listing`], split out for the same
-/// reason as `classify_ls_files`: a unit test hands it a truncated stream and
+/// reason as `index_records::classify_ls_files`: a unit test hands it a truncated stream and
 /// the same bytes uncut. The listing is stdout as written, never parsed here.
 fn classify_listing(
     exit_ok: bool,

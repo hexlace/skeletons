@@ -1068,8 +1068,9 @@ one a truncated stream and the same bytes uncut
 `truncated_stdout_reads_as_git_output_too_large`, →
 `crates/skeletons/src/work_tree/clean.rs` →
 `truncated_status_stdout_reads_as_git_output_too_large_never_clean`, →
+`crates/skeletons/src/work_tree/index_records.rs` →
+`truncated_ls_files_stdout_reads_as_too_large`, →
 `crates/skeletons/src/sync/proof.rs` →
-`truncated_ls_files_stdout_reads_as_output_too_large`, →
 `truncated_cat_file_stdout_reads_as_output_too_large`,
 `crates/skeletons/src/sync/proof/listing.rs` →
 `a_truncated_listing_is_refused_as_too_large_never_searched_in_part`, and
@@ -1429,13 +1430,37 @@ panics, and a few assertions in the workspace reader and the process runner can
 be reached after `cargo add`; a panic leaves whatever was already written.
 Rollback cannot give back a change made around
 it, and does not check that a file still holds what `wear` last wrote before
-restoring the original, so git is the second undo, and a clean work tree is
-required first. That is the same whole-tree question `sync` asks, through the
-same code, counting every uncommitted path rather than only the two files
-`wear` changes, because a person's own edits to them would otherwise be mixed
-into what `wear` wrote (`crates/skeletons/src/work_tree.rs` → `open_clean`, and
+restoring the original, so git is the second undo, and git has to hold what it
+would give back: a clean work tree is required first, and then the two files
+are checked.
+
+The clean tree is the same whole-tree question `sync` asks, through the same
+code, counting every uncommitted path rather than only the two files `wear`
+changes, because a person's own edits to them would otherwise be mixed into
+what `wear` wrote (`crates/skeletons/src/work_tree.rs` → `open_clean`, and
 `ritual/tests/wear_refusals.rs` →
 `a_work_tree_with_uncommitted_changes_is_refused_and_nothing_changes`).
+
+A clean tree says nothing about a file git is told not to read, so `wear` then
+asks git's index about the manifest and `Cargo.lock`, the way `sync`'s rule (b)
+asks about every path it writes: the same `ls-files -v --stage -z` question,
+the same record parser and the same line for a hidden file. The manifest has to
+be tracked and read from the work tree, tagged `H` and not `h`, `S` or `s`, and
+a tracked `Cargo.lock` has to be too; otherwise `wear` refuses before writing,
+because a dependency and a table written into a file git does not watch would
+leave a lockfile that no committed manifest explains
+(`crates/skeletons/src/wear/hand_back.rs` →
+`a_file_flagged_so_git_does_not_read_it_is_refused_for_each_flag_and_each_file`
+and →
+`a_manifest_git_holds_nothing_for_is_refused_and_a_lockfile_is_allowed`;
+`ritual/tests/wear_refusals.rs` →
+`a_manifest_marked_skip_worktree_with_a_local_edit_is_refused_and_nothing_changes`
+and →
+`a_manifest_that_git_ignores_and_does_not_track_is_refused_and_nothing_changes`).
+An untracked or ignored `Cargo.lock` is allowed: git never held it, Cargo
+regenerates it, and refusing it would shut out every project that ignores its
+lockfile (`ritual/tests/wear_refusals.rs` →
+`a_lockfile_that_git_ignores_and_does_not_track_is_worn_and_then_synced`).
 
 **Everything the workspace already answers is refused before `cargo add` runs.**
 The workspace is read `--locked` first, so a stale lockfile is refused before

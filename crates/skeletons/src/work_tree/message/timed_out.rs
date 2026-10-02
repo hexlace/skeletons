@@ -33,7 +33,7 @@ pub(super) fn timed_out_message(question: &GitQuestion, command: WritingCommand)
         ),
         GitQuestion::IndexEntry(path) => index_message(
             seconds,
-            &format!("reading git's index entry for {}", Escaped(path.as_str())),
+            &format!("reading git's index entry for {}", Escaped(path)),
             command,
         ),
         GitQuestion::IndexAbove(directory) => index_message(
@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn an_index_question_that_timed_out_names_the_path_or_directory_it_was_reading() {
         let entry = timed_out_message(
-            &GitQuestion::IndexEntry(claim("a/b.yml")),
+            &GitQuestion::IndexEntry("a/b.yml".to_owned()),
             WritingCommand::Sync,
         );
         assert!(
@@ -198,7 +198,7 @@ mod tests {
         // the index helper or the ignore sentence.
         assert_eq!(
             timed_out_message(
-                &GitQuestion::IndexEntry(claim("a/b.yml")),
+                &GitQuestion::IndexEntry("a/b.yml".to_owned()),
                 WritingCommand::Wear
             ),
             "`git ls-files` timed out after 30 s reading git's index entry for a/b.yml, and was \

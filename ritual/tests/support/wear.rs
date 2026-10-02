@@ -185,3 +185,75 @@ pub(crate) fn assert_worn_as_a_dev_dependency(
     );
     Ok(())
 }
+
+/// Runs a git command in `fixture`'s workspace, as a fixture-building step
+/// that must succeed.
+pub(crate) fn git_step(fixture: &Fixture, arguments: &[&str]) -> Result<String, Box<dyn Error>> {
+    super::git::run(
+        fixture.root(),
+        fixture.sandbox().home(),
+        arguments,
+        "git (fixture step)",
+    )
+}
+
+/// Runs `wear` on the checked-in `passthrough-plain` skeleton, by path, with
+/// the key defaulted: the invocation a refusal scenario that is about the
+/// project, not the arguments, needs.
+pub(crate) fn wear_passthrough_plain(fixture: &Fixture) -> Result<super::Report, Box<dyn Error>> {
+    let skeleton_path = super::checked_in_test_skeleton("passthrough-plain");
+    let skeleton_path = skeleton_path.to_str().ok_or("path must be UTF-8")?;
+    fixture.run(&[
+        "skeletons",
+        "wear",
+        "passthrough-plain",
+        "--path",
+        skeleton_path,
+    ])
+}
+
+/// Asserts the whole story of a refusal made before anything was written:
+/// a non-zero exit, `line` as one whole stderr line, no claim that anything
+/// was undone, and the manifest and lockfile exactly as `before` read them.
+pub(crate) fn assert_refused_and_untouched(
+    fixture: &Fixture,
+    report: &super::Report,
+    line: &str,
+    before: &ManifestAndLockfile,
+    manifest_relative: &str,
+) -> Result<(), Box<dyn Error>> {
+    assert_ne!(
+        report.exit_code, 0,
+        "wear must refuse; stdout was: {}",
+        report.stdout
+    );
+    assert_refused_with_line(report, line);
+    assert_nothing_was_undone(report);
+    assert_eq!(
+        &ManifestAndLockfile::read(fixture, manifest_relative)?,
+        before,
+        "a refused wear must leave the manifest and Cargo.lock byte-identical"
+    );
+    Ok(())
+}
+
+/// The one non-blank line `report`'s stderr holds, after the command line's
+/// prefix. Fails the calling test if stderr holds none or several.
+pub(crate) fn the_single_refusal_line(report: &super::Report) -> &str {
+    let lines: Vec<&str> = report
+        .stderr
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    assert!(
+        lines.len() == 1,
+        "stderr must hold exactly one line; it was:\n{}",
+        report.stderr
+    );
+    assert!(
+        lines[0].starts_with(REFUSAL_PREFIX),
+        "the line must start with `{REFUSAL_PREFIX}`: {}",
+        lines[0]
+    );
+    &lines[0][REFUSAL_PREFIX.len()..]
+}

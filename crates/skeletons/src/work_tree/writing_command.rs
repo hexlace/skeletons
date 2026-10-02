@@ -52,7 +52,7 @@ impl WritingCommand {
     pub(crate) const fn held_by_git(self) -> &'static str {
         match self {
             Self::Sync => "everything it could replace",
-            Self::Wear => "everything it changes",
+            Self::Wear => "the manifest it changes and any Cargo.lock git tracks",
         }
     }
 }
@@ -92,6 +92,9 @@ mod tests {
             WritingCommand::Sync.held_by_git(),
             "everything it could replace"
         );
-        assert_eq!(WritingCommand::Wear.held_by_git(), "everything it changes");
+        assert_eq!(
+            WritingCommand::Wear.held_by_git(),
+            "the manifest it changes and any Cargo.lock git tracks"
+        );
     }
 }

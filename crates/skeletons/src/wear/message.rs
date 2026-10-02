@@ -9,7 +9,10 @@ use crate::skeleton::Escaped;
 /// The next step names the `sync` task and nothing before it: a task is
 /// never told the key it is mounted under, so it cannot say how its command
 /// line reaches `sync`, and the wearer recognises the subcommand on their
-/// own.
+/// own. It says to commit first because `sync` writes only into a clean work
+/// tree, and `wear` has just changed the manifest and `Cargo.lock`; the
+/// lockfile is always at the workspace root, which is where the wearer sees
+/// it named.
 pub(crate) fn added_lines(added: &Added) -> [String; 2] {
     let (package, manifest, key) = (
         Escaped(&added.package),
@@ -22,7 +25,7 @@ pub(crate) fn added_lines(added: &Added) -> [String; 2] {
              [package.metadata.skeletons.{key}] table",
             added.version
         ),
-        "now run the `sync` task to write its files".to_owned(),
+        format!("commit {manifest} and Cargo.lock, then run the `sync` task to write its files"),
     ]
 }
 
@@ -49,21 +52,24 @@ mod tests {
                 "added tidy 1.2.3 to crates/cli/Cargo.toml as the dev-dependency `neat`, with \
                  an empty [package.metadata.skeletons.neat] table"
                     .to_owned(),
-                "now run the `sync` task to write its files".to_owned(),
+                "commit crates/cli/Cargo.toml and Cargo.lock, then run the `sync` task to write \
+                 its files"
+                    .to_owned(),
             ]
         );
     }
 
     #[test]
-    fn the_first_line_prints_outside_text_on_one_line_escaped_once() {
+    fn both_lines_print_outside_text_on_one_line_escaped_once() {
         // The package name, the manifest's path and the key are all text from
-        // outside: a path can hold a newline.
+        // outside: a path can hold a newline, and the manifest is named on
+        // both lines.
         let added = added(&poison(), &poison(), &poison());
 
         let [first, second] = added_lines(&added);
 
         assert_escaped_once(&first, "the added line");
-        assert!(!second.contains('\n'), "the next-step line is one line");
+        assert_escaped_once(&second, "the next-step line");
     }
 
     #[test]

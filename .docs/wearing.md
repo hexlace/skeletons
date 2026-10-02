@@ -867,13 +867,15 @@ workspace root, then the next step.
 
 ```text
 added a-dependabot-skeleton 0.1.0 to ritual/Cargo.toml as the dev-dependency `dependabot`, with an empty [package.metadata.skeletons.dependabot] table
-now run the `sync` task to write its files
+commit ritual/Cargo.toml and Cargo.lock, then run the `sync` task to write its files
 ```
 
 The next step names the `sync` task and nothing before it: a task is never told
 the key it is mounted under, so it cannot say how its command line reaches
-`sync`. Cargo's own output is not repeated. `sync` then needs a clean work tree,
-so commit what `wear` wrote, and any option values edited into the table, first.
+`sync`. It gives the order itself: `sync` writes only into a clean work tree, so
+the line says to commit the manifest it names, and `Cargo.lock` (always at the
+workspace root), before running it. Cargo's own output is not repeated. Any
+option values edited into the table go in that commit too.
 
 **It refuses before it writes anything** when the request or the project is
 wrong, in this order, and each message ends by saying what to do. Every message

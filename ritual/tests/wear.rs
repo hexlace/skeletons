@@ -90,7 +90,7 @@ fn wearing_from_a_path_adds_the_dependency_and_an_empty_table_then_sync_and_chec
         report.stdout,
         "added passthrough-plain 0.0.0 to Cargo.toml as the dev-dependency `passthrough-plain`, \
          with an empty [package.metadata.skeletons.passthrough-plain] table\n\
-         now run the `sync` task to write its files\n",
+         commit Cargo.toml and Cargo.lock, then run the `sync` task to write its files\n",
         "wear must report what it wrote and what to run next, on stdout, as two lines"
     );
     let manifest = String::from_utf8(fixture.read("Cargo.toml")?)?;
@@ -308,6 +308,16 @@ fn wear_writes_into_the_command_lines_own_package_in_a_workspace_of_several() ->
         report.exit_code, 0,
         "wear must succeed; stderr was: {}",
         report.stderr
+    );
+    assert_eq!(
+        report.stdout,
+        "added passthrough-plain 0.0.0 to tools/cli/Cargo.toml as the dev-dependency \
+         `passthrough-plain`, with an empty [package.metadata.skeletons.passthrough-plain] \
+         table\n\
+         commit tools/cli/Cargo.toml and Cargo.lock, then run the `sync` task to write its \
+         files\n",
+        "the next step must name the manifest as the first line shows it, relative to the \
+         workspace root"
     );
     let manifest = String::from_utf8(fixture.read("tools/cli/Cargo.toml")?)?;
     assert_worn_as_a_dev_dependency(&manifest, "passthrough-plain", "passthrough-plain")?;

@@ -1482,7 +1482,9 @@ left to be found by the next `check`
 **The next step names the `sync` task alone.** A task is never told the key it
 is mounted under, so `wear` cannot say how its command line reaches `sync`, and
 the wearer recognises the subcommand on their own command line. The same holds
-for every message that asks for another run.
+for every message that asks for another run. The line opens by telling the
+wearer to commit the manifest and `Cargo.lock`, because `sync` writes only into
+a clean work tree and `wear` has just changed both.
 
 `wear` adds a skeleton and nothing takes one off: by hand that is two
 deletions, with no order to get wrong.

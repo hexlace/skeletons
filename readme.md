@@ -106,7 +106,7 @@ cargo ritual skeletons wear a-dependabot-skeleton dependabot --path ../skeletons
 
 ```text
 added a-dependabot-skeleton 0.1.0 to ritual/Cargo.toml as the dev-dependency `dependabot`, with an empty [package.metadata.skeletons.dependabot] table
-now run the `sync` task to write its files
+commit ritual/Cargo.toml and Cargo.lock, then run the `sync` task to write its files
 ```
 
 The first argument is the skeleton's crate, with a version requirement after

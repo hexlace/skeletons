@@ -38,6 +38,9 @@ exclude = ["/test-skeletons", "/src/behind/captures", "/src/workspace/fixtures"]
 
 [dependencies]
 rituals.workspace = true
+# Ritual's metadata reader and `rollback`, which `wear` writes through: see the
+# workspace manifest.
+rituals-compose.workspace = true
 # Reading `[package.metadata.skeletons]` out of a skeleton's own `Cargo.toml`. Real
 # library code, compiled into every build: `check` calls `skeleton::render` for
 # every worn skeleton.

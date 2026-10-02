@@ -1417,14 +1417,17 @@ they were, byte for byte
 `a_crate_that_is_not_a_skeleton_is_refused_after_cargo_ran_and_nothing_changes`,
 and `crates/skeletons/src/wear.rs` →
 `a_crate_that_is_not_a_skeleton_puts_the_manifest_and_lockfile_back_byte_for_byte`).
-Rollback undoes a failure and does not undo a panic, so every condition `wear`
-can find after `cargo add` is a returned failure, including the two that are
-defects in `skeletons`
+Rollback undoes a failure and does not undo a panic, so every condition the
+wearer can cause or act on, found after `cargo add`, is a returned failure,
+including the two that are defects in `skeletons`
 (`crates/skeletons/src/wear/confirm.rs` →
 `a_workspace_that_does_not_report_the_wearing_at_all_is_a_defect`, and
 `crates/skeletons/src/wear/refusal.rs` →
 `a_table_that_changed_something_else_is_called_a_defect`): a panic there would
-leave the project half-written. Rollback cannot give back a change made around
+leave the project half-written. A violated invariant is still a defect that
+panics, and a few assertions in the workspace reader and the process runner can
+be reached after `cargo add`; a panic leaves whatever was already written.
+Rollback cannot give back a change made around
 it, and does not check that a file still holds what `wear` last wrote before
 restoring the original, so git is the second undo, and a clean work tree is
 required first. That is the same whole-tree question `sync` asks, through the

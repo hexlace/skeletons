@@ -18,7 +18,7 @@ use tempfile::TempDir;
 
 use crate::git::{self, Locale};
 
-use super::work_tree::{WorkTree, open};
+use crate::work_tree::{WorkTree, open};
 
 /// A real git repository, with its own isolated `HOME` (always owned, and
 /// removed on drop). Its own working directory is either a fresh temporary
@@ -26,7 +26,7 @@ use super::work_tree::{WorkTree, open};
 /// existing directory a test already owns the cleanup of —
 /// [`TestRepository::new_at`], for a repository nested inside another
 /// [`TestRepository`]'s own tree, which must not be removed twice.
-pub(super) struct TestRepository {
+pub(crate) struct TestRepository {
     directory: PathBuf,
     _owned_directory: Option<TempDir>,
     home: TempDir,
@@ -35,7 +35,7 @@ pub(super) struct TestRepository {
 impl TestRepository {
     /// `git init`, in a fresh temporary directory this value owns, with no
     /// repository history yet.
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let directory = TempDir::new().expect("scratch repository directory");
         let path = directory.path().to_path_buf();
         Self::init(path, Some(directory))
@@ -44,7 +44,7 @@ impl TestRepository {
     /// `git init` at `directory`, an already-existing directory this
     /// value's own cleanup does not own — for a repository nested inside
     /// another [`TestRepository`]'s own working directory.
-    pub(super) fn new_at(directory: PathBuf) -> Self {
+    pub(crate) fn new_at(directory: PathBuf) -> Self {
         Self::init(directory, None)
     }
 
@@ -59,13 +59,13 @@ impl TestRepository {
         repository
     }
 
-    pub(super) fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.directory
     }
 
     /// Writes `content` at `relative`, under this repository's own root,
     /// creating parent directories as needed.
-    pub(super) fn write(&self, relative: &str, content: &[u8]) {
+    pub(crate) fn write(&self, relative: &str, content: &[u8]) {
         let full_path = self.path().join(relative);
         if let Some(parent) = full_path.parent() {
             std::fs::create_dir_all(parent).expect("create parent directories");
@@ -74,7 +74,7 @@ impl TestRepository {
     }
 
     /// `git add --all` then `git commit`.
-    pub(super) fn commit_all(&self, message: &str) {
+    pub(crate) fn commit_all(&self, message: &str) {
         self.git(&["add", "--all"]).run_ok();
         self.git(&["commit", "--quiet", "--message", message])
             .run_ok();
@@ -82,7 +82,7 @@ impl TestRepository {
 
     /// A [`Command`] builder, isolated the way this whole module's own doc
     /// comment describes, with `arguments` appended.
-    pub(super) fn git(&self, arguments: &[&str]) -> TestCommand {
+    pub(crate) fn git(&self, arguments: &[&str]) -> TestCommand {
         let mut command = git::command(Locale::Fixed);
         command
             .current_dir(self.path())
@@ -121,7 +121,7 @@ impl TestRepository {
     /// Opens this repository's own root as a [`WorkTree`] — the same call
     /// `sync`'s own orchestration makes, so `clean`'s and `proof`'s own unit
     /// tests exercise the real seam rather than a hand-built [`WorkTree`].
-    pub(super) fn work_tree(&self) -> WorkTree {
+    pub(crate) fn work_tree(&self) -> WorkTree {
         open(self.path(), |_name| false).expect("a freshly built repository must open")
     }
 
@@ -130,7 +130,7 @@ impl TestRepository {
     /// this snapshot is proving) — the mechanism behind design.md's guarantee
     /// that none of the git commands `sync` runs writes git's own index,
     /// refs, config or object database.
-    pub(super) fn snapshot_dot_git(&self) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    pub(crate) fn snapshot_dot_git(&self) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
         let mut snapshot = std::collections::BTreeMap::new();
         let root = self.path().join(".git");
         let mut pending = vec![root.clone()];
@@ -174,7 +174,7 @@ impl TestRepository {
 /// Never prints a file's bytes. Asserting two whole snapshots equal dumps
 /// every file's contents, which is enough output to cut a CI log off before
 /// it reaches the path that differs.
-pub(super) fn describe_difference(
+pub(crate) fn describe_difference(
     before: &BTreeMap<PathBuf, Vec<u8>>,
     after: &BTreeMap<PathBuf, Vec<u8>>,
 ) -> String {
@@ -212,7 +212,7 @@ pub(super) fn describe_difference(
 /// needs — never the contract `clean`/`proof`'s own production code reads
 /// (that goes through [`crate::subprocess::run`], exercised through
 /// [`TestRepository::work_tree`] instead).
-pub(super) struct TestCommand {
+pub(crate) struct TestCommand {
     command: Command,
 }
 
@@ -220,7 +220,7 @@ impl TestCommand {
     /// Runs the command, panicking with its own stdout and stderr if it did
     /// not exit successfully — fixture setup has no contract of its own to
     /// assert on, so a failure here is this test's own fixture being wrong.
-    pub(super) fn run_ok(mut self) {
+    pub(crate) fn run_ok(mut self) {
         let output = self.command.output().expect("git must be runnable");
         assert!(
             output.status.success(),
@@ -234,14 +234,14 @@ impl TestCommand {
     /// Runs the command, returning its raw `Output` regardless of whether it
     /// exited successfully — for fixture steps whose own point is a
     /// non-zero exit (a deliberately conflicted merge, in particular).
-    pub(super) fn run_allow_failure(mut self) -> std::process::Output {
+    pub(crate) fn run_allow_failure(mut self) -> std::process::Output {
         self.command.output().expect("git must be runnable")
     }
 
     /// Runs the command, panicking on a non-zero exit, and returns its own
     /// stdout, trimmed — for a fixture step whose whole point is reading
     /// back a value git printed (an object id, in particular).
-    pub(super) fn output_ok(mut self) -> String {
+    pub(crate) fn output_ok(mut self) -> String {
         let output = self.command.output().expect("git must be runnable");
         assert!(
             output.status.success(),

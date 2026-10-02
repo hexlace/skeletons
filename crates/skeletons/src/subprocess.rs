@@ -149,8 +149,8 @@ enum SubprocessErrorKind {
 impl SubprocessError {
     /// Whether this command was killed for running past its own timeout.
     ///
-    /// `sync` reads it to say a git command timed out rather than could not
-    /// be run (`sync::work_tree::run_local`), since the two ask the wearer for
+    /// The commands that write read it to say a git command timed out rather
+    /// than could not be run (`work_tree::run_local`), since the two ask the wearer for
     /// different things. `behind`'s git remote queries do set
     /// [`Limits::timeout`], but they report a failed query by its `Display`
     /// text alone, which reads the same as any other reason a query could not

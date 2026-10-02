@@ -22,15 +22,12 @@
 //! A file read back after the commit that no longer holds what `sync` wrote
 //! is reported as changed, with its path, and never a panic.
 
-mod abort;
-mod clean;
 mod fold_variant;
 mod index_entry;
 mod message;
 mod proof;
 #[cfg(test)]
-mod test_repository;
-mod work_tree;
+pub(crate) mod test_repository;
 mod write;
 
 use std::path::Path;
@@ -39,6 +36,11 @@ use rituals::{Failure, Outcome, Task, clap, report as write_report};
 
 use crate::check::{AbortingCommand, WEARS_NOTHING_LINE, abort_message};
 use crate::survey::survey;
+use crate::work_tree;
+use crate::work_tree::abort::WorkTreeAbort;
+use crate::work_tree::clean::{self, Cleanliness};
+use crate::work_tree::message::{dirty_summary, report_dirty};
+use crate::work_tree::writing_command::WritingCommand;
 use crate::workspace::{self, Network};
 
 // `sync` takes no arguments.
@@ -140,20 +142,22 @@ fn prove_writes(
     // `ritual/tests/sync_worktree.rs` →
     // `sync_in_a_pre_commit_hook_with_every_bone_matching_needs_no_git_and_exits_zero`.
     let opened_work_tree = work_tree::open(root, |name| std::env::var_os(name).is_some())
-        .map_err(|abort| Failure::new(message::sync_abort_message(&abort, root)))?;
+        .map_err(|abort| aborted(&abort, root))?;
 
-    let clean = match clean::check_clean(&opened_work_tree)
-        .map_err(|abort| Failure::new(message::sync_abort_message(&abort, root)))?
-    {
-        clean::Cleanliness::Clean(clean) => clean,
-        clean::Cleanliness::Dirty(dirty) => {
-            message::report_dirty(&dirty);
-            return Err(Failure::new(message::dirty_summary(dirty.len())));
-        }
-    };
+    let clean =
+        match clean::check_clean(&opened_work_tree).map_err(|abort| aborted(&abort, root))? {
+            Cleanliness::Clean(clean) => clean,
+            Cleanliness::Dirty(dirty) => {
+                report_dirty(&dirty);
+                return Err(Failure::new(dirty_summary(
+                    dirty.len(),
+                    WritingCommand::Sync,
+                )));
+            }
+        };
 
     let proven_writes = match proof::prove(&opened_work_tree, &clean, writes)
-        .map_err(|abort| Failure::new(message::sync_abort_message(&abort, root)))?
+        .map_err(|abort| aborted(&abort, root))?
     {
         proof::Proven::All(proven_writes) => proven_writes,
         proof::Proven::Refused(unproven) => {
@@ -163,4 +167,14 @@ fn prove_writes(
     };
 
     Ok(proven_writes)
+}
+
+/// The failure for a git question `sync` could not even ask, in `sync`'s own
+/// words.
+fn aborted(abort: &WorkTreeAbort, root: &Path) -> Failure {
+    Failure::new(work_tree::message::abort_message(
+        abort,
+        root,
+        WritingCommand::Sync,
+    ))
 }

@@ -21,7 +21,7 @@
 //!
 //! "Rule (a)" and "rule (b)" throughout this module are the two conditions
 //! `.docs/design.md` sets out for a write: (a) "The whole work tree is clean",
-//! checked in [`super::clean`], and (b) "Positive proof, per path", which this
+//! checked in [`crate::work_tree::clean`], and (b) "Positive proof, per path", which this
 //! module establishes.
 
 mod above;
@@ -32,12 +32,12 @@ use crate::claim::{ClaimPath, DriftReason, OnDisk, UnsafePathCause, resolve};
 use crate::git::{self, Locale, ObjectId};
 use crate::subprocess::Truncated;
 
-use super::abort::{GitQuestion, SyncAbort};
-use super::clean::CleanWorkTree;
 use super::fold_variant::{FoldVariant, fold_variants};
 use super::index_entry::{IndexRecord, IndexTag, parse_ls_files_tagged};
-use super::work_tree::{WorkTree, run_local};
 use super::write::Write;
+use crate::work_tree::abort::{GitQuestion, WorkTreeAbort};
+use crate::work_tree::clean::CleanWorkTree;
+use crate::work_tree::{WorkTree, run_local};
 
 /// A drifted write `sync` may actually perform: nothing is at its path, or
 /// git's index holds exactly what is there. The fields are private; only
@@ -305,7 +305,7 @@ pub(crate) fn prove(
     work_tree: &WorkTree,
     _clean: &CleanWorkTree,
     writes: Vec<Write>,
-) -> Result<Proven, SyncAbort> {
+) -> Result<Proven, WorkTreeAbort> {
     let claims: Vec<&ClaimPath> = writes.iter().map(|write| &write.path).collect();
     let index_paths = listing::index_listing(work_tree, &claims)?;
     let variants_per_write = fold_variants(&index_paths, &claims);
@@ -373,7 +373,7 @@ pub(crate) fn prove(
 /// refusal can say whether there is one checkout to bring the file back to
 /// ([`why_not_the_checkout`]); that second question is asked only on the
 /// refusal path.
-fn prove_one(work_tree: &WorkTree, write: &Write) -> Result<Result<Evidence, Why>, SyncAbort> {
+fn prove_one(work_tree: &WorkTree, write: &Write) -> Result<Result<Evidence, Why>, WorkTreeAbort> {
     let target = write.path.to_path(work_tree.root());
     match std::fs::symlink_metadata(&target) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -477,7 +477,10 @@ fn why_not_the_checkout(first: &[u8], second: Result<Vec<u8>, Why>) -> Why {
 /// and `ritual/tests/sync_free_paths.rs` →
 /// `a_path_git_hides_under_another_case_is_refused_not_created` and →
 /// `a_path_git_hides_under_a_directory_of_another_case_is_refused_not_created`.
-fn prove_absent(work_tree: &WorkTree, write: &Write) -> Result<Result<Evidence, Why>, SyncAbort> {
+fn prove_absent(
+    work_tree: &WorkTree,
+    write: &Write,
+) -> Result<Result<Evidence, Why>, WorkTreeAbort> {
     if matches!(write.reason, DriftReason::Changed) {
         return Ok(Err(Why::ChangedSinceSurvey));
     }
@@ -508,7 +511,7 @@ fn prove_absent(work_tree: &WorkTree, write: &Write) -> Result<Result<Evidence, 
 fn index_records_for(
     work_tree: &WorkTree,
     path: &ClaimPath,
-) -> Result<Result<Vec<IndexRecord>, Why>, SyncAbort> {
+) -> Result<Result<Vec<IndexRecord>, Why>, WorkTreeAbort> {
     let mut ls_files = work_tree.git(Locale::Fixed);
     ls_files.args(["ls-files", "-v", "--stage", "-z", "--", path.as_str()]);
     run_ls_files(ls_files, GitQuestion::IndexEntry(path.clone()))
@@ -538,7 +541,7 @@ fn index_records_for(
 fn absent_index_records_for(
     work_tree: &WorkTree,
     path: &ClaimPath,
-) -> Result<Result<Vec<IndexRecord>, Why>, SyncAbort> {
+) -> Result<Result<Vec<IndexRecord>, Why>, WorkTreeAbort> {
     let mut ls_files = work_tree.git_for_pathspec_magic(Locale::Fixed);
     ls_files.args([
         "ls-files",
@@ -557,7 +560,7 @@ fn absent_index_records_for(
 fn run_ls_files(
     ls_files: std::process::Command,
     question: GitQuestion,
-) -> Result<Result<Vec<IndexRecord>, Why>, SyncAbort> {
+) -> Result<Result<Vec<IndexRecord>, Why>, WorkTreeAbort> {
     let finished = run_local(ls_files, question)?;
     Ok(classify_ls_files(
         finished.success(),
@@ -666,7 +669,7 @@ fn checkout_bytes_for(
     work_tree: &WorkTree,
     path: &ClaimPath,
     object: &ObjectId,
-) -> Result<Result<Vec<u8>, Why>, SyncAbort> {
+) -> Result<Result<Vec<u8>, Why>, WorkTreeAbort> {
     let mut cat_file = work_tree.git(Locale::Inherited);
     cat_file.env("GIT_NO_LAZY_FETCH", "1");
     cat_file.args([
@@ -732,9 +735,9 @@ fn disk_bytes_equal(work_tree: &WorkTree, path: &ClaimPath, checkout: &[u8]) -> 
 #[cfg(test)]
 mod tests {
     use crate::claim::ClaimPath;
-    use crate::sync::abort::SyncAbort;
-    use crate::sync::clean::{Cleanliness, Dirt, check_clean};
     use crate::sync::test_repository::{TestRepository, describe_difference};
+    use crate::work_tree::abort::WorkTreeAbort;
+    use crate::work_tree::clean::{Cleanliness, Dirt, check_clean};
 
     use crate::subprocess::Truncated;
 
@@ -767,8 +770,8 @@ mod tests {
     ) -> Result<Evidence, Why> {
         let work_tree = repository.work_tree();
         let clean = match check_clean(&work_tree).expect("status must run") {
-            crate::sync::clean::Cleanliness::Clean(clean) => clean,
-            crate::sync::clean::Cleanliness::Dirty(dirty) => {
+            crate::work_tree::clean::Cleanliness::Clean(clean) => clean,
+            crate::work_tree::clean::Cleanliness::Dirty(dirty) => {
                 panic!("fixture must be clean going into prove: {dirty:?}")
             }
         };
@@ -1396,8 +1399,8 @@ mod tests {
     /// state ever reaches them: replacing a committed symlink or gitlink
     /// with a regular file — even one whose bytes happen to hash equal —
     /// is a type change (`git status --porcelain=v2` reports it `.T`), which
-    /// `sync::clean`'s own parser reads as `Dirt::Unstaged` (tested by
-    /// `crates/skeletons/src/sync/clean.rs` →
+    /// `work_tree::clean`'s own parser reads as `Dirt::Unstaged` (tested by
+    /// `crates/skeletons/src/work_tree/clean.rs` →
     /// `a_type_change_with_a_blank_index_column_is_read_as_unstaged`), so
     /// rule (a) always refuses first in a real run. These two are
     /// exercised by a hand-crafted index entry (`update-index --cacheinfo`)
@@ -1405,8 +1408,8 @@ mod tests {
     /// [`CleanWorkTree::assume_clean_for_test`] standing in for rule (a)
     /// having already run.
     mod mode_checks_unreachable_from_a_clean_tree {
-        use crate::sync::clean::CleanWorkTree;
         use crate::sync::test_repository::TestRepository;
+        use crate::work_tree::clean::CleanWorkTree;
 
         use super::super::{Proven, Why, prove};
         use super::write;
@@ -1696,7 +1699,7 @@ mod tests {
         let error = check_clean(&work_tree).expect_err("a failing required filter must abort");
         assert!(matches!(
             error,
-            SyncAbort::GitFailed {
+            WorkTreeAbort::GitFailed {
                 command: "status",
                 ..
             }

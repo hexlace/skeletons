@@ -14,7 +14,7 @@
 //! text from a claim, so nothing a claim spells can change what they match.
 //!
 //! The listing is read whole or not at all, like every git answer here. One
-//! past the cap is refused as [`SyncAbort::GitOutputTooLarge`] rather than
+//! past the cap is refused as [`WorkTreeAbort::GitOutputTooLarge`] rather than
 //! searched in part, since a variant in the part that was cut off is exactly
 //! the one that would be missed.
 
@@ -24,8 +24,8 @@ use crate::claim::ClaimPath;
 use crate::git::{self, Locale};
 use crate::subprocess::Truncated;
 
-use super::super::abort::{GitQuestion, SyncAbort};
-use super::super::work_tree::{WorkTree, run_local};
+use crate::work_tree::abort::{GitQuestion, WorkTreeAbort};
+use crate::work_tree::{WorkTree, run_local};
 
 /// The paths of every index entry at depth 1 through the deepest of `writes`,
 /// NUL-separated as `ls-files -z` prints them. Empty for no writes.
@@ -36,7 +36,7 @@ use super::super::work_tree::{WorkTree, run_local};
 pub(super) fn index_listing(
     work_tree: &WorkTree,
     writes: &[&ClaimPath],
-) -> Result<Vec<u8>, SyncAbort> {
+) -> Result<Vec<u8>, WorkTreeAbort> {
     let Some(deepest) = writes.iter().map(|claim| claim.depth()).max() else {
         return Ok(Vec::new());
     };
@@ -64,14 +64,14 @@ fn classify_listing(
     exit_ok: bool,
     stdout: Result<&[u8], Truncated>,
     stderr: &[u8],
-) -> Result<Vec<u8>, SyncAbort> {
+) -> Result<Vec<u8>, WorkTreeAbort> {
     if !exit_ok {
-        return Err(SyncAbort::GitFailed {
+        return Err(WorkTreeAbort::GitFailed {
             command: "ls-files",
             diagnostic: git::diagnostic(stderr),
         });
     }
-    let stdout = stdout.map_err(|_truncated| SyncAbort::GitOutputTooLarge {
+    let stdout = stdout.map_err(|_truncated| WorkTreeAbort::GitOutputTooLarge {
         command: "ls-files",
     })?;
     Ok(stdout.to_vec())
@@ -80,7 +80,7 @@ fn classify_listing(
 #[cfg(test)]
 mod tests {
     use crate::subprocess::Truncated;
-    use crate::sync::abort::SyncAbort;
+    use crate::work_tree::abort::WorkTreeAbort;
 
     use super::classify_listing;
 
@@ -92,7 +92,7 @@ mod tests {
             .expect_err("a truncated listing must be refused");
         assert!(matches!(
             refused,
-            SyncAbort::GitOutputTooLarge {
+            WorkTreeAbort::GitOutputTooLarge {
                 command: "ls-files"
             }
         ));
@@ -106,7 +106,7 @@ mod tests {
     fn a_failed_listing_names_git_s_own_detail() {
         let refused = classify_listing(false, Ok(b"partial"), b"fatal: bad index file\n")
             .expect_err("a non-zero exit must be refused");
-        let SyncAbort::GitFailed {
+        let WorkTreeAbort::GitFailed {
             command,
             diagnostic,
         } = refused

@@ -29,6 +29,7 @@ mod skeleton;
 mod subprocess;
 mod survey;
 mod sync;
+mod work_tree;
 mod workspace;
 
 // Tests for `skeleton::render`, read from real skeleton crates under

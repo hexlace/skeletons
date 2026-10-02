@@ -1,5 +1,5 @@
-//! Why `sync` could not even ask git the questions it needs answered before
-//! it writes anything.
+//! Why a command that writes could not even ask git the questions it needs
+//! answered before it writes anything.
 
 use crate::claim::ClaimPath;
 
@@ -24,12 +24,12 @@ pub(crate) enum GitQuestion {
     Ignored(ClaimPath),
 }
 
-/// Why `sync` could not establish either rule (a) (the whole work tree is
+/// Why a writing command could not establish either rule (a) (the whole work tree is
 /// clean) or rule (b) (positive proof per path) at all — as opposed to
-/// either rule answering "no", which is a refusal `sync` reports in full
+/// either rule answering "no", which is a refusal the command reports in full
 /// (dirty paths, or unproven ones), not an abort.
 #[derive(Debug)]
-pub(crate) enum SyncAbort {
+pub(crate) enum WorkTreeAbort {
     /// One or more of the variables that redirect which repository, work
     /// tree, index, object store or attribute source git answers from is
     /// set in this process's own environment.
@@ -37,8 +37,8 @@ pub(crate) enum SyncAbort {
     /// `git rev-parse --is-inside-work-tree` exited zero with an answer
     /// other than `true`, or exited non-zero saying the directory is not a
     /// git repository. Any other non-zero exit is
-    /// [`SyncAbort::DubiousOwnership`] or [`SyncAbort::GitFailed`], and an
-    /// answer too large to read is [`SyncAbort::GitOutputTooLarge`].
+    /// [`WorkTreeAbort::DubiousOwnership`] or [`WorkTreeAbort::GitFailed`], and an
+    /// answer too large to read is [`WorkTreeAbort::GitOutputTooLarge`].
     NotAWorkTree,
     /// git refused to read the repository at all because another user owns
     /// it (`safe.directory`).
@@ -50,7 +50,7 @@ pub(crate) enum SyncAbort {
     /// another process holding git's index, or a slow filesystem can each
     /// cause it.
     GitTimedOut { question: GitQuestion },
-    /// A git command ran and exited non-zero, for a reason `sync` does not
+    /// A git command ran and exited non-zero, for a reason the command does not
     /// otherwise recognise.
     GitFailed {
         command: &'static str,

@@ -814,7 +814,7 @@ or change inside a submodule. Ignored files do not count. The status
 question is asked under flags that defeat configuration that would
 otherwise hide dirt from a plain `git status`
 (`status.showUntrackedFiles`, `diff.ignoreSubmodules`,
-`submodule.<name>.ignore`; `crates/skeletons/src/sync/clean.rs` →
+`submodule.<name>.ignore`; `crates/skeletons/src/work_tree/clean.rs` →
 `status_show_untracked_files_no_does_not_hide_an_untracked_file` and →
 `a_submodule_edit_is_dirty_even_under_ignore_all_configuration`). A file
 merely deleted in the work tree still counts as dirty — the whole-tree
@@ -1057,9 +1057,9 @@ that takes the stream as `Result<&[u8], Truncated>`, so a stream that ran
 past its cap cannot be reached as bytes without handling that
 (`crates/skeletons/src/subprocess.rs` → `stdout`); a unit test hands each
 one a truncated stream and the same bytes uncut
-(`crates/skeletons/src/sync/work_tree.rs` →
+(`crates/skeletons/src/work_tree.rs` →
 `truncated_stdout_reads_as_git_output_too_large`, →
-`crates/skeletons/src/sync/clean.rs` →
+`crates/skeletons/src/work_tree/clean.rs` →
 `truncated_status_stdout_reads_as_git_output_too_large_never_clean`, →
 `crates/skeletons/src/sync/proof.rs` →
 `truncated_ls_files_stdout_reads_as_output_too_large`, →
@@ -1076,9 +1076,9 @@ it up, and how to find out. A `cat-file` names the content filter the
 repository configures for the path and `git check-attr filter`, which names it;
 a `status` names a filter or a slow filesystem and says to run it by hand; an
 `ls-files` names another process holding git's index, and a `check-ignore`
-names a slow filesystem (`crates/skeletons/src/sync/work_tree.rs` →
+names a slow filesystem (`crates/skeletons/src/work_tree.rs` →
 `a_command_killed_for_running_too_long_is_a_timeout_naming_the_question`,
-`crates/skeletons/src/sync/message/timed_out.rs` →
+`crates/skeletons/src/work_tree/message/timed_out.rs` →
 `a_checkout_that_timed_out_names_the_path_the_command_and_the_filter`, and
 `ritual/tests/sync_messages.rs` →
 `a_content_filter_that_times_out_is_named_with_its_path_command_and_a_remedy`).
@@ -1092,7 +1092,7 @@ is set in its own environment, whatever its value — each one redirects
 which repository, work tree, index, object store or attribute source git
 would actually answer about, so a `sync` that ran anyway could be checking
 one repository and writing into another
-(`crates/skeletons/src/sync/work_tree.rs` → `open`, called once there is
+(`crates/skeletons/src/work_tree.rs` → `open`, called once there is
 something to write and before either rule is asked). The refusal exists
 because inside `git commit <paths>` or `git commit -a` the index git is
 using may be a temporary one, and a file written mid-commit is not part of

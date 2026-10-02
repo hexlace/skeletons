@@ -10,7 +10,7 @@ use crate::claim::ClaimPath;
 /// Variables that redirect which repository, work tree, index, object
 /// store, or attribute source git answers from (git(1), "The Git
 /// Repository"; every variable it lists there was audited against captured
-/// behaviour). `sync::work_tree::open` refuses outright, naming the
+/// behaviour). `work_tree::open` refuses outright, naming the
 /// variable, when any of these is set — before running git at all — and
 /// [`command`] removes every one of them anyway (the refusal is the first
 /// line of defence, this removal the second, tested by

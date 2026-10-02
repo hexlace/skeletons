@@ -188,7 +188,7 @@ fn a_submodule_edit_at_a_claimed_path_is_refused_and_content_preserved() -> supp
     // repository before git is asked anything. The whole-tree question
     // (rule (a), "The whole work tree is clean", in `.docs/design.md`) that a
     // submodule edit is dirty even under `ignore=all` is pinned on its own, in
-    // `crates/skeletons/src/sync/clean.rs`, where no claim walk stands in front
+    // `crates/skeletons/src/work_tree/clean.rs`, where no claim walk stands in front
     // of it.
     assert_refused_naming(
         &report,

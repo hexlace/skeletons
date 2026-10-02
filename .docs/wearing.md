@@ -953,10 +953,21 @@ and, like every message in this document, prints text from outside escaped.
   `tidy` is taken in ritual/Cargo.toml: its dependency on lint-skeleton is declared under `tidy`; give the `wear` task another key as its second argument
   ```
 - the manifest already has a wearing table at the key, with no dependency under
-  it. A table is matched exactly, as `sync` reads it:
+  it. A table at exactly the key is this one, as `sync` reads a table:
 
   ```text
   ritual/Cargo.toml already has a [package.metadata.skeletons.dependabot] table, with no dependency declared under `dependabot`; remove the table, or give the `wear` task another key as its second argument
+  ```
+- the manifest has a wearing table at another spelling of the key, which `rustc`
+  takes as the same name (`ab_cd` for `ab-cd`), and no dependency under either.
+  Writing the key would leave two tables for one key, which `sync` refuses, so
+  `wear` names the table as the manifest spells it. The one remedy is to remove
+  it, since another key would leave it where `check` refuses it. If several
+  spellings are there, the first in key order is named, and running again after
+  removing it names the next:
+
+  ```text
+  ritual/Cargo.toml already has a [package.metadata.skeletons.dependabot_x] table, which is `dependabot-x` to rustc; remove [package.metadata.skeletons.dependabot_x], which names no dependency, then run the `wear` task again
   ```
 - the work tree is not clean, or git cannot be asked. This is the question
   `sync` asks (see [Sync](#sync)), with the whole tree counted, asked last so a

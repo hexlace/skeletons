@@ -93,6 +93,13 @@ pub(crate) enum WearRefusal {
     ParentNotATable { manifest: String, parent: Parent },
     /// The manifest already has a wearing table for the key.
     TableWithoutDependency { manifest: String, key: String },
+    /// The manifest has a wearing table at another spelling of the key, which
+    /// `rustc` takes as the same name.
+    TableAtOtherSpelling {
+        manifest: String,
+        table: String,
+        key: String,
+    },
     /// The wearing table written differs from the one meant, or changes
     /// something else in the manifest, for the reason `detail` gives.
     //
@@ -166,6 +173,11 @@ impl WearRefusal {
             Self::TableWithoutDependency { manifest, key } => {
                 table_without_dependency_message(manifest, key)
             }
+            Self::TableAtOtherSpelling {
+                manifest,
+                table,
+                key,
+            } => table_at_other_spelling_message(manifest, table, key),
             Self::TableDefect {
                 manifest,
                 key,
@@ -294,6 +306,15 @@ fn table_without_dependency_message(manifest: &str, key: &str) -> String {
     )
 }
 
+fn table_at_other_spelling_message(manifest: &str, table: &str, key: &str) -> String {
+    let (manifest, table, key) = (Escaped(manifest), Escaped(table), Escaped(key));
+    format!(
+        "{manifest} already has a [package.metadata.skeletons.{table}] table, which is `{key}` \
+         to rustc; remove [package.metadata.skeletons.{table}], which names no dependency, then \
+         run the `wear` task again"
+    )
+}
+
 fn table_defect_message(manifest: &str, key: &str, detail: &str) -> String {
     let (manifest, key, detail) = (Escaped(manifest), Escaped(key), Escaped(detail));
     format!(
@@ -332,7 +353,7 @@ mod tests {
     /// How many kinds of [`WearRefusal`] there are. The match in [`kind`] has
     /// no wildcard, so a kind added without an arm does not compile, and
     /// [`samples`] must then cover it.
-    const KINDS: usize = 18;
+    const KINDS: usize = 19;
 
     const fn kind(refusal: &WearRefusal) -> usize {
         match refusal {
@@ -351,9 +372,10 @@ mod tests {
             WearRefusal::ManifestUnreadable { .. } => 12,
             WearRefusal::ParentNotATable { .. } => 13,
             WearRefusal::TableWithoutDependency { .. } => 14,
-            WearRefusal::TableDefect { .. } => 15,
-            WearRefusal::NotConfirmed { .. } => 16,
-            WearRefusal::NotReported { .. } => 17,
+            WearRefusal::TableAtOtherSpelling { .. } => 15,
+            WearRefusal::TableDefect { .. } => 16,
+            WearRefusal::NotConfirmed { .. } => 17,
+            WearRefusal::NotReported { .. } => 18,
         }
     }
 
@@ -409,6 +431,11 @@ mod tests {
             },
             WearRefusal::TableWithoutDependency {
                 manifest: poison(),
+                key: poison(),
+            },
+            WearRefusal::TableAtOtherSpelling {
+                manifest: poison(),
+                table: poison(),
                 key: poison(),
             },
             WearRefusal::TableDefect {
@@ -639,6 +666,20 @@ mod tests {
             "Cargo.toml already has a [package.metadata.skeletons.tidy] table, with no \
              dependency declared under `tidy`; remove the table, or give the `wear` task \
              another key as its second argument"
+        );
+    }
+
+    #[test]
+    fn a_wearing_table_at_the_other_spelling_says_to_remove_it() {
+        assert_eq!(
+            only(&WearRefusal::TableAtOtherSpelling {
+                manifest: "Cargo.toml".to_owned(),
+                table: "ab_cd".to_owned(),
+                key: "ab-cd".to_owned(),
+            }),
+            "Cargo.toml already has a [package.metadata.skeletons.ab_cd] table, which is \
+             `ab-cd` to rustc; remove [package.metadata.skeletons.ab_cd], which names no \
+             dependency, then run the `wear` task again"
         );
     }
 

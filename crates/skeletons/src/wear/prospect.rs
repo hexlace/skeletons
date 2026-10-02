@@ -23,7 +23,8 @@ use crate::workspace::{
 /// 4. a dependency on this skeleton's crate under any key, which is not worn,
 ///    in any dependency table, with a wearing table at its key or without;
 /// 5. a key a dependency on another crate already holds;
-/// 6. a wearing table at the key with no dependency under it.
+/// 6. a wearing table at the key with no dependency under it, or one at
+///    another spelling of the key.
 ///
 /// A dependency's key, and the crate it is on, are compared as `rustc` names
 /// them, with `-` and `_` the same, because two dependencies that differ only
@@ -145,7 +146,14 @@ fn is_the_skeleton(request: &Request, declared: &Declared) -> bool {
 }
 
 /// A wearing table already at the key, which `wear` would have to overwrite or
-/// adopt: it does neither.
+/// adopt: it does neither. Or one at another spelling of the key, which
+/// `rustc` takes as the same name: `wear` would write a second table beside
+/// it, and `sync` would refuse the pair.
+///
+/// A table at exactly the key is said as it always was, with the choice of
+/// another key. A table at another spelling is said with one remedy, removing
+/// it: a different key would leave the stray table, which `check` refuses
+/// anyway.
 fn refuse_table_without_dependency(request: &Request, member: &Member) -> Result<(), WearRefusal> {
     match &member.skeletons {
         SkeletonsTable::Keys(keys) if keys.contains(request.key().as_str()) => {
@@ -154,7 +162,21 @@ fn refuse_table_without_dependency(request: &Request, member: &Member) -> Result
                 key: request.key().as_str().to_owned(),
             })
         }
-        SkeletonsTable::Keys(_) | SkeletonsTable::Absent | SkeletonsTable::NotATable => Ok(()),
+        SkeletonsTable::Keys(keys) => {
+            // One is enough to name: the keys come in sorted order, and
+            // removing the one named and running again names the next.
+            let other = keys
+                .iter()
+                .find(|table| underscored(table) == request.key().underscored());
+            other.map_or(Ok(()), |table| {
+                Err(WearRefusal::TableAtOtherSpelling {
+                    manifest: member.manifest.clone(),
+                    table: table.clone(),
+                    key: request.key().as_str().to_owned(),
+                })
+            })
+        }
+        SkeletonsTable::Absent | SkeletonsTable::NotATable => Ok(()),
     }
 }
 
@@ -623,10 +645,58 @@ mod tests {
     }
 
     #[test]
-    fn a_table_key_is_matched_exactly_not_by_its_underscored_form() {
-        // Tables are named as `sync` reads them, which is exactly: only a
-        // dependency's name is folded, because only that is `rustc`'s.
-        let prospect = prospect(Vec::new(), Vec::new(), keys(&["a_x"]));
+    fn a_wearing_table_at_the_other_spelling_of_the_key_is_refused_naming_it_as_written() {
+        // `a_x` and `a-x` are one name to rustc, so a table at either is a
+        // table for the key asked for at the other, in either direction.
+        for (table, asked) in [("a_x", "a-x"), ("a-x", "a_x")] {
+            let prospect = prospect(Vec::new(), Vec::new(), keys(&[table]));
+
+            assert_eq!(
+                check(&request("tidy", Some(asked)), &prospect, "cli"),
+                Err(WearRefusal::TableAtOtherSpelling {
+                    manifest: "Cargo.toml".to_owned(),
+                    table: table.to_owned(),
+                    key: asked.to_owned(),
+                }),
+                "table {table} against {asked}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_table_at_exactly_the_key_is_still_the_table_without_a_dependency() {
+        // The exact spelling keeps its own refusal, even when a table at
+        // another spelling is there too.
+        let prospect = prospect(Vec::new(), Vec::new(), keys(&["a_x", "a-x"]));
+
+        assert_eq!(
+            check(&request("tidy", Some("a-x")), &prospect, "cli"),
+            Err(WearRefusal::TableWithoutDependency {
+                manifest: "Cargo.toml".to_owned(),
+                key: "a-x".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn the_first_of_several_other_spellings_is_the_one_named() {
+        // `a_b-c` and `a-b_c` are both other spellings of `a-b-c`; the keys
+        // are sorted, so `a-b_c` comes first.
+        let prospect = prospect(Vec::new(), Vec::new(), keys(&["a_b-c", "a-b_c"]));
+
+        assert_eq!(
+            check(&request("tidy", Some("a-b-c")), &prospect, "cli"),
+            Err(WearRefusal::TableAtOtherSpelling {
+                manifest: "Cargo.toml".to_owned(),
+                table: "a-b_c".to_owned(),
+                key: "a-b-c".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_table_that_differs_by_more_than_the_hyphen_is_no_obstacle() {
+        let prospect = prospect(Vec::new(), Vec::new(), keys(&["a_xy", "A_x"]));
 
         assert_eq!(
             check(&request("tidy", Some("a-x")), &prospect, "cli"),

@@ -1500,7 +1500,12 @@ compiler (`crates/skeletons/src/wear/prospect.rs` →
 `a_hyphen_and_an_underscore_collide_because_rustc_names_them_alike`), and a
 dependency under a target-specific table holds its key like any other
 (`crates/skeletons/src/wear/prospect.rs` →
-`a_target_specific_dependency_holds_its_key_like_any_other`). The work tree is
+`a_target_specific_dependency_holds_its_key_like_any_other`). A wearing table
+is compared the same way: one at another spelling of the key is refused, since
+`wear` would write a second table beside it and `sync` would refuse the pair
+(`crates/skeletons/src/wear/prospect.rs` →
+`a_wearing_table_at_the_other_spelling_of_the_key_is_refused_naming_it_as_written`).
+The work tree is
 asked last, so a request that is wrong is refused as wrong whether or not the
 tree is clean.
 

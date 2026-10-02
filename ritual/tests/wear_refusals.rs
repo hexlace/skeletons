@@ -664,3 +664,29 @@ fn a_read_only_manifest_is_refused_before_anything_is_written() -> TestOutcome {
 fn a_read_only_lockfile_is_refused_before_anything_is_written() -> TestOutcome {
     assert_a_read_only_file_is_refused("Cargo.lock")
 }
+
+#[test]
+fn a_wearing_table_at_the_other_spelling_of_the_key_is_refused_and_nothing_changes() -> TestOutcome
+{
+    // The manifest has `[package.metadata.skeletons.ab_cd]` and no dependency
+    // under either spelling. To rustc `ab_cd` and `ab-cd` are one name, so
+    // wearing `ab-cd` would leave two tables for one key, and `sync` would
+    // refuse the pair. `wear` must see the table at the other spelling, name
+    // it as it is spelled in the manifest, before `cargo add` has run, and
+    // leave everything as it was.
+    let fixture = fixture_for_wearing(&wearing_table("ab_cd", ""))?;
+    let before = ManifestAndLockfile::read(&fixture, "Cargo.toml")?;
+    let path = skeleton_path("passthrough-plain")?;
+
+    let report = fixture.run(&["skeletons", "wear", "ab-cd", "--path", &path])?;
+
+    assert_refused_and_untouched(
+        &fixture,
+        &report,
+        "Cargo.toml already has a [package.metadata.skeletons.ab_cd] table, which is `ab-cd` to \
+         rustc; remove [package.metadata.skeletons.ab_cd], which names no dependency, then run \
+         the `wear` task again",
+        &before,
+        "Cargo.toml",
+    )
+}

@@ -15,9 +15,9 @@
 #   deny     — cargo deny check: advisories, licences, bans and sources, as
 #              `deny.toml` sets them; weekly, advisories alone
 #
-# Nothing here `needs` anything else, and nothing caches: a cold build is fast
-# enough that a shared cache's invalidation and poisoning risks cost more than
-# it saves.
+# Nothing here `needs` anything else, and nothing caches: no job restores a
+# cache, so none starts from anything an earlier run left behind, stale or
+# poisoned.
 #
 # clippy and test run on both supported platforms because they see different
 # code: a `cfg(target_os)` item is linted only where it compiles, and each

@@ -50,10 +50,12 @@ it is current, behind a newer version, permanently pinned, or that could
 not be determined. `sync` writes every drifted bone's file back to match,
 refusing outright unless the work tree is clean and every file it would
 replace is exactly what git would check out (see
-[Check, behind and sync](#check-behind-and-sync)). See
+[Check, behind and sync](#check-behind-and-sync)). `wear` is how a repository
+starts: it adds a skeleton as a dependency and writes the empty wearing table
+that makes it worn, and leaves the files to `sync` (see [Wear](#wear)). See
 [wearing.md](wearing.md) for the wearer's own reference:
-the wearing table, where bones land, `check` and `sync`'s own output, and
-every way either can refuse.
+the wearing table, `wear`, where bones land, `check` and `sync`'s own output,
+and every way each can refuse.
 
 ## A skeleton is a set of claims about a repository
 
@@ -110,6 +112,11 @@ version, `check` shows which files it changes, and `sync` makes them match.
 Drift arrives the way any dependency update does, as a version bump someone
 chooses to take, never as a change that reached into a repository on its
 own.
+
+`wear` keeps to that. It writes the dependency by running `cargo add`, so
+Cargo's own sources and version grammar apply, and the only thing it adds of
+its own is the empty wearing table beside it. Each repository still ends with
+its own dependency line, its own table and its own lockfile pin.
 
 ## Provenance is derived, not stored
 
@@ -1366,6 +1373,119 @@ and → `drop_removes_the_directory_and_everything_under_it`; end to end,
 `ritual/tests/check_behind_branch_directory.rs` →
 `a_branch_pin_reads_behind_when_a_commit_past_the_lock_touches_this_crates_own_directory`
 asserts that none survives the run and that Cargo's own home is unchanged).
+
+## Wear
+
+Wearing a skeleton takes two pieces written into a manifest: the skeleton as a
+dependency, and a `[package.metadata.skeletons.<key>]` table named for the
+dependency's key, which is not the package's name when the dependency is
+renamed. Both are boilerplate and the second is easy to get slightly wrong.
+`wear <crate>[@<version>] [<key>]` writes both and nothing else: no option
+value, which is the wearer's to state, and no file, which is `sync`'s. Nothing
+about how wearing works changes. A repository that wears a skeleton by hand and
+one that used `wear` are the same repository.
+
+**Cargo does the dependency half.** `wear` runs
+`cargo add --dev --package <package> …`, so a registry, a git repository and a
+directory all work, the version grammar is Cargo's own, and `skeletons` reads no
+source and resolves no version. Every flag that takes a value is handed over as
+`--flag=value`, one argument, so a url or directory that begins with `-` cannot
+be read as an option of `cargo add`
+(`crates/skeletons/src/wear/cargo_add.rs` →
+`a_value_that_begins_with_a_hyphen_stays_inside_its_own_flag`).
+
+**The package it writes into is the command line's own.** A task built to
+receive its command line is told which package built it, and `wear` locates that
+package through ritual's workspace metadata, as ritual's own `add` does. There is
+no search for a manifest, no flag to choose one, and no case of two candidates
+to refuse: the command line that is running always knows which package it is.
+It is also the one manifest a project is certain to have that can hold
+dependencies, since a project's root manifest may be a `[workspace]` with no
+`[package]`. The dependency is a dev-dependency because the skeleton is not part
+of that command line's build. A command line outside the workspace it runs in
+is refused, writing nothing
+(`crates/skeletons/src/wear/prospect.rs` →
+`a_package_that_is_no_member_is_refused_naming_the_package_and_the_root`).
+
+**A refusal puts the files back; it does not run `cargo remove`.** `cargo add`
+changes `Cargo.lock` as well as the manifest, and `cargo remove` restores
+neither the lockfile nor the manifest's own formatting and comments. So both
+writes run inside ritual's rollback, which records the manifest and `Cargo.lock`
+before the first change and, when the run returns a failure, writes both back as
+they were, byte for byte
+(`ritual/tests/wear_refusals.rs` →
+`a_crate_that_is_not_a_skeleton_is_refused_after_cargo_ran_and_nothing_changes`,
+and `crates/skeletons/src/wear.rs` →
+`a_crate_that_is_not_a_skeleton_puts_the_manifest_and_lockfile_back_byte_for_byte`).
+Rollback undoes a failure and does not undo a panic, so every condition `wear`
+can find after `cargo add` is a returned failure, including the two that are
+defects in `skeletons`
+(`crates/skeletons/src/wear/confirm.rs` →
+`a_workspace_that_does_not_report_the_wearing_at_all_is_a_defect`, and
+`crates/skeletons/src/wear/refusal.rs` →
+`a_table_that_changed_something_else_is_called_a_defect`): a panic there would
+leave the project half-written. Rollback cannot give back a change made around
+it, and does not check that a file still holds what `wear` last wrote before
+restoring the original, so git is the second undo, and a clean work tree is
+required first. That is the same whole-tree question `sync` asks, through the
+same code, counting every uncommitted path rather than only the two files
+`wear` changes, because a person's own edits to them would otherwise be mixed
+into what `wear` wrote (`crates/skeletons/src/work_tree.rs` → `open_clean`, and
+`ritual/tests/wear_refusals.rs` →
+`a_work_tree_with_uncommitted_changes_is_refused_and_nothing_changes`).
+
+**Everything the workspace already answers is refused before `cargo add` runs.**
+The workspace is read `--locked` first, so a stale lockfile is refused before
+`cargo add` could rewrite more of it than the skeleton, and what that read holds
+settles a skeleton already worn, a key a dependency already holds and a wearing
+table with no dependency under it, each in `wear`'s own words and with nothing
+changed. A key is compared as `rustc` names a dependency, with `-` and `_` the
+same, because two dependencies that differ only there are one name to the
+compiler (`crates/skeletons/src/wear/prospect.rs` →
+`a_hyphen_and_an_underscore_collide_because_rustc_names_them_alike`), and a
+dependency under a target-specific table holds its key like any other
+(`crates/skeletons/src/wear/prospect.rs` →
+`a_target_specific_dependency_holds_its_key_like_any_other`). The work tree is
+asked last, so a request that is wrong is refused as wrong whether or not the
+tree is clean.
+
+**The key grammar is narrower than Cargo's.** A key, and the crate name that
+becomes one when none is given, start with an ASCII letter or `_` and continue
+with ASCII letters, digits, `-` and `_`, at most 64 bytes. Cargo accepts more
+than a person means to type there, and checks a rename only after it has
+written it, so a key it would then refuse leaves a broken manifest. The
+narrower grammar is checked first, and it also keeps a crate spec from ever
+reaching `cargo add` as an option
+(`crates/skeletons/src/wear/request.rs` → `a_key_outside_the_grammar_is_refused`,
+and → `a_crate_name_is_held_to_the_grammar_a_key_is_and_is_refused_as_a_crate_name`).
+A key outside it can still be written by hand. The crate name and the key are
+two types sharing the one grammar, so one cannot be passed for the other.
+
+**The table goes where `toml_edit` puts it.** The empty table is written in
+place, so every comment and blank line the wearer wrote stays, after the last
+`[package…]` table with one blank line around it. That placement is
+`toml_edit`'s own and is pinned by tests rather than decided here
+(`crates/skeletons/src/wear/table.rs` →
+`with_no_metadata_the_table_goes_right_after_package`, and →
+`a_trailing_comment_and_a_missing_final_newline_are_kept`). The edited manifest
+is compared against an independent parse of the original before it is kept: it
+must be the original plus the one empty table.
+
+**What `wear` writes is read back by what reads it.** Before it keeps anything,
+the workspace is read again through the reader `check` and `sync` use, and the
+wearing at the key must come back as a worn skeleton, so a table named for the
+wrong key, or a crate that is no skeleton, is refused and undone rather than
+left to be found by the next `check`
+(`ritual/tests/wear.rs` →
+`wearing_from_a_path_adds_the_dependency_and_an_empty_table_then_sync_and_check_agree`).
+
+**The next step names the `sync` task alone.** A task is never told the key it
+is mounted under, so `wear` cannot say how its command line reaches `sync`, and
+the wearer recognises the subcommand on their own command line. The same holds
+for every message that asks for another run.
+
+`wear` adds a skeleton and nothing takes one off: by hand that is two
+deletions, with no order to get wrong.
 
 ## Known limits
 

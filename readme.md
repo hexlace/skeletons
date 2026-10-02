@@ -37,7 +37,9 @@ render, and reports whether each skeleton is behind a newer version. `sync`
 writes a drifted file back to match, and only when git can hand back
 whatever it replaces. Both work from the manifests and the lockfile as they
 are on every run. Nothing is stored between runs, so there is nothing to go
-stale.
+stale. `wear` is how a repository starts: it adds a skeleton as a dependency
+and the wearing table that says the repository means to wear it, which
+leaves the files to `sync`.
 
 ## Mounting the bundle
 
@@ -65,7 +67,7 @@ tasks = ["ritual", "skeletons"]
 why everything below runs as `cargo ritual skeletons …`. A project that
 depends on it as `tools = { package = "skeletons", … }` runs
 `cargo ritual tools check` instead, and the tool's own messages name only
-the `check` and `sync` tasks, so they read the same either way. Then
+the `check`, `sync` and `wear` tasks, so they read the same either way. Then
 regenerate the command line's `src/main.rs`, which is written from that list:
 
 ```sh
@@ -88,35 +90,68 @@ prints its progress before the output. Later runs reuse the build.
 ## Wearing a first skeleton
 
 A repository wears a skeleton by depending on it and saying, beside the
-dependency, that it means to wear it. The examples from here on wear
-`a-dependabot-skeleton`, which is invented for this readme: a dependabot
-configuration with a cadence, a list of ecosystems and an optional assignee.
-Substitute the skeleton your team wears, or
+dependency, that it means to wear it. `wear` writes both. The examples from
+here on wear `a-dependabot-skeleton`, which is invented for this readme: a
+dependabot configuration with a cadence, a list of ecosystems and an optional
+assignee. Substitute the skeleton your team wears, or
 [write one](#writing-a-skeleton).
 
-Put the dependency in a manifest of the project, and the wearing table beside
-it. Here it goes in `ritual/Cargo.toml`, because the root manifest of a
-project made by `ritual new` is virtual, a `[workspace]` with no
-`[package]`, and cannot hold dependencies. It goes in as a dev-dependency so
-the skeleton stays out of the command line's own build; any of a manifest's
-dependency tables works.
+`wear` rewrites a manifest and `Cargo.lock`, so it refuses to run in a git
+work tree with uncommitted changes, and outside a git repository altogether.
+Commit first, then run it from the project's root:
+
+```sh
+cargo ritual skeletons wear a-dependabot-skeleton dependabot --path ../skeletons/a-dependabot-skeleton
+```
+
+```text
+added a-dependabot-skeleton 0.1.0 to ritual/Cargo.toml as the dev-dependency `dependabot`, with an empty [package.metadata.skeletons.dependabot] table
+now run the `sync` task to write its files
+```
+
+The first argument is the skeleton's crate, with a version requirement after
+an `@` when it should have one (`a-dependabot-skeleton@0.1`, in Cargo's own
+grammar). The second is the key to wear it under, which is the crate's name
+when left out. With no source flag the crate comes from crates.io. `--git`,
+with at most one of `--branch`, `--tag` and `--rev`, takes it from a git
+repository, and `--path` from a directory, relative to where the command
+runs.
+
+That is the whole of wearing, and the two pieces `wear` wrote are what a
+person could have written by hand. In `ritual/Cargo.toml`:
 
 ```toml
-[dev-dependencies]
-dependabot = { package = "a-dependabot-skeleton", path = "../../skeletons/a-dependabot-skeleton" }
+[package.metadata.skeletons.dependabot]
 
+[dev-dependencies]
+dependabot = { path = "../../skeletons/a-dependabot-skeleton", package = "a-dependabot-skeleton" }
+```
+
+The dependency went into `ritual/Cargo.toml` because `wear` writes into the
+crate the running command line is built from, and the root manifest of a
+project made by `ritual new` is virtual, a `[workspace]` with no `[package]`,
+and cannot hold dependencies. It is a dev-dependency so the skeleton stays out
+of the command line's own build; by hand, any of a manifest's dependency
+tables works. The wearing table is named for the dependency key, `dependabot`
+and not `a-dependabot-skeleton`, which is easy to get wrong when typing both.
+
+The path is relative to `ritual/`, which is why it is not the one typed above,
+and leads to a `skeletons/` directory beside the project: outside the
+workspace, so Cargo does not read the skeleton as one of its members. The
+dependency's source is Cargo's business: a path, a git repository or a
+registry all work, and moving a skeleton from one to another changes that one
+line. It does decide what `check` can say about newer versions (see
+[Behind](#behind)).
+
+The table is written empty, which wears the skeleton with every option at its
+default. Options are set by editing it:
+
+```toml
 [package.metadata.skeletons.dependabot]
 cadence = "daily"
 ecosystems = ["cargo", "github-actions"]
 assignee = "octocat"
 ```
-
-The path is relative to `ritual/`, and leads to a `skeletons/` directory
-beside the project: outside the workspace, so Cargo does not read the
-skeleton as one of its members. The dependency's source is Cargo's business:
-a path, a git repository or a registry all work, and moving a skeleton from
-one to another changes that one line. It does decide what `check` can say
-about newer versions (see [Behind](#behind)).
 
 A few rules cover a first wearing:
 
@@ -136,8 +171,8 @@ A few rules cover a first wearing:
 
 Every file a worn skeleton renders lands at a path relative to the workspace
 root, whichever member wears it. [`.docs/wearing.md`](.docs/wearing.md) has
-the rest: what happens when two skeletons claim one path, and every way a
-wearing can be refused.
+the rest: what `wear` refuses and how it puts the project back, what happens
+when two skeletons claim one path, and every way a wearing can be refused.
 
 ## Check
 
@@ -170,7 +205,7 @@ so a file that was only reformatted still reads as drifted.
 
 `check` fails on any drift, any refusal, and a workspace it cannot read at
 all, such as one whose `Cargo.lock` is missing or out of date, since
-`skeletons` reads the lockfile and never writes it. When it fails it exits
+`check` reads the lockfile and never writes it. When it fails it exits
 non-zero and says why in one line on stderr, the last line above. Being behind
 does not fail it on its own:
 
@@ -360,10 +395,10 @@ written, and it need not be UTF-8. See
 ## Where next
 
 - [`skeletons` on docs.rs](https://docs.rs/skeletons) is the crate's own
-  page: mounting the bundle, and what `check` and `sync` guarantee.
+  page: mounting the bundle, and what `check`, `sync` and `wear` guarantee.
 - [`.docs/wearing.md`](.docs/wearing.md) is the reference for a repository
-  that wears skeletons: the wearing table, where bones land, `check` and
-  `sync`'s output, and every refusal.
+  that wears skeletons: the wearing table, `wear`, where bones land, `check`
+  and `sync`'s output, and every refusal.
 - [`.docs/skeleton-format.md`](.docs/skeleton-format.md) is the reference for
   writing a skeleton.
 - [`.docs/design.md`](.docs/design.md) explains why `skeletons` is shaped the

@@ -68,8 +68,8 @@ only crate here that is published. Every member inherits
 `version.workspace = true`, the `skeletons` requirement in the root
 `[workspace.dependencies]` is that same version, and a test in `xtask`
 fails if either stops being true. `skeletons-ritual`, `skeletons-wearer` and
-`xtask` inherit the version too, and are never published. `rituals` and `rituals-core` come from
-crates.io at a version of their own, which a release never touches.
+`xtask` inherit the version too, and are never published. `rituals`, `rituals-core` and
+`rituals-compose` come from crates.io at a version of their own, which a release never touches.
 
 A release takes three steps, and GitHub Actions does the work between them:
 

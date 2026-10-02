@@ -34,7 +34,7 @@ yet starts with ritual's
 [Install](https://github.com/hexlace/ritual#install) and
 [Quickstart](https://github.com/hexlace/ritual#quickstart).
 
-## Check and sync
+## Check, sync and wear
 
 `check` compares a repository's own files against the skeletons it wears. It
 reads the wearing tables and the lockfile fresh on every run, and reports, for
@@ -49,11 +49,20 @@ everything it would replace, so that git is the undo. If a rename still
 fails partway, the files already written stay and the rest do not, each
 named.
 
-Neither command runs a git command that writes the repository's own index,
-refs, config or object database. A content filter the repository configures
-can, and `sync` runs one while it reads a file to prove git holds it:
-git-lfs's clean filter can add an object under `.git/lfs/objects/`, and never
-changes one already there. The one repository `check` writes to is a
+`wear` is how a repository starts wearing a skeleton. `wear <crate>[@<version>]
+[<key>]` adds the crate as a dev-dependency of the command line's own crate,
+through `cargo add`, from crates.io, a git repository or a directory, and adds
+an empty `[package.metadata.skeletons.<key>]` table beside it, which is all
+`sync` needs to start writing the skeleton's files. It changes a manifest and
+`Cargo.lock`, so it refuses unless the work tree is clean, as `sync` does, and
+a run that fails after `cargo add` has changed them puts both back exactly as
+they were, and says so.
+
+None of the three commands runs a git command that writes the repository's
+own index, refs, config or object database. A content filter the repository
+configures can, and `sync` runs one while it reads a file to prove git holds
+it: git-lfs's clean filter can add an object under `.git/lfs/objects/`, and
+never changes one already there. The one repository `check` writes to is a
 temporary one of its own, created and removed within the run, when the head
 of a `branch` pin has moved, or of a `git` dependency that names none of
 `tag`, `branch` or `rev`.
@@ -63,8 +72,8 @@ of a `branch` pin has moved, or of a `git` dependency that names none of
 The references live beside the code, and every claim above is argued in them:
 
 - [Wearing a skeleton](https://github.com/hexlace/skeletons/blob/main/.docs/wearing.md)
-  covers the wearing table, where bones land, `check` and `sync`'s output,
-  and every way either can refuse.
+  covers the wearing table, `wear`, where bones land, `check` and `sync`'s
+  output, and every way each can refuse.
 - [The skeleton format](https://github.com/hexlace/skeletons/blob/main/.docs/skeleton-format.md)
   covers writing a skeleton.
 - [The design](https://github.com/hexlace/skeletons/blob/main/.docs/design.md)

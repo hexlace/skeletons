@@ -1,18 +1,20 @@
 # Wearing a skeleton
 
-A reference for wearing a skeleton: the wearing table, where its bones land,
-what `check` and `sync` say, and every way either can refuse. The reasons
-behind each rule are in [design.md](design.md); this document is what a
-wearing repository works from directly.
+A reference for wearing a skeleton: the wearing table, `wear`, which writes it,
+where bones land, what `check` and `sync` say, and every way each can refuse.
+The reasons behind each rule are in [design.md](design.md); this document is
+what a wearing repository works from directly.
 
 The commands are written for the default dependency key, `skeletons`. A project
 that depends on `skeletons` under another key runs them under that key
-(`cargo ritual tools check`), and the tool's own messages name only `check` and
-`sync`, so they read the same either way.
+(`cargo ritual tools check`), and the tool's own messages name only `check`,
+`sync` and `wear`, so they read the same either way.
 
 ## The wearing table
 
-A worked example, for a repository that wears the dependabot skeleton
+[`wear`](#wear) writes the table, empty, with the dependency it belongs to; the
+rest of this section is what a person can write there by hand or edit
+afterwards. A worked example, for a repository that wears the dependabot skeleton
 [skeleton-format.md](skeleton-format.md) is written against:
 
 ```toml
@@ -789,6 +791,232 @@ clean side, and git-lfs's own filters can store a new, content-addressed
 object under `.git/lfs/objects/` while doing so — never changing an existing
 one, and never something `sync` itself asked for.
 
+## Wear
+
+```text
+cargo ritual skeletons wear <crate>[@<version>] [<key>] [--git <url> [--branch <name> | --tag <name> | --rev <revision>] | --path <directory>]
+```
+
+`wear` starts a repository wearing a skeleton: it adds the skeleton as a
+dependency and adds the wearing table for it, which is everything `sync` needs
+to begin writing the skeleton's files. It writes the same two pieces a person
+could write by hand and nothing else, so a repository that wore a skeleton by
+hand and one that used `wear` are the same repository. It does not write the
+skeleton's files, which are `sync`'s, and it records no option values: it
+writes the table empty, and options are set by editing it.
+
+**The arguments.**
+
+- **`<crate>[@<version>]`** is the skeleton's crate, split at the first `@`. The
+  text after it is a version requirement in Cargo's own grammar
+  (`a-dependabot-skeleton@0.1`, with no `v`), handed to Cargo as typed, which
+  refuses one it cannot read. Cargo also refuses a version beside `--path`.
+- **`[<key>]`** is the dependency key, which also names the wearing table (see
+  [The wearing table](#the-wearing-table)). Left out, it is the crate's name.
+  `wear` passes Cargo `--rename` only when the key differs from the crate's
+  name, since Cargo writes a redundant `package = …` for an equal one.
+- **No source flag** takes the crate from the default registry. **`--git <url>`**
+  takes it from a git repository, at the tip of its default branch unless one
+  of **`--branch`**, **`--tag`** or **`--rev`** names the reference; those three
+  need `--git` and exclude one another. **`--path <directory>`** takes it from a
+  directory, relative to where the command runs, which Cargo writes into the
+  manifest relative to the manifest. `--git` and `--path` exclude each other.
+  Each value reaches Cargo as `--flag=value`, one argument, so a value that
+  begins with `-` is never read as an option of its own.
+
+**The grammar of a key.** A key, and the crate's name, start with an ASCII
+letter or `_`, continue with ASCII letters, digits, `-` and `_`, and are at most
+64 bytes. That is narrower than Cargo's own rule, which lets a key hold other
+Unicode identifier characters and checks a rename only after writing it, so a
+key Cargo would then refuse could leave a broken manifest. A key outside this
+grammar is refused before anything is written, and can still be written by hand.
+`options` and `verbatim` are refused as keys, whether typed or defaulted from a
+crate of that name (see [The wearing table](#the-wearing-table)): wear such a
+crate under another key.
+
+**Where it writes.** `wear` is told which package built the command line it runs
+in, and writes into that package's manifest and the workspace's `Cargo.lock`:
+there is nothing to point it at, and no case of two candidates to refuse. That
+package has to be a member of the workspace the command runs in. For a project
+made by `ritual new` it is the crate under `ritual/`, which is also why the
+dependency is a dev-dependency: it keeps the skeleton out of the command line's
+own build.
+
+**What it writes**, in this order:
+
+1. The dependency, by running `cargo add --dev --package <that package>` with the
+   crate, the key and the source, so the version grammar and every source Cargo
+   knows are Cargo's. The dependency lands under `[dev-dependencies]`, and
+   `Cargo.lock` gains the skeleton's pin. `wear` may reach the network, as
+   Cargo does to resolve a registry version or fetch a git source.
+2. An empty `[package.metadata.skeletons.<key>]` table in the same manifest.
+   The manifest is edited in place, so every comment and blank line the wearer
+   wrote stays, and the result is compared against an independent parse of the
+   manifest before it is kept: it must hold the one new empty table and nothing
+   else different. The table lands after the last `[package…]` table, with one
+   blank line around it: right after `[package]`, or after
+   `[package.metadata.ritual]` or a sibling wearing table. A table it has to go
+   under that is written inline gets the new one inside it, inline.
+3. A read of the workspace back through the same reader `check` and `sync` use.
+   `wear` keeps what it wrote only if that reader finds a worn skeleton at the
+   key.
+
+**What it prints.** On success, two lines on stdout: what was added and where,
+with the version Cargo locked and the manifest as a path relative to the
+workspace root, then the next step.
+
+```text
+added a-dependabot-skeleton 0.1.0 to ritual/Cargo.toml as the dev-dependency `dependabot`, with an empty [package.metadata.skeletons.dependabot] table
+now run the `sync` task to write its files
+```
+
+The next step names the `sync` task and nothing before it: a task is never told
+the key it is mounted under, so it cannot say how its command line reaches
+`sync`. Cargo's own output is not repeated. `sync` then needs a clean work tree,
+so commit what `wear` wrote, and any option values edited into the table, first.
+
+**It refuses before it writes anything** when the request or the project is
+wrong, in this order, and each message ends by saying what to do. Every message
+below is one line on stderr after the command line's own prefix (`ritual: `),
+and, like every message in this document, prints text from outside escaped.
+
+- the crate name is not in the key grammar:
+
+  ```text
+  `Bad Name` is not a crate name wear can add: a name starts with an ASCII letter or `_`, continues with ASCII letters, digits, `-` and `_`, and is at most 64 bytes; give the `wear` task the crate's name as its manifest spells it
+  ```
+- the key is not in the grammar, or is `options` or `verbatim`:
+
+  ```text
+  `x y` cannot be a dependency key: a key starts with an ASCII letter or `_`, continues with ASCII letters, digits, `-` and `_`, and is at most 64 bytes; give the `wear` task another key as its second argument
+  `options` cannot be worn as a dependency key: `options` and `verbatim` under [package.metadata.skeletons] belong to a skeleton's own declaration; give the `wear` task another key as its second argument
+  ```
+- the workspace cannot be read, which is `check`'s abort for the same four
+  causes (see [Refusals](#refusals)). `cargo metadata` is run `--locked`, so a
+  stale or missing lockfile is refused before `cargo add` could rewrite more of
+  it than the skeleton, and the lockfile message says why `wear` would otherwise
+  write it:
+
+  ```text
+  Cargo.lock is missing or out of date, and wear changes it only to add the skeleton; run `cargo update --workspace`, then run the `wear` task again
+  ```
+- the command line's package is not a member of the workspace the command ran
+  in:
+
+  ```text
+  this command line is built from the package `skeletons-ritual`, which is not a member of the workspace at /path/to/workspace, so wear wrote nothing: run the `wear` task from inside the project this command line belongs to
+  ```
+- the skeleton is already worn by any member of the workspace, under any key.
+  A workspace wears a skeleton once. A wearing that `check` reports as refused
+  wears nothing, and does not count:
+
+  ```text
+  a-dependabot-skeleton is already worn, as `dependabot` in ritual/Cargo.toml; a workspace wears a skeleton once, so to change its options, edit [package.metadata.skeletons.dependabot] there
+  ```
+- `[package.metadata.skeletons]` in the manifest is not a table:
+
+  ```text
+  [package.metadata.skeletons] in ritual/Cargo.toml is not a table, so wear cannot add a wearing table under it; make it a table, then run the `wear` task again
+  ```
+- the manifest already depends on this crate, under any key and in any
+  dependency table, target-specific ones included, without wearing it. A second
+  dependency on one crate is something Cargo refuses only after `cargo add` has
+  written it, so `wear` says it first, naming the key the dependency has, which
+  is where the wearing table goes. This is said before a key is found taken, as
+  the table is the one remedy that helps. Crate names are compared with `-` and
+  `_` the same, as Cargo takes them:
+
+  ```text
+  ritual/Cargo.toml already depends on a-dependabot-skeleton under the key `dependabot`, without wearing it; to wear it, add an empty [package.metadata.skeletons.dependabot] table to ritual/Cargo.toml
+  ```
+- the manifest depends on this crate as above and already has a wearing table at
+  that dependency's key, so the skeleton is not worn only because its wearing is
+  refused (a worn one is the already-worn refusal above). Adding a table would
+  be no remedy, so `wear` sends the wearer to `check`, which says why:
+
+  ```text
+  ritual/Cargo.toml already depends on a-dependabot-skeleton under the key `dependabot`, and has a [package.metadata.skeletons.dependabot] table for it, but that wearing is refused; the `check` task says why, so run it and fix what it names in ritual/Cargo.toml
+  ```
+- the key is already a dependency of the manifest on another crate, in any
+  dependency table, target-specific ones included. Keys are compared as `rustc`
+  names them, with `-` and `_` the same, so `a-x` cannot be worn beside `a_x`:
+  the key is taken, and another is to be given:
+
+  ```text
+  `tidy` is taken in ritual/Cargo.toml: its dependency on lint-skeleton is declared under `tidy`; give the `wear` task another key as its second argument
+  ```
+- the manifest already has a wearing table at the key, with no dependency under
+  it. A table is matched exactly, as `sync` reads it:
+
+  ```text
+  ritual/Cargo.toml already has a [package.metadata.skeletons.dependabot] table, with no dependency declared under `dependabot`; remove the table, or give the `wear` task another key as its second argument
+  ```
+- the work tree is not clean, or git cannot be asked. This is the question
+  `sync` asks (see [Sync](#sync)), with the whole tree counted, asked last so a
+  request that is wrong is refused as wrong whether or not the tree is clean.
+  The per-path lines are `sync`'s, on stdout, then the summary on stderr, worded
+  for `wear`. `wear` makes no per-path proof, since the only files it changes
+  are the manifest and the lockfile:
+
+  ```text
+  ritual/Cargo.toml has uncommitted changes
+  the working tree has 1 uncommitted change, so wear wrote nothing: it writes only into a clean working tree, where git holds everything it changes; commit, stash or move it, then run the `wear` task again
+  ```
+
+  Outside git it reads `/path/to/workspace is not inside a git work tree, so
+  wear wrote nothing: without git there is no undo for what it changes; commit
+  the workspace to git first`. Every other git refusal is `sync`'s with `wear`
+  for `sync`, `` run the `wear` task outside a git hook (the `check` task works
+  inside one)`` in the lines about a redirecting variable, and `` run the `wear`
+  task again`` in the timed-out ones.
+
+**It undoes what it did when it fails after `cargo add`.** Both writes go
+through ritual's rollback, which records the manifest and `Cargo.lock` before
+the first change and, when the run returns a failure, writes both back exactly
+as they were: the bytes, not a `cargo remove`, which restores neither the
+lockfile nor a manifest's formatting and comments. The message then ends with
+`; ritual put the project back as it found it`:
+
+```text
+cargo add failed: error: the version provided, `v1` is not a valid SemVer requirement\n\nhelp: changing the package to `a-dependabot-skeleton@1`\n\nCaused by:\n  unexpected character 'v' while parsing major version number; ritual put the project back as it found it
+not-one 0.1.0 is not a skeleton: its manifest has no [package.metadata.skeletons] table, so it cannot be worn; wear a crate that is one; ritual put the project back as it found it
+```
+
+These are the failures that come after the first change:
+
+- `cargo add` refuses, with everything Cargo said on one line, escaped as above,
+  or could not be run at all (``running `cargo add` failed: …``).
+- the crate Cargo added has no `[package.metadata.skeletons]` table, so it is no
+  skeleton. Only the read back can tell, for a source Cargo resolves itself.
+- the manifest could not be read to add the table to (`wear could not read
+  <manifest> to add the wearing table: …`), or the edited manifest is not the
+  original plus one empty table (`wear could not add
+  [package.metadata.skeletons.<key>] to <manifest> without changing anything
+  else in it (…); this is a defect in skeletons`).
+- the read back refuses the new wearing (``wear added `<key>` to <manifest>, and
+  reading it back refuses it:`` and the refusal's own message), does not report
+  it at all (``wear added `<key>` to <manifest>, and cargo metadata does not
+  report it; this is a defect in skeletons``), or finds that the skeleton Cargo
+  resolved is one another entry already wears under its package name, which no
+  check before the write could see (the already-worn message above).
+
+When the undo itself fails, the message names every path that was not put back
+and says to check it before running the `wear` task again:
+
+```text
+<the failure>; ritual put the project back except for ritual/Cargo.toml — check it before running the `wear` task again
+```
+
+Two things the undo cannot give back. A panic: rollback runs when the run
+returns a failure and not when it panics, so a panic leaves whatever `cargo add`
+and the table write had already changed, which is why `wear` returns a failure
+for every condition it can find after `cargo add`. And a change made around
+it: rollback does not check that a file still holds what `wear` last wrote
+before putting the original back, so an edit to the manifest or the lockfile
+made by something else while `wear` runs is overwritten, and Cargo's own
+caches, which are outside the project, are not touched. Git is the undo for
+everything else, which is why the work tree has to be clean first.
+
 ## `--json`
 
 One pretty-printed JSON document (two-space indentation), carrying
@@ -1252,4 +1480,7 @@ bones, when the workspace itself could not be read at all — never read as
 
 `sync` aborts the same way, for the same four causes, before writing
 anything — its own work-tree checks (see [Sync](#sync)) only ever run
-once the workspace itself has been read successfully.
+once the workspace itself has been read successfully. `wear` aborts the same
+way too, with `check`'s wording for a `cargo metadata` failure and its own for
+the lockfile (see [Wear](#wear), which also holds the refusals only `wear`
+makes).

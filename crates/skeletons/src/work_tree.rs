@@ -229,7 +229,7 @@ mod tests {
         // machine.
         let real_elapsed_max = Duration::from_secs(30);
         let clock = TestClock::new();
-        let clock_before = clock.now();
+        let deadline = clock.now() + timeout;
         let real = std::time::Instant::now();
         let error = run_with_clock(command, &limits, &clock)
             .expect_err("a command past its timeout is killed");
@@ -237,14 +237,15 @@ mod tests {
             real.elapsed() < real_elapsed_max,
             "the child was waited out instead of killed"
         );
-        // The injected clock moves only in poll steps, so a timeout measured on
-        // it lands within one poll of `timeout`. Bounded on both sides, so a
-        // deadline read from the wall clock while the waits stay injected fails
-        // as surely as one measured on the wall clock throughout.
-        let measured = clock.now().duration_since(clock_before);
-        assert!(
-            measured >= timeout && measured < timeout + Duration::from_secs(1),
-            "the timeout was not measured on the injected clock: it advanced {measured:?}"
+        // The last pause is cut to what is left of the timeout, so the pauses
+        // before the deadline add up to exactly `timeout` on the injected
+        // clock. Exact on both sides, so a deadline read from the wall clock
+        // while the waits stay injected fails as surely as one measured on
+        // the wall clock throughout.
+        let measured: Duration = clock.waits_begun_before(deadline).iter().sum();
+        assert_eq!(
+            measured, timeout,
+            "the timeout was not measured on the injected clock"
         );
         let question = GitQuestion::Checkout(
             ClaimPath::from_rendering_path("plain.yml").expect("a well-formed test path"),

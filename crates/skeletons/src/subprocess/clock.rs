@@ -15,7 +15,8 @@ pub(crate) trait Clock {
     /// Returns the current instant.
     fn now(&self) -> Instant;
 
-    /// Pauses for `duration` before the caller polls again.
+    /// Pauses for `duration` before the caller polls again. The caller chooses
+    /// the length of each pause, so the clock never decides a polling rate.
     fn wait(&self, duration: Duration);
 }
 
@@ -33,18 +34,28 @@ impl Clock for SystemClock {
     }
 }
 
+/// One pause a [`TestClock`] was asked for: the instant it began at on the
+/// clock, and how long it was asked to last.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy)]
+struct Wait {
+    began: Instant,
+    duration: Duration,
+}
+
 /// A clock for unit tests that never lets real time pass.
 ///
 /// It starts at one real instant and moves only when told to wait, by exactly
 /// the duration asked for, returning at once. A timeout is therefore reached
 /// after a few polls however long the child would really have run. It also
-/// counts the reads and waits it is asked for, so a test can show that a
-/// command with no timeout never consulted it.
+/// counts the reads and records every wait it is asked for, so a test can show
+/// that a command with no timeout never consulted it, and what pauses a
+/// bounded one asked for.
 #[cfg(test)]
 pub(crate) struct TestClock {
     now: std::cell::Cell<Instant>,
     reads: std::cell::Cell<u32>,
-    waits: std::cell::Cell<u32>,
+    waits: std::cell::RefCell<Vec<Wait>>,
 }
 
 #[cfg(test)]
@@ -54,7 +65,7 @@ impl TestClock {
         Self {
             now: std::cell::Cell::new(Instant::now()),
             reads: std::cell::Cell::new(0),
-            waits: std::cell::Cell::new(0),
+            waits: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -63,9 +74,20 @@ impl TestClock {
         self.reads.get()
     }
 
-    /// Returns how many times this clock has been asked to pause.
-    pub(crate) fn times_waited(&self) -> u32 {
-        self.waits.get()
+    /// Returns whether this clock has been asked to pause at all.
+    pub(crate) fn has_waited(&self) -> bool {
+        !self.waits.borrow().is_empty()
+    }
+
+    /// Returns the length of each pause that began strictly before `instant`,
+    /// in the order they were asked for.
+    pub(crate) fn waits_begun_before(&self, instant: Instant) -> Vec<Duration> {
+        self.waits
+            .borrow()
+            .iter()
+            .filter(|wait| wait.began < instant)
+            .map(|wait| wait.duration)
+            .collect()
     }
 }
 
@@ -77,7 +99,10 @@ impl Clock for TestClock {
     }
 
     fn wait(&self, duration: Duration) {
-        self.waits.set(self.waits.get() + 1);
+        self.waits.borrow_mut().push(Wait {
+            began: self.now.get(),
+            duration,
+        });
         self.now.set(self.now.get() + duration);
     }
 }

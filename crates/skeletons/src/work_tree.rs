@@ -201,6 +201,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::claim::ClaimPath;
+    use crate::subprocess::clock::Clock;
     use crate::subprocess::{Limits, TestClock, Truncated, run_with_clock};
     use crate::work_tree::abort::GitQuestion;
 
@@ -210,16 +211,36 @@ mod tests {
     fn a_command_killed_for_running_too_long_is_a_timeout_naming_the_question() {
         // A real command past a bound measured on a test clock, so the
         // error is the one `subprocess::run_with_clock` produces and not a
-        // stand-in for it, and no real time passes reaching it.
+        // stand-in for it. The test clock must have advanced by the timeout
+        // (the bound was measured on the injected clock), and the call must
+        // return in far less real time than the child would have run (the
+        // child was killed, not waited out); that real-time bound only fails
+        // when the kill is missing, and a passing run never waits on it.
         let mut command = Command::new("sh");
         command.args(["-c", "sleep 60"]);
+        let timeout = Duration::from_millis(100);
         let limits = Limits {
-            timeout: Some(Duration::from_millis(100)),
+            timeout: Some(timeout),
             stdout_bytes_max: u64::MAX,
             stderr_bytes_max: u64::MAX,
         };
-        let error = run_with_clock(command, &limits, &TestClock::new())
+        // Half the child's `sleep 60`: a call that returns sooner cannot have
+        // waited the child out, and the margin is wide enough for a loaded
+        // machine.
+        let real_elapsed_max = Duration::from_secs(30);
+        let clock = TestClock::new();
+        let clock_before = clock.now();
+        let real = std::time::Instant::now();
+        let error = run_with_clock(command, &limits, &clock)
             .expect_err("a command past its timeout is killed");
+        assert!(
+            real.elapsed() < real_elapsed_max,
+            "the child was waited out instead of killed"
+        );
+        assert!(
+            clock.now().duration_since(clock_before) >= timeout,
+            "the timeout was not measured on the injected clock"
+        );
         let question = GitQuestion::Checkout(
             ClaimPath::from_rendering_path("plain.yml").expect("a well-formed test path"),
         );

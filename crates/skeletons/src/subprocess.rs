@@ -382,6 +382,7 @@ mod tests {
     use std::process::Command;
     use std::time::Duration;
 
+    use super::clock::Clock;
     use super::{Limits, TestClock, run, run_with_clock};
 
     /// No bound at all: a fast command's own bytes and exit status are read
@@ -475,20 +476,42 @@ mod tests {
 
     #[test]
     fn a_command_that_never_exits_is_killed_once_its_timeout_elapses() {
-        // The child really would outlive the timeout, but the timeout is
-        // measured on a test clock that advances only as `wait_bounded`
-        // waits, so the bound is reached after a few polls and the child is
-        // killed at once.
+        // The child would run for a minute, but the timeout is measured on a
+        // test clock that advances only as `wait_bounded` waits through it.
+        // Three things are checked: the result is a timeout; the test clock
+        // advanced by the timeout, so the bound was measured on the injected
+        // clock and not the wall clock; and the call returned in far less
+        // real time than the child would have run, so the child was killed
+        // and not waited out. The real-time bound only fails when the kill
+        // is missing; a passing run never waits on it.
         let mut command = Command::new("sh");
         command.args(["-c", "sleep 60"]);
+        let timeout = Duration::from_millis(100);
         let limits = Limits {
-            timeout: Some(Duration::from_millis(100)),
+            timeout: Some(timeout),
             stdout_bytes_max: u64::MAX,
             stderr_bytes_max: u64::MAX,
         };
-        let error = run_with_clock(command, &limits, &TestClock::new())
+        // Half the child's `sleep 60`: a call that returns sooner cannot have
+        // waited the child out, and the margin is wide enough for a loaded
+        // machine.
+        let real_elapsed_max = Duration::from_secs(30);
+        let clock = TestClock::new();
+        let clock_before = clock.now();
+        let real = std::time::Instant::now();
+
+        let error = run_with_clock(command, &limits, &clock)
             .expect_err("a command past its timeout must be killed");
+
         assert!(error.is_timed_out());
+        assert!(
+            real.elapsed() < real_elapsed_max,
+            "the child was waited out instead of killed"
+        );
+        assert!(
+            clock.now().duration_since(clock_before) >= timeout,
+            "the timeout was not measured on the injected clock"
+        );
     }
 
     #[test]

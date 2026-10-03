@@ -10,9 +10,15 @@
 //! rest of that stream is drained and discarded rather than held, and the
 //! captured bytes report that they were cut short.
 
+pub(crate) mod clock;
+
 use std::io::Read;
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+#[cfg(test)]
+pub(crate) use clock::TestClock;
+use clock::{Clock, SystemClock};
 
 /// How often the wait loop polls [`Child::try_wait`] for a command with a
 /// timeout. Small enough that a fast command is reported back promptly,
@@ -215,7 +221,24 @@ impl std::error::Error for SubprocessError {
 /// Returns [`SubprocessError`] when the command cannot be spawned at all, or
 /// when it is still running once [`Limits::timeout`] elapses — in which case
 /// it is killed before this function returns.
-pub(crate) fn run(mut command: Command, limits: &Limits) -> Result<Finished, SubprocessError> {
+pub(crate) fn run(command: Command, limits: &Limits) -> Result<Finished, SubprocessError> {
+    run_with_clock(command, limits, &SystemClock)
+}
+
+/// Runs `command` like [`run`], measuring [`Limits::timeout`] against `clock`
+/// instead of the wall clock.
+///
+/// A unit test can thereby drive a command past its timeout without any real
+/// time passing.
+///
+/// # Errors
+///
+/// The same as [`run`].
+pub(crate) fn run_with_clock(
+    mut command: Command,
+    limits: &Limits,
+    clock: &impl Clock,
+) -> Result<Finished, SubprocessError> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -234,7 +257,7 @@ pub(crate) fn run(mut command: Command, limits: &Limits) -> Result<Finished, Sub
     let stdout_reader = std::thread::spawn(move || read_bounded(&mut stdout_pipe, stdout_cap));
     let stderr_reader = std::thread::spawn(move || read_bounded(&mut stderr_pipe, stderr_cap));
 
-    let status = wait_bounded(&mut child, limits.timeout)?;
+    let status = wait_bounded(&mut child, limits.timeout, clock)?;
 
     // `read_bounded` never panics, so a reader thread's `join` only ever
     // fails by propagating whatever it itself resumed — there is nothing
@@ -255,15 +278,17 @@ pub(crate) fn run(mut command: Command, limits: &Limits) -> Result<Finished, Sub
 }
 
 /// Waits for `child` to finish, killing it and reporting a timeout once
-/// `timeout` (when given) elapses.
+/// `timeout` (when given) elapses on `clock`.
 ///
 /// Polls rather than blocking in [`Child::wait`] so a timeout can actually
-/// be enforced — `wait` itself has no bounded form.
+/// be enforced — `wait` itself has no bounded form. Both the elapsed time
+/// and the pause between polls come from `clock` alone.
 fn wait_bounded(
     child: &mut Child,
     timeout: Option<Duration>,
+    clock: &impl Clock,
 ) -> Result<ExitStatus, SubprocessError> {
-    let started = Instant::now();
+    let started = clock.now();
     loop {
         // A `try_wait` that itself errors (checked here on every poll) is an
         // environment failure indistinguishable from "cannot run the
@@ -277,7 +302,8 @@ fn wait_bounded(
                 });
             }
         }
-        let timed_out = timeout.is_some_and(|timeout| started.elapsed() >= timeout);
+        let timed_out =
+            timeout.is_some_and(|timeout| clock.now().duration_since(started) >= timeout);
         if timed_out {
             // Postcondition of `timed_out`: `timeout` is `Some` whenever
             // this arm is reached.
@@ -293,7 +319,7 @@ fn wait_bounded(
                 kind: SubprocessErrorKind::TimedOut { timeout },
             });
         }
-        std::thread::sleep(SUBPROCESS_POLL_INTERVAL);
+        clock.wait(SUBPROCESS_POLL_INTERVAL);
     }
 }
 
@@ -356,7 +382,7 @@ mod tests {
     use std::process::Command;
     use std::time::Duration;
 
-    use super::{Limits, run};
+    use super::{Limits, TestClock, run, run_with_clock};
 
     /// No bound at all: a fast command's own bytes and exit status are read
     /// back exactly, on both streams.
@@ -449,6 +475,10 @@ mod tests {
 
     #[test]
     fn a_command_that_never_exits_is_killed_once_its_timeout_elapses() {
+        // The child really would outlive the timeout, but the timeout is
+        // measured on a test clock that advances only as `wait_bounded`
+        // waits, so the bound is reached after a few polls and the child is
+        // killed at once.
         let mut command = Command::new("sh");
         command.args(["-c", "sleep 60"]);
         let limits = Limits {
@@ -456,7 +486,8 @@ mod tests {
             stdout_bytes_max: u64::MAX,
             stderr_bytes_max: u64::MAX,
         };
-        let error = run(command, &limits).expect_err("a command past its timeout must be killed");
+        let error = run_with_clock(command, &limits, &TestClock::new())
+            .expect_err("a command past its timeout must be killed");
         assert!(error.is_timed_out());
     }
 

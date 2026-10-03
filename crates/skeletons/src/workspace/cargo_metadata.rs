@@ -2,10 +2,10 @@
 //! its output into a [`Document`] or a named abort.
 
 use std::path::Path;
-use std::process::Command;
 
 use super::Network;
 use super::schema::Document;
+use crate::cargo;
 use crate::subprocess::{self, Limits};
 
 /// The largest `cargo metadata` output this crate ever reads, in mebibytes —
@@ -79,12 +79,7 @@ pub(crate) enum ReadWorkspaceError {
 /// workspace root, exactly as it does for any other cargo command run from a
 /// subdirectory.
 pub(crate) fn fetch(directory: &Path, network: Network) -> Result<Document, ReadWorkspaceError> {
-    // Falls back to the literal `cargo`, as ritual's own `cargo metadata`
-    // caller does: `$CARGO` is set under `cargo run`/`cargo test`, so a
-    // nested call uses the same cargo that launched this process rather
-    // than whatever `cargo` resolves to on `$PATH`.
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
-    let mut command = Command::new(&cargo);
+    let mut command = cargo::command();
     command.current_dir(directory).args([
         "metadata",
         "--format-version",

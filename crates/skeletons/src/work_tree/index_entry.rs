@@ -1,5 +1,8 @@
 //! Parsing `git ls-files -v --stage -z`'s own output — one record per index
-//! entry, `<tag> SP <mode> SP <oid> SP <stage> TAB <path> NUL`.
+//! entry, `<tag> SP <mode> SP <oid> SP <stage> TAB <path> NUL` — and reading
+//! the one letter that says whether git looks at the file in the work tree.
+//! `sync` proves every path it writes against these records, and `wear` the
+//! two files it changes.
 
 use crate::git::ObjectId;
 
@@ -22,7 +25,41 @@ pub(crate) enum IndexTag {
     Unmerged,
 }
 
+/// Which flag hides a present file from git.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HiddenFlag {
+    SkipWorktree,
+    AssumeUnchanged,
+    Both,
+}
+
+/// What a command that reads a file through git's index makes of an entry's
+/// tag: the one reading of the five letters, so that no command matches on
+/// the letters itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TagReading {
+    /// Git reads the file from the work tree.
+    Read,
+    /// Git does not read the file from the work tree, because of this flag.
+    Hidden(HiddenFlag),
+    /// The entry is unmerged.
+    Unmerged,
+}
+
 impl IndexTag {
+    /// Reads the tag as whether git looks at the entry's file in the work
+    /// tree. The mapping from letters is written only here, so every command
+    /// that refuses a hidden or unmerged file agrees on which letters those are.
+    pub(crate) const fn reading(self) -> TagReading {
+        match self {
+            Self::Tracked => TagReading::Read,
+            Self::SkipWorktree => TagReading::Hidden(HiddenFlag::SkipWorktree),
+            Self::AssumeUnchanged => TagReading::Hidden(HiddenFlag::AssumeUnchanged),
+            Self::SkipWorktreeAndAssumeUnchanged => TagReading::Hidden(HiddenFlag::Both),
+            Self::Unmerged => TagReading::Unmerged,
+        }
+    }
+
     const fn from_byte(letter: u8) -> Option<Self> {
         match letter {
             b'H' => Some(Self::Tracked),
@@ -144,7 +181,32 @@ fn parse_one_index_record(record: &[u8]) -> Result<IndexRecord, MalformedIndexRe
 mod tests {
     use proptest::prelude::*;
 
-    use super::{IndexTag, parse_ls_files_tagged};
+    use super::{HiddenFlag, IndexTag, TagReading, parse_ls_files_tagged};
+
+    #[test]
+    fn each_tag_is_read_as_read_hidden_by_its_flag_or_unmerged() {
+        // Every tag, so a new one cannot be left out: the three letters that
+        // make git look away name the flag that does, tracked is read, and
+        // unmerged is its own reading.
+        for (tag, expected) in [
+            (IndexTag::Tracked, TagReading::Read),
+            (
+                IndexTag::SkipWorktree,
+                TagReading::Hidden(HiddenFlag::SkipWorktree),
+            ),
+            (
+                IndexTag::AssumeUnchanged,
+                TagReading::Hidden(HiddenFlag::AssumeUnchanged),
+            ),
+            (
+                IndexTag::SkipWorktreeAndAssumeUnchanged,
+                TagReading::Hidden(HiddenFlag::Both),
+            ),
+            (IndexTag::Unmerged, TagReading::Unmerged),
+        ] {
+            assert_eq!(tag.reading(), expected, "{tag:?}");
+        }
+    }
 
     #[test]
     fn empty_input_parses_to_no_entries() {

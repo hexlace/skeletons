@@ -8,219 +8,22 @@
 //! is counted through a match that has no wildcard, so a variant added without
 //! an arm does not compile, and the sample list must then cover it.
 
-use std::path::Path;
-
 use super::poisoned::poisoned_leftover;
 use super::{
-    dirty_line, leftover_text, leftovers_after_success_message, sync_abort_message, unproven_line,
-    write_failure_message, written_line,
+    leftover_text, leftovers_after_success_message, unproven_line, write_failure_message,
+    written_line,
 };
 use crate::claim::{DriftReason, UnsafePathCause};
 use crate::survey::poison::{
-    POISON, POISON_FOLDED, assert_escaped_once, assert_every_kind, assert_one_line, claim, poison,
+    POISON, POISON_FOLDED, assert_escaped_once, assert_every_kind, claim, poison,
 };
-use crate::sync::abort::{GitQuestion, SyncAbort};
-use crate::sync::clean::{Dirt, DirtyPath};
 use crate::sync::fold_variant::{FoldVariant, fold_variants};
-use crate::sync::proof::{AboveEntry, HiddenFlag, Unproven, Why};
+use crate::sync::proof::{AboveEntry, Unproven, Why};
 use crate::sync::write::{
     CollisionAt, CommitCause, CommitFailure, Leftover, LeftoverReason, StagingRelation,
     TargetChange, WriteFailure,
 };
-
-/// Whether a message of some kind names text from outside, and so must show
-/// it escaped; a message that names none is only asked to stay on one line.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OutsideText {
-    Named,
-    NotNamed,
-}
-
-/// One kind of an enum a message reads: its place among the kinds, and
-/// whether its message names text from outside.
-#[derive(Clone, Copy, Debug)]
-struct Kind {
-    index: usize,
-    outside_text: OutsideText,
-}
-
-const fn named(index: usize) -> Kind {
-    Kind {
-        index,
-        outside_text: OutsideText::Named,
-    }
-}
-
-const fn not_named(index: usize) -> Kind {
-    Kind {
-        index,
-        outside_text: OutsideText::NotNamed,
-    }
-}
-
-/// Asserts `text` is one line, and shows the poison escaped once if `kind`'s
-/// message names any.
-fn assert_message(text: &str, kind: Kind, what: &str) {
-    match kind.outside_text {
-        OutsideText::Named => assert_escaped_once(text, what),
-        OutsideText::NotNamed => assert_one_line(text, what),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SyncAbort and GitQuestion
-// ---------------------------------------------------------------------------
-
-/// How many kinds of [`SyncAbort`] there are.
-const ABORT_KINDS: usize = 7;
-
-/// A timed-out abort names what the question it timed out on names, so its
-/// kind reads that question's.
-const fn abort_kind(abort: &SyncAbort) -> Kind {
-    match abort {
-        SyncAbort::RedirectedGit { .. } => not_named(0),
-        SyncAbort::NotAWorkTree => named(1),
-        SyncAbort::DubiousOwnership { .. } => named(2),
-        SyncAbort::GitUnavailable { .. } => named(3),
-        SyncAbort::GitTimedOut { question } => Kind {
-            index: 4,
-            outside_text: question_kind(question).outside_text,
-        },
-        SyncAbort::GitFailed { .. } => named(5),
-        SyncAbort::GitOutputTooLarge { .. } => not_named(6),
-    }
-}
-
-/// How many kinds of [`GitQuestion`] there are.
-const QUESTION_KINDS: usize = 7;
-
-const fn question_kind(question: &GitQuestion) -> Kind {
-    match question {
-        GitQuestion::WorkTree => not_named(0),
-        GitQuestion::Status => not_named(1),
-        GitQuestion::IndexEntry(_) => named(2),
-        GitQuestion::IndexAbove(_) => named(3),
-        GitQuestion::IndexListing => not_named(4),
-        GitQuestion::Checkout(_) => named(5),
-        GitQuestion::Ignored(_) => named(6),
-    }
-}
-
-fn question_samples() -> Vec<GitQuestion> {
-    vec![
-        GitQuestion::WorkTree,
-        GitQuestion::Status,
-        GitQuestion::IndexEntry(claim(POISON)),
-        GitQuestion::IndexAbove(claim(POISON)),
-        GitQuestion::IndexListing,
-        GitQuestion::Checkout(claim(POISON)),
-        GitQuestion::Ignored(claim(POISON)),
-    ]
-}
-
-fn abort_samples() -> Vec<SyncAbort> {
-    let mut samples = vec![
-        SyncAbort::RedirectedGit {
-            variables: vec!["GIT_DIR"],
-        },
-        SyncAbort::NotAWorkTree,
-        SyncAbort::DubiousOwnership {
-            diagnostic: poison(),
-        },
-        SyncAbort::GitUnavailable { detail: poison() },
-        SyncAbort::GitFailed {
-            command: "status",
-            diagnostic: poison(),
-        },
-        SyncAbort::GitOutputTooLarge { command: "status" },
-    ];
-    samples.extend(
-        question_samples()
-            .into_iter()
-            .map(|question| SyncAbort::GitTimedOut { question }),
-    );
-    samples
-}
-
-#[test]
-fn every_sync_abort_prints_its_outside_text_escaped_once() {
-    // The root the message names when the directory is no work tree is
-    // poisoned too. Kinds that name nothing from outside are still one line.
-    let samples = abort_samples();
-    assert_every_kind(
-        samples.iter().map(|abort| abort_kind(abort).index),
-        ABORT_KINDS,
-        "SyncAbort",
-    );
-
-    for abort in &samples {
-        let text = sync_abort_message(abort, Path::new(POISON));
-        assert_message(&text, abort_kind(abort), &format!("{abort:?}"));
-    }
-}
-
-#[test]
-fn every_git_question_names_its_path_escaped_once() {
-    let samples = question_samples();
-    assert_every_kind(
-        samples.iter().map(|question| question_kind(question).index),
-        QUESTION_KINDS,
-        "GitQuestion",
-    );
-
-    for question in &samples {
-        let text = super::timed_out::timed_out_message(question);
-        assert_message(&text, question_kind(question), &format!("{question:?}"));
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Dirty paths
-// ---------------------------------------------------------------------------
-
-/// How many kinds of [`Dirt`] there are.
-const DIRT_KINDS: usize = 8;
-
-const fn dirt_kind(dirt: Dirt) -> usize {
-    match dirt {
-        Dirt::Unstaged => 0,
-        Dirt::Staged => 1,
-        Dirt::Deleted => 2,
-        Dirt::Untracked => 3,
-        Dirt::IntentToAdd => 4,
-        Dirt::Conflicted => 5,
-        Dirt::Submodule => 6,
-        Dirt::Unreadable => 7,
-    }
-}
-
-#[test]
-fn every_dirty_path_prints_its_name_escaped_once() {
-    // `shown` is a path, or for an unreadable record the record itself.
-    let samples = [
-        Dirt::Unstaged,
-        Dirt::Staged,
-        Dirt::Deleted,
-        Dirt::Untracked,
-        Dirt::IntentToAdd,
-        Dirt::Conflicted,
-        Dirt::Submodule,
-        Dirt::Unreadable,
-    ];
-    assert_every_kind(
-        samples.iter().map(|dirt| dirt_kind(*dirt)),
-        DIRT_KINDS,
-        "Dirt",
-    );
-
-    for dirt in samples {
-        let dirty = DirtyPath {
-            shown: poison(),
-            dirt,
-        };
-        assert_escaped_once(&dirty_line(&dirty), &format!("{dirt:?}"));
-    }
-}
+use crate::work_tree::index_entry::HiddenFlag;
 
 // ---------------------------------------------------------------------------
 // Unproven paths

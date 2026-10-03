@@ -1,0 +1,368 @@
+{
+  "packages": [
+    {
+      "name": "never",
+      "version": "0.1.0",
+      "id": "path+file:///WORKSPACE/never#0.1.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "never",
+          "src_path": "/WORKSPACE/never/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/WORKSPACE/never/Cargo.toml",
+      "metadata": null,
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    },
+    {
+      "name": "other",
+      "version": "0.1.0",
+      "id": "path+file:///WORKSPACE/other#0.1.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "other",
+          "src_path": "/WORKSPACE/other/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/WORKSPACE/other/Cargo.toml",
+      "metadata": null,
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    },
+    {
+      "name": "plain",
+      "version": "0.1.0",
+      "id": "path+file:///WORKSPACE/plain#0.1.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "plain",
+          "src_path": "/WORKSPACE/plain/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/WORKSPACE/plain/Cargo.toml",
+      "metadata": null,
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    },
+    {
+      "name": "tooling",
+      "version": "0.1.0",
+      "id": "path+file:///WORKSPACE/tooling#0.1.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "tooling",
+          "src_path": "/WORKSPACE/tooling/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/WORKSPACE/tooling/Cargo.toml",
+      "metadata": null,
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    },
+    {
+      "name": "wearer",
+      "version": "0.1.0",
+      "id": "path+file:///WORKSPACE/wearer#0.1.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [
+        {
+          "name": "other",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": "neat",
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/WORKSPACE/other"
+        },
+        {
+          "name": "plain",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/WORKSPACE/plain"
+        },
+        {
+          "name": "tooling",
+          "source": null,
+          "req": "*",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/WORKSPACE/tooling"
+        },
+        {
+          "name": "never",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": "cfg(any())",
+          "registry": null,
+          "path": "/WORKSPACE/never"
+        }
+      ],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "wearer",
+          "src_path": "/WORKSPACE/wearer/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/WORKSPACE/wearer/Cargo.toml",
+      "metadata": {
+        "skeletons": {
+          "plain": {
+            "mode": "x"
+          }
+        }
+      },
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    }
+  ],
+  "workspace_members": [
+    "path+file:///WORKSPACE/wearer#0.1.0",
+    "path+file:///WORKSPACE/other#0.1.0",
+    "path+file:///WORKSPACE/plain#0.1.0",
+    "path+file:///WORKSPACE/tooling#0.1.0",
+    "path+file:///WORKSPACE/never#0.1.0"
+  ],
+  "workspace_default_members": [
+    "path+file:///WORKSPACE/wearer#0.1.0",
+    "path+file:///WORKSPACE/other#0.1.0",
+    "path+file:///WORKSPACE/plain#0.1.0",
+    "path+file:///WORKSPACE/tooling#0.1.0",
+    "path+file:///WORKSPACE/never#0.1.0"
+  ],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///WORKSPACE/never#0.1.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      },
+      {
+        "id": "path+file:///WORKSPACE/other#0.1.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      },
+      {
+        "id": "path+file:///WORKSPACE/plain#0.1.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      },
+      {
+        "id": "path+file:///WORKSPACE/tooling#0.1.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      },
+      {
+        "id": "path+file:///WORKSPACE/wearer#0.1.0",
+        "dependencies": [
+          "path+file:///WORKSPACE/never#0.1.0",
+          "path+file:///WORKSPACE/other#0.1.0",
+          "path+file:///WORKSPACE/plain#0.1.0",
+          "path+file:///WORKSPACE/tooling#0.1.0"
+        ],
+        "deps": [
+          {
+            "name": "never",
+            "pkg": "path+file:///WORKSPACE/never#0.1.0",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": "cfg(any())"
+              }
+            ]
+          },
+          {
+            "name": "neat",
+            "pkg": "path+file:///WORKSPACE/other#0.1.0",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          },
+          {
+            "name": "plain",
+            "pkg": "path+file:///WORKSPACE/plain#0.1.0",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          },
+          {
+            "name": "tooling",
+            "pkg": "path+file:///WORKSPACE/tooling#0.1.0",
+            "dep_kinds": [
+              {
+                "kind": "dev",
+                "target": null
+              }
+            ]
+          }
+        ],
+        "features": []
+      }
+    ],
+    "root": null
+  },
+  "target_directory": "/WORKSPACE/target",
+  "build_directory": "/WORKSPACE/target",
+  "version": 1,
+  "workspace_root": "/WORKSPACE",
+  "metadata": null
+}

@@ -14,9 +14,15 @@ resolver = "3"
 # mounts under `ritual`. The two are released together at one version and must
 # be asked for at that one version: the generated `main.rs` hands a task built
 # against one to a function in the other, and two resolved copies of `rituals`
-# would not share a `Task` type.
-rituals = "0.1.1"
-ritual = { package = "rituals-core", version = "0.1.1" }
+# would not share a `Task` type. `rituals-compose`, below, is the third crate
+# taken from that release, and the same holds for it: all three resolve to the
+# one `rituals`.
+rituals = "0.1.2"
+ritual = { package = "rituals-core", version = "0.1.2" }
+# Ritual's `rollback`, which `wear` writes through.
+# Already compiled into every `ritual` binary through `rituals-core`, so it adds
+# no package to `Cargo.lock`. Released with `rituals` at one version.
+rituals-compose = "0.1.2"
 # The `skeletons` bundle, declared once under the key a command line mounts it
 # by. `path` is what a build in this repository uses; `version` is what a
 # published crate's manifest keeps, since crates.io has no path to follow.

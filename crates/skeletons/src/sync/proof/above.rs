@@ -21,9 +21,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::claim::ClaimPath;
 use crate::git::{self, Locale};
 
-use super::super::abort::{GitQuestion, SyncAbort};
-use super::super::work_tree::WorkTree;
-use super::{AboveEntry, Why, run_ls_files};
+use super::{AboveEntry, Why, why_unusable};
+use crate::work_tree::WorkTree;
+use crate::work_tree::abort::{GitQuestion, WorkTreeAbort};
+use crate::work_tree::index_records::run_ls_files;
 
 /// For each of `writes`, the refusal that follows from an index entry at a
 /// directory above it, or `None` when git tracks nothing at any of them.
@@ -42,7 +43,7 @@ use super::{AboveEntry, Why, run_ls_files};
 pub(super) fn tracked_above(
     work_tree: &WorkTree,
     writes: &[&ClaimPath],
-) -> Result<Vec<Option<Why>>, SyncAbort> {
+) -> Result<Vec<Option<Why>>, WorkTreeAbort> {
     let directories: BTreeSet<ClaimPath> =
         writes.iter().flat_map(|claim| claim.ancestors()).collect();
 
@@ -69,13 +70,13 @@ pub(super) fn tracked_above(
 /// needed, a submodule, or a mode this crate does not know. A git failure or
 /// an unreadable answer is the refusal itself, so it reaches every write
 /// under `directory`.
-fn ask_about(work_tree: &WorkTree, directory: &ClaimPath) -> Result<Option<Why>, SyncAbort> {
+fn ask_about(work_tree: &WorkTree, directory: &ClaimPath) -> Result<Option<Why>, WorkTreeAbort> {
     let mut ls_files = work_tree.git_for_pathspec_magic(Locale::Fixed);
     ls_files.args(["ls-files", "-v", "--stage", "-z", "--"]);
     ls_files.args(git::pathspec_exactly_ignoring_case(directory));
     Ok(
         match run_ls_files(ls_files, GitQuestion::IndexAbove(directory.clone()))? {
-            Err(why) => Some(why),
+            Err(unusable) => Some(why_unusable(unusable)),
             Ok(records) => records.first().map(|record| Why::TrackedAbove {
                 git_path: String::from_utf8_lossy(&record.path).into_owned(),
                 entry: AboveEntry::from_mode(&record.mode),

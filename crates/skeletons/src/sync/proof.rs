@@ -21,7 +21,7 @@
 //!
 //! "Rule (a)" and "rule (b)" throughout this module are the two conditions
 //! `.docs/design.md` sets out for a write: (a) "The whole work tree is clean",
-//! checked in [`super::clean`], and (b) "Positive proof, per path", which this
+//! checked in [`crate::work_tree::clean`], and (b) "Positive proof, per path", which this
 //! module establishes.
 
 mod above;
@@ -32,12 +32,13 @@ use crate::claim::{ClaimPath, DriftReason, OnDisk, UnsafePathCause, resolve};
 use crate::git::{self, Locale, ObjectId};
 use crate::subprocess::Truncated;
 
-use super::abort::{GitQuestion, SyncAbort};
-use super::clean::CleanWorkTree;
 use super::fold_variant::{FoldVariant, fold_variants};
-use super::index_entry::{IndexRecord, IndexTag, parse_ls_files_tagged};
-use super::work_tree::{WorkTree, run_local};
 use super::write::Write;
+use crate::work_tree::abort::{GitQuestion, WorkTreeAbort};
+use crate::work_tree::clean::CleanWorkTree;
+use crate::work_tree::index_entry::{HiddenFlag, IndexRecord, TagReading};
+use crate::work_tree::index_records::{self, UnusableIndexAnswer};
+use crate::work_tree::{WorkTree, run_local};
 
 /// A drifted write `sync` may actually perform: nothing is at its path, or
 /// git's index holds exactly what is there. The fields are private; only
@@ -251,14 +252,6 @@ pub(crate) enum Why {
     ChangedSinceSurvey,
 }
 
-/// Which flag hides a present file from git.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HiddenFlag {
-    SkipWorktree,
-    AssumeUnchanged,
-    Both,
-}
-
 /// What git's index tracks at a directory above a claim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AboveEntry {
@@ -305,7 +298,7 @@ pub(crate) fn prove(
     work_tree: &WorkTree,
     _clean: &CleanWorkTree,
     writes: Vec<Write>,
-) -> Result<Proven, SyncAbort> {
+) -> Result<Proven, WorkTreeAbort> {
     let claims: Vec<&ClaimPath> = writes.iter().map(|write| &write.path).collect();
     let index_paths = listing::index_listing(work_tree, &claims)?;
     let variants_per_write = fold_variants(&index_paths, &claims);
@@ -373,7 +366,7 @@ pub(crate) fn prove(
 /// refusal can say whether there is one checkout to bring the file back to
 /// ([`why_not_the_checkout`]); that second question is asked only on the
 /// refusal path.
-fn prove_one(work_tree: &WorkTree, write: &Write) -> Result<Result<Evidence, Why>, SyncAbort> {
+fn prove_one(work_tree: &WorkTree, write: &Write) -> Result<Result<Evidence, Why>, WorkTreeAbort> {
     let target = write.path.to_path(work_tree.root());
     match std::fs::symlink_metadata(&target) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -396,8 +389,8 @@ fn prove_one(work_tree: &WorkTree, write: &Write) -> Result<Result<Evidence, Why
 
     let pathspec = write.path.as_str();
 
-    let records = match index_records_for(work_tree, &write.path)? {
-        Err(why) => return Ok(Err(why)),
+    let records = match index_records::records_for(work_tree, pathspec)? {
+        Err(unusable) => return Ok(Err(why_unusable(unusable))),
         Ok(records) => records,
     };
     let (mode, object) = match index_entry_from(&records, pathspec) {
@@ -477,12 +470,15 @@ fn why_not_the_checkout(first: &[u8], second: Result<Vec<u8>, Why>) -> Why {
 /// and `ritual/tests/sync_free_paths.rs` →
 /// `a_path_git_hides_under_another_case_is_refused_not_created` and →
 /// `a_path_git_hides_under_a_directory_of_another_case_is_refused_not_created`.
-fn prove_absent(work_tree: &WorkTree, write: &Write) -> Result<Result<Evidence, Why>, SyncAbort> {
+fn prove_absent(
+    work_tree: &WorkTree,
+    write: &Write,
+) -> Result<Result<Evidence, Why>, WorkTreeAbort> {
     if matches!(write.reason, DriftReason::Changed) {
         return Ok(Err(Why::ChangedSinceSurvey));
     }
     let records = match absent_index_records_for(work_tree, &write.path)? {
-        Err(why) => return Ok(Err(why)),
+        Err(unusable) => return Ok(Err(why_unusable(unusable))),
         Ok(records) => records,
     };
     // Any record, at any stage, counts — a conflicted entry is tracked too —
@@ -500,22 +496,8 @@ fn prove_absent(work_tree: &WorkTree, write: &Write) -> Result<Result<Evidence, 
     Ok(ignored::refusal(work_tree, &write.path)?.map_or(Ok(Evidence::Absent), Err))
 }
 
-/// Runs `ls-files -v --stage -z -- <pathspec>` under [`git::command`]'s
-/// literal reading of a pathspec, and reads back every record it printed, tag
-/// included — or why they could not be read. How [`prove_one`] asks git about
-/// the one index entry a path on disk must have, by exactly the spelling
-/// claimed.
-fn index_records_for(
-    work_tree: &WorkTree,
-    path: &ClaimPath,
-) -> Result<Result<Vec<IndexRecord>, Why>, SyncAbort> {
-    let mut ls_files = work_tree.git(Locale::Fixed);
-    ls_files.args(["ls-files", "-v", "--stage", "-z", "--", path.as_str()]);
-    run_ls_files(ls_files, GitQuestion::IndexEntry(path.clone()))
-}
-
-/// The same `ls-files -v --stage -z` question for a path nothing is at on
-/// disk, asked with git's own case fold: the pathspec is
+/// The `ls-files -v --stage -z` question ([`index_records::records_for`]) for
+/// a path nothing is at on disk, asked with git's own case fold: the pathspec is
 /// `:(literal,icase)<claim>`, so git lists every entry at or beneath the
 /// claim under any case it would take for it.
 ///
@@ -538,7 +520,7 @@ fn index_records_for(
 fn absent_index_records_for(
     work_tree: &WorkTree,
     path: &ClaimPath,
-) -> Result<Result<Vec<IndexRecord>, Why>, SyncAbort> {
+) -> Result<Result<Vec<IndexRecord>, UnusableIndexAnswer>, WorkTreeAbort> {
     let mut ls_files = work_tree.git_for_pathspec_magic(Locale::Fixed);
     ls_files.args([
         "ls-files",
@@ -548,44 +530,19 @@ fn absent_index_records_for(
         "--",
         &git::pathspec_ignoring_case(path),
     ]);
-    run_ls_files(ls_files, GitQuestion::IndexEntry(path.clone()))
+    index_records::run_ls_files(ls_files, GitQuestion::IndexEntry(path.as_str().to_owned()))
 }
 
-/// Runs a built `ls-files -v --stage -z` command under [`run_local`]'s bounds
-/// and reads its records through [`classify_ls_files`]: the one place each
-/// question about an index entry, at the claim or above it, is run and read.
-fn run_ls_files(
-    ls_files: std::process::Command,
-    question: GitQuestion,
-) -> Result<Result<Vec<IndexRecord>, Why>, SyncAbort> {
-    let finished = run_local(ls_files, question)?;
-    Ok(classify_ls_files(
-        finished.success(),
-        finished.stdout(),
-        finished.stderr_head(),
-    ))
-}
-
-/// The pure classifier behind [`run_ls_files`]: `ls-files`'s exit,
-/// stdout and stderr in, its records (or the refusal they amount to) out —
-/// split out so a unit test drives a truncated stream through the very code
-/// production runs, with no process to spawn.
-fn classify_ls_files(
-    exit_ok: bool,
-    stdout: Result<&[u8], Truncated>,
-    stderr: &[u8],
-) -> Result<Vec<IndexRecord>, Why> {
-    if !exit_ok {
-        return Err(Why::IndexEntryUnreadable {
-            detail: git::diagnostic(stderr),
-        });
+/// What an `ls-files` answer that cannot be used means for the path it was
+/// asked about: git's own diagnostic, or an answer past the cap, as `sync`
+/// words them.
+pub(super) fn why_unusable(unusable: UnusableIndexAnswer) -> Why {
+    match unusable {
+        UnusableIndexAnswer::Failed { detail } => Why::IndexEntryUnreadable { detail },
+        UnusableIndexAnswer::TooLarge => Why::OutputTooLarge {
+            command: "ls-files",
+        },
     }
-    let stdout = stdout.map_err(|_truncated| Why::OutputTooLarge {
-        command: "ls-files",
-    })?;
-    parse_ls_files_tagged(stdout).map_err(|error| Why::IndexEntryUnreadable {
-        detail: error.to_string(),
-    })
 }
 
 /// Reads the single, stage-0, regular-file entry rule (b) requires out of
@@ -624,21 +581,13 @@ fn index_entry_from(records: &[IndexRecord], pathspec: &str) -> Result<(IndexMod
             });
         }
     };
-    match record.tag {
-        IndexTag::Tracked => Ok((mode, record.object.clone())),
-        IndexTag::SkipWorktree => Err(Why::HiddenFromWorkTree {
-            flag: HiddenFlag::SkipWorktree,
-        }),
-        IndexTag::AssumeUnchanged => Err(Why::HiddenFromWorkTree {
-            flag: HiddenFlag::AssumeUnchanged,
-        }),
-        IndexTag::SkipWorktreeAndAssumeUnchanged => Err(Why::HiddenFromWorkTree {
-            flag: HiddenFlag::Both,
-        }),
+    match record.tag.reading() {
+        TagReading::Read => Ok((mode, record.object.clone())),
+        TagReading::Hidden(flag) => Err(Why::HiddenFromWorkTree { flag }),
         // A stage-0 record is never unmerged: the stage check above already
         // refused every unmerged entry. Reaching here means git printed a
         // contradiction, which is a refusal, not a guess.
-        IndexTag::Unmerged => Err(Why::Conflicted),
+        TagReading::Unmerged => Err(Why::Conflicted),
     }
 }
 
@@ -666,7 +615,7 @@ fn checkout_bytes_for(
     work_tree: &WorkTree,
     path: &ClaimPath,
     object: &ObjectId,
-) -> Result<Result<Vec<u8>, Why>, SyncAbort> {
+) -> Result<Result<Vec<u8>, Why>, WorkTreeAbort> {
     let mut cat_file = work_tree.git(Locale::Inherited);
     cat_file.env("GIT_NO_LAZY_FETCH", "1");
     cat_file.args([
@@ -684,7 +633,7 @@ fn checkout_bytes_for(
 }
 
 /// The pure classifier behind [`checkout_bytes_for`], split out for the same
-/// reason as [`classify_ls_files`]. The checkout is stdout as written, never
+/// reason as [`index_records::classify_ls_files`]. The checkout is stdout as written, never
 /// parsed.
 fn classify_cat_file(
     exit_ok: bool,
@@ -732,16 +681,18 @@ fn disk_bytes_equal(work_tree: &WorkTree, path: &ClaimPath, checkout: &[u8]) -> 
 #[cfg(test)]
 mod tests {
     use crate::claim::ClaimPath;
-    use crate::sync::abort::SyncAbort;
-    use crate::sync::clean::{Cleanliness, Dirt, check_clean};
     use crate::sync::test_repository::{TestRepository, describe_difference};
+    use crate::work_tree::abort::WorkTreeAbort;
+    use crate::work_tree::clean::{Cleanliness, Dirt, check_clean};
 
     use crate::subprocess::Truncated;
 
     use super::{
-        AboveEntry, Evidence, HiddenFlag, IndexMode, Proven, Why, classify_cat_file,
-        classify_ls_files, prove, why_not_the_checkout,
+        AboveEntry, Evidence, IndexMode, Proven, Why, classify_cat_file, prove,
+        why_not_the_checkout, why_unusable,
     };
+    use crate::work_tree::index_entry::HiddenFlag;
+    use crate::work_tree::index_records::classify_ls_files;
 
     fn claim_path(path: &str) -> ClaimPath {
         ClaimPath::from_rendering_path(path).expect("a well-formed test path")
@@ -767,8 +718,8 @@ mod tests {
     ) -> Result<Evidence, Why> {
         let work_tree = repository.work_tree();
         let clean = match check_clean(&work_tree).expect("status must run") {
-            crate::sync::clean::Cleanliness::Clean(clean) => clean,
-            crate::sync::clean::Cleanliness::Dirty(dirty) => {
+            crate::work_tree::clean::Cleanliness::Clean(clean) => clean,
+            crate::work_tree::clean::Cleanliness::Dirty(dirty) => {
                 panic!("fixture must be clean going into prove: {dirty:?}")
             }
         };
@@ -1050,15 +1001,15 @@ mod tests {
     }
 
     #[test]
-    fn truncated_ls_files_stdout_reads_as_output_too_large() {
+    fn an_ls_files_answer_that_cannot_be_used_is_worded_as_sync_words_it() {
         // Every ls-files answer, for a path on disk or not, is read through
-        // `classify_ls_files`; this drives a stream past its cap through it.
+        // `classify_ls_files`, and a truncated stream is the cap's refusal.
         // The control hands it the same well-formed record uncut, which must
-        // parse — so the refusal is the truncation, never the bytes.
+        // parse, so the refusal is the truncation, never the bytes.
         let refused = classify_ls_files(true, Err(Truncated::for_test(16 * 1024 * 1024)), b"")
             .expect_err("a truncated ls-files stream must be refused");
         assert!(matches!(
-            refused,
+            why_unusable(refused),
             Why::OutputTooLarge {
                 command: "ls-files"
             }
@@ -1067,6 +1018,13 @@ mod tests {
         let records = classify_ls_files(true, Ok(ONE_INDEX_RECORD), b"")
             .expect("the same record, uncut, must parse");
         assert_eq!(records.len(), 1);
+
+        let failed = classify_ls_files(false, Ok(b""), b"fatal: no\n")
+            .expect_err("a failed ls-files must be refused");
+        let Why::IndexEntryUnreadable { detail } = why_unusable(failed) else {
+            panic!("a failed ls-files is an unreadable entry")
+        };
+        assert_eq!(detail, "no");
     }
 
     #[test]
@@ -1396,8 +1354,8 @@ mod tests {
     /// state ever reaches them: replacing a committed symlink or gitlink
     /// with a regular file — even one whose bytes happen to hash equal —
     /// is a type change (`git status --porcelain=v2` reports it `.T`), which
-    /// `sync::clean`'s own parser reads as `Dirt::Unstaged` (tested by
-    /// `crates/skeletons/src/sync/clean.rs` →
+    /// `work_tree::clean`'s own parser reads as `Dirt::Unstaged` (tested by
+    /// `crates/skeletons/src/work_tree/clean.rs` →
     /// `a_type_change_with_a_blank_index_column_is_read_as_unstaged`), so
     /// rule (a) always refuses first in a real run. These two are
     /// exercised by a hand-crafted index entry (`update-index --cacheinfo`)
@@ -1405,8 +1363,8 @@ mod tests {
     /// [`CleanWorkTree::assume_clean_for_test`] standing in for rule (a)
     /// having already run.
     mod mode_checks_unreachable_from_a_clean_tree {
-        use crate::sync::clean::CleanWorkTree;
         use crate::sync::test_repository::TestRepository;
+        use crate::work_tree::clean::CleanWorkTree;
 
         use super::super::{Proven, Why, prove};
         use super::write;
@@ -1696,7 +1654,7 @@ mod tests {
         let error = check_clean(&work_tree).expect_err("a failing required filter must abort");
         assert!(matches!(
             error,
-            SyncAbort::GitFailed {
+            WorkTreeAbort::GitFailed {
                 command: "status",
                 ..
             }

@@ -1,37 +1,18 @@
 //! The lines for the ways git looks away from a path `sync` is about to
-//! write: a present file flagged so git does not read it, an entry git tracks
-//! at a directory above the claim, and an entry git hides under another
-//! spelling that the filesystem takes for the claim. Each names what git
-//! holds and where, and a remedy only where one works.
+//! write, other than a file git is told not to read (which `wear` meets too,
+//! so [`crate::work_tree::message::hidden_from_work_tree_line`] is shared): an
+//! entry git tracks at a directory above the claim, an entry git hides under another spelling that
+//! the filesystem takes for the claim, and a file git ignores. Each names what
+//! git holds and where, and a remedy only where one works.
 
 use crate::claim::ClaimPath;
 use crate::skeleton::Escaped;
 use crate::survey::told_apart;
 use crate::sync::fold_variant::{FoldRelation, FoldVariant};
-use crate::sync::proof::{AboveEntry, HiddenFlag};
+use crate::sync::proof::AboveEntry;
 
 use super::{RUN_SYNC_AGAIN, nothing_written_with_remedy};
 use crate::sync::write::Leftover;
-
-/// `` {path} is marked {flag} in git's index, so git does not read its bytes
-/// from the work tree and would ignore what sync wrote there: run `git
-/// update-index --no-{flag} -- {path}`, then run the `sync` task again ``.
-pub(super) fn hidden_from_work_tree_line(path: &ClaimPath, flag: HiddenFlag) -> String {
-    let path = Escaped(path.as_str());
-    let (marked, options) = match flag {
-        HiddenFlag::SkipWorktree => ("skip-worktree", "--no-skip-worktree"),
-        HiddenFlag::AssumeUnchanged => ("assume-unchanged", "--no-assume-unchanged"),
-        HiddenFlag::Both => (
-            "skip-worktree and assume-unchanged",
-            "--no-skip-worktree --no-assume-unchanged",
-        ),
-    };
-    format!(
-        "{path} is marked {marked} in git's index, so git does not read its bytes from the work \
-         tree and would ignore what sync wrote there: run `git update-index {options} -- \
-         {path}`, then {RUN_SYNC_AGAIN}"
-    )
-}
 
 /// `` {path} is ignored by git (`{rule}`, as `git check-ignore -v` reports it
 /// as source:line:pattern), so sync would create a file git status never
@@ -176,48 +157,13 @@ pub(super) fn bring_back_remedy(git_path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        bring_back_remedy, folds_onto_tracked_message, hidden_from_work_tree_line,
-        tracked_above_line,
-    };
+    use super::{bring_back_remedy, folds_onto_tracked_message, tracked_above_line};
     use crate::survey::poison::{POISON, POISON_FOLDED, assert_escaped_once, claim};
     use crate::sync::fold_variant::fold_variants;
-    use crate::sync::proof::{AboveEntry, HiddenFlag};
+    use crate::sync::proof::AboveEntry;
     use crate::sync::write::{Leftover, LeftoverReason};
 
     use super::super::poisoned::poisoned_leftover;
-
-    #[test]
-    fn a_hidden_file_names_its_flag_and_the_command_that_clears_exactly_that_flag() {
-        for (flag, marked, options) in [
-            (
-                HiddenFlag::SkipWorktree,
-                "marked skip-worktree in",
-                "--no-skip-worktree --",
-            ),
-            (
-                HiddenFlag::AssumeUnchanged,
-                "marked assume-unchanged in",
-                "--no-assume-unchanged --",
-            ),
-            (
-                HiddenFlag::Both,
-                "marked skip-worktree and assume-unchanged in",
-                "--no-skip-worktree --no-assume-unchanged --",
-            ),
-        ] {
-            let line = hidden_from_work_tree_line(&claim("d/plain.yml"), flag);
-            assert_eq!(
-                line,
-                format!(
-                    "d/plain.yml is {marked} git's index, so git does not read its bytes from \
-                     the work tree and would ignore what sync wrote there: run `git \
-                     update-index {options} d/plain.yml`, then run the `sync` task \
-                     again"
-                )
-            );
-        }
-    }
 
     #[test]
     fn a_file_above_names_the_entry_and_offers_the_removal_from_the_index() {

@@ -18,7 +18,7 @@ use crate::skeleton::{Choice, Choices};
 /// this crate wears: `options` its option schema
 /// (`[package.metadata.skeletons.options]`) and `verbatim` its list of files
 /// shipped as bytes (`[package.metadata.skeletons] verbatim = [...]`).
-const RESERVED_WEARING_KEYS: [&str; 2] = ["options", "verbatim"];
+pub(crate) const RESERVED_WEARING_KEYS: [&str; 2] = ["options", "verbatim"];
 
 /// The dependency key a `[package.metadata.skeletons.<key>]` table names.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

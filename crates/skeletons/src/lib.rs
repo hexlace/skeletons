@@ -3,8 +3,9 @@
 //! ## What this crate provides
 //!
 //! [`task()`] is the whole of this crate's public API, as it is for any
-//! ritual task: the bundle a project's command line mounts, holding `check`
-//! and `sync` as its two commands. Everything else in the crate is private.
+//! ritual task: the bundle a project's command line mounts, holding `check`,
+//! `sync` and `wear` as its three commands. Everything else in the crate is
+//! private.
 
 // Every module in this crate is private, and every item shared between
 // modules is `pub(crate)`: the visibility that is true, and what rustc's
@@ -22,6 +23,7 @@
 use rituals::Task;
 
 mod behind;
+mod cargo;
 mod check;
 mod claim;
 mod git;
@@ -29,6 +31,8 @@ mod skeleton;
 mod subprocess;
 mod survey;
 mod sync;
+mod wear;
+mod work_tree;
 mod workspace;
 
 // Tests for `skeleton::render`, read from real skeleton crates under
@@ -63,22 +67,26 @@ mod doc_citations;
 pub fn task() -> Task {
     Task::group(
         "keep this repository from drifting apart from its siblings",
-        [("check", check::task()), ("sync", sync::task())],
+        [
+            ("check", check::task()),
+            ("sync", sync::task()),
+            ("wear", wear::task()),
+        ],
     )
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_bundle_holds_exactly_check_and_sync() {
+    fn the_bundle_holds_exactly_check_sync_and_wear() {
         // Task's own Debug impl prints a bundle's `children: [names]`, and
         // is the only door onto them from outside `rituals`. What breaks if
         // this fails is every command line that mounts it: its children are
         // the commands under `skeletons`, child for child.
         let rendered = format!("{:?}", super::task());
         assert!(
-            rendered.contains(r#"children: ["check", "sync"]"#),
-            "expected exactly the check and sync children; Debug was: {rendered}"
+            rendered.contains(r#"children: ["check", "sync", "wear"]"#),
+            "expected exactly the check, sync and wear children; Debug was: {rendered}"
         );
     }
 }

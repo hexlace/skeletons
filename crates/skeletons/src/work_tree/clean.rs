@@ -1,14 +1,14 @@
-//! Rule (a): the whole work tree, not only the paths `sync` is about to
+//! Rule (a): the whole work tree, not only the paths a command is about to
 //! write, must be clean — as git itself defines clean, under flags that
 //! defeat the configuration that would otherwise hide dirt from a plain
 //! `git status`. It is rule (a) in `.docs/design.md`, "The whole work tree is
-//! clean"; rule (b), "Positive proof, per path", is `super::proof`'s.
+//! clean"; rule (b), "Positive proof, per path", is `sync`'s own `proof`.
 
 use crate::git::{self, Locale, RepositoryPrefix};
 use crate::subprocess::Truncated;
 
-use super::abort::{GitQuestion, SyncAbort};
-use super::work_tree::{WorkTree, run_local};
+use super::abort::{GitQuestion, WorkTreeAbort};
+use super::{WorkTree, run_local};
 
 /// Proof that `git status` reported nothing at all for the whole work
 /// tree: no tracked change (staged or unstaged, mode included), untracked
@@ -81,7 +81,7 @@ pub(crate) enum Dirt {
 /// flags that defeat `status.showUntrackedFiles`, `diff.ignoreSubmodules`
 /// and `submodule.<name>.ignore`, with `core.fsmonitor=false` so no
 /// fsmonitor answer is trusted and no daemon is started under `.git/`.
-pub(crate) fn check_clean(work_tree: &WorkTree) -> Result<Cleanliness, SyncAbort> {
+pub(crate) fn check_clean(work_tree: &WorkTree) -> Result<Cleanliness, WorkTreeAbort> {
     // A content filter (git-lfs's clean filter, in particular) can run
     // while git compares a file's content, so this command's own locale is
     // inherited rather than fixed — the same reason `cat-file` is.
@@ -116,14 +116,15 @@ fn classify_status(
     stdout: Result<&[u8], Truncated>,
     stderr: &[u8],
     prefix: &RepositoryPrefix,
-) -> Result<Cleanliness, SyncAbort> {
+) -> Result<Cleanliness, WorkTreeAbort> {
     if !exit_ok {
-        return Err(SyncAbort::GitFailed {
+        return Err(WorkTreeAbort::GitFailed {
             command: "status",
             diagnostic: git::diagnostic(stderr),
         });
     }
-    let stdout = stdout.map_err(|_truncated| SyncAbort::GitOutputTooLarge { command: "status" })?;
+    let stdout =
+        stdout.map_err(|_truncated| WorkTreeAbort::GitOutputTooLarge { command: "status" })?;
 
     let dirty = parse_status(stdout, prefix);
     if dirty.is_empty() {
@@ -238,7 +239,7 @@ mod tests {
     use super::{Cleanliness, Dirt, classify_ordinary, classify_status, parse_status};
     use crate::git::RepositoryPrefix;
     use crate::subprocess::Truncated;
-    use crate::sync::abort::SyncAbort;
+    use crate::work_tree::abort::WorkTreeAbort;
 
     fn top_level() -> RepositoryPrefix {
         RepositoryPrefix::parse("").expect("empty prefix")
@@ -259,7 +260,7 @@ mod tests {
         .expect_err("a truncated status stream must be refused");
         assert!(matches!(
             error,
-            SyncAbort::GitOutputTooLarge { command: "status" }
+            WorkTreeAbort::GitOutputTooLarge { command: "status" }
         ));
 
         let verdict = classify_status(true, Ok(b""), b"", &top_level())
@@ -404,8 +405,8 @@ mod tests {
     /// configuration, nested repositories, and git's own defaults for
     /// `--ignored`/`--untracked-files`.
     mod real_git {
-        use super::super::{Cleanliness, check_clean};
         use crate::sync::test_repository::TestRepository;
+        use crate::work_tree::clean::{Cleanliness, check_clean};
 
         fn dirt_kinds(cleanliness: Cleanliness) -> Vec<super::Dirt> {
             let Cleanliness::Dirty(dirty) = cleanliness else {

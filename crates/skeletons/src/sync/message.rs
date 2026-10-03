@@ -3,9 +3,6 @@
 
 mod hidden;
 mod links;
-mod timed_out;
-
-use std::path::Path;
 
 use rituals::report as write_report;
 
@@ -14,81 +11,13 @@ use crate::skeleton::Escaped;
 use crate::survey::count;
 use crate::survey::{Refusal, join_and, told_apart, unsafe_path_change_clause};
 
-use super::abort::SyncAbort;
-use super::clean::{Dirt, DirtyPath};
 use super::proof::{Unproven, Why};
 use super::write::{
     CollisionAt, CommitCause, CommitFailure, Committed, Leftover, LeftoverReason, StagingRelation,
     TargetChange, WriteFailure,
 };
-
-/// The stderr message for a [`SyncAbort`] — `sync` could not even ask git
-/// the questions it needs answered, as opposed to git answering "no" to one
-/// of them, which is a refusal reported through [`report_dirty`] or
-/// [`report_unproven`] instead.
-pub(crate) fn sync_abort_message(abort: &SyncAbort, root: &Path) -> String {
-    let root = root.display().to_string();
-    let root = Escaped(&root);
-    match abort {
-        SyncAbort::RedirectedGit { variables } => redirected_git_message(variables),
-        SyncAbort::NotAWorkTree => format!(
-            "{root} is not inside a git work tree, so sync wrote nothing: without git there is \
-             no undo for what it replaces; commit the workspace to git first"
-        ),
-        SyncAbort::DubiousOwnership { diagnostic } => {
-            let diagnostic = Escaped(diagnostic);
-            format!(
-                "git refuses to read this repository because another user owns it (git's \
-                 safe.directory check), so sync wrote nothing: {diagnostic}"
-            )
-        }
-        SyncAbort::GitUnavailable { detail } => {
-            let detail = Escaped(detail);
-            format!("running `git` failed, so sync wrote nothing: {detail}")
-        }
-        SyncAbort::GitFailed {
-            command,
-            diagnostic,
-        } => {
-            let diagnostic = Escaped(diagnostic);
-            format!("git {command} failed, so sync wrote nothing: {diagnostic}")
-        }
-        SyncAbort::GitTimedOut { question } => timed_out::timed_out_message(question),
-        SyncAbort::GitOutputTooLarge { command } => format!(
-            "git {command} printed more than 16 MiB, the most `skeletons` reads from git, so sync \
-             wrote nothing"
-        ),
-    }
-}
-
-/// `` {GIT_A and GIT_B} {is|are} set, and git would answer from wherever
-/// {it points|they point} rather than from this work tree's own repository,
-/// so sync wrote nothing: git sets {it|them} for the hooks it runs, so run
-/// `sync` outside a git hook (the `check` task works inside one), or unset {it|them} ``.
-///
-/// Only reached when something would be written: with nothing to write,
-/// `sync` never asks git anything, so it needs no such refusal. Inside a
-/// commit the index git is using may be a temporary one (`git commit
-/// <paths>`, `git commit -a`), and a file written mid-commit is not part of
-/// that commit — which is what refusing there protects.
-fn redirected_git_message(variables: &[&'static str]) -> String {
-    let count = variables.len();
-    let names = join_and(
-        &variables
-            .iter()
-            .map(|name| (*name).to_owned())
-            .collect::<Vec<_>>(),
-    );
-    format!(
-        "{names} {} set, and git would answer from wherever {} rather than from this work \
-         tree's own repository, so sync wrote nothing: git sets {} for the hooks it runs, so \
-         run the `sync` task outside a git hook (the `check` task works inside one), or unset {}",
-        count::is_or_are(count),
-        count::it_points_or_they_point(count),
-        count::it_or_them(count),
-        count::it_or_them(count),
-    )
-}
+use crate::work_tree::message::hidden_from_work_tree_line;
+use crate::work_tree::writing_command::WritingCommand;
 
 /// Reports every refusal on stdout, each as `refused: <message>` — the same
 /// self-contained text `check` shows for a refusal about no single
@@ -112,52 +41,6 @@ pub(crate) fn refused_summary(count: usize) -> String {
     format!(
         "sync writes all or nothing, and {}, so it wrote nothing",
         count::there_are_refusals(count)
-    )
-}
-
-/// Reports every dirty path on stdout, one line per path, sorted by its own
-/// shown spelling.
-pub(crate) fn report_dirty(dirty: &[DirtyPath]) {
-    let mut sorted: Vec<&DirtyPath> = dirty.iter().collect();
-    sorted.sort_by(|left, right| left.shown.cmp(&right.shown));
-    let lines: Vec<String> = sorted.iter().map(|entry| dirty_line(entry)).collect();
-    write_report(lines.join("\n"));
-}
-
-fn dirty_line(dirty: &DirtyPath) -> String {
-    let shown = Escaped(&dirty.shown);
-    match dirty.dirt {
-        Dirt::Unreadable => {
-            format!("git status reported a line `skeletons` cannot read: {shown}")
-        }
-        other => format!("{shown} {}", dirt_phrase(other)),
-    }
-}
-
-fn dirt_phrase(dirt: Dirt) -> &'static str {
-    match dirt {
-        Dirt::Unstaged => "has uncommitted changes",
-        Dirt::Staged => "has staged changes",
-        Dirt::Deleted => "is deleted",
-        Dirt::Untracked => "is untracked",
-        Dirt::IntentToAdd => "is marked intent-to-add",
-        Dirt::Conflicted => "is conflicted",
-        Dirt::Submodule => "is a submodule with changes of its own",
-        Dirt::Unreadable => unreachable!("dirty_line handles Unreadable before reaching this"),
-    }
-}
-
-/// `` the working tree has {n} uncommitted {change|changes}, so sync wrote
-/// nothing: it writes only into a clean working tree, where git holds
-/// everything it could replace; commit, stash or move {it|them}, then run
-/// `sync` again ``.
-pub(crate) fn dirty_summary(count: usize) -> String {
-    format!(
-        "the working tree has {count} uncommitted {}, so sync wrote nothing: it \
-         writes only into a clean working tree, where git holds everything it could replace; \
-         commit, stash or move {}, then {RUN_SYNC_AGAIN}",
-        count::change(count),
-        count::it_or_them(count)
     )
 }
 
@@ -210,7 +93,7 @@ fn unproven_line(unproven: &Unproven) -> String {
         ),
         Why::TrackedButAbsent { git_path } => tracked_but_absent_line(&unproven.path, git_path),
         Why::HiddenFromWorkTree { flag } => {
-            hidden::hidden_from_work_tree_line(&unproven.path, *flag)
+            hidden_from_work_tree_line(unproven.path.as_str(), *flag, WritingCommand::Sync)
         }
         Why::TrackedAbove { git_path, entry } => {
             hidden::tracked_above_line(&unproven.path, git_path, entry)
@@ -529,15 +412,9 @@ fn target_change_clause(what: &TargetChange) -> String {
     }
 }
 
-/// The remedy every message that ends by asking for another run gives.
-///
-/// It names the subcommand as a task and nothing before it. The task is told
-/// neither the key it is mounted under nor how its command line is reached
-/// (<https://github.com/hexlace/ritual/issues/6>), so the remedy names only the
-/// subcommand, which the wearer recognises on their own command line. It says
-/// "task" because a bare `sync` is also a shell command that flushes buffers,
-/// prints nothing and exits 0.
-pub(super) const RUN_SYNC_AGAIN: &str = "run the `sync` task again";
+/// The remedy every message that ends by asking for another run gives:
+/// [`WritingCommand::run_again`] for `sync`, which says why it names a task.
+pub(super) const RUN_SYNC_AGAIN: &str = WritingCommand::Sync.run_again();
 
 /// One leftover as the messages name it: `<path> (<reason>)`.
 fn leftover_text(leftover: &Leftover) -> String {
@@ -792,9 +669,8 @@ mod poisoned;
 mod tests {
     use super::{
         CollisionAt, CommitCause, CommitFailure, Leftover, LeftoverReason, StagingRelation,
-        SyncAbort, TargetChange, WriteFailure, directory_not_writable_message, dirty_summary,
-        leftovers_after_success_message, redirected_git_message, refused_summary,
-        sync_abort_message, unproven_summary, write_failure_message,
+        TargetChange, WriteFailure, directory_not_writable_message,
+        leftovers_after_success_message, refused_summary, unproven_summary, write_failure_message,
     };
     use crate::claim::{DriftReason, UnsafePathCause};
     use crate::survey::poison::claim;
@@ -834,26 +710,6 @@ mod tests {
         assert_eq!(
             refused_summary(2),
             "sync writes all or nothing, and there are 2 refusals, so it wrote nothing"
-        );
-    }
-
-    #[test]
-    fn dirty_summary_is_singular_for_one_change() {
-        assert_eq!(
-            dirty_summary(1),
-            "the working tree has 1 uncommitted change, so sync wrote nothing: it writes only \
-             into a clean working tree, where git holds everything it could replace; commit, \
-             stash or move it, then run the `sync` task again"
-        );
-    }
-
-    #[test]
-    fn dirty_summary_is_plural_for_several_changes() {
-        assert_eq!(
-            dirty_summary(2),
-            "the working tree has 2 uncommitted changes, so sync wrote nothing: it writes only \
-             into a clean working tree, where git holds everything it could replace; commit, \
-             stash or move them, then run the `sync` task again"
         );
     }
 
@@ -928,30 +784,6 @@ mod tests {
                 assert!(!summary.contains(remedy), "{remedy:?} in {summary}");
             }
         }
-    }
-
-    #[test]
-    fn redirected_git_names_one_variable_singular() {
-        let message = redirected_git_message(&["GIT_DIR"]);
-        assert_eq!(
-            message,
-            "GIT_DIR is set, and git would answer from wherever it points rather than from \
-             this work tree's own repository, so sync wrote nothing: git sets it for the hooks \
-             it runs, so run the `sync` task outside a git hook (the `check` task works inside \
-             one), or unset it"
-        );
-    }
-
-    #[test]
-    fn redirected_git_names_several_variables_plural() {
-        let message = redirected_git_message(&["GIT_DIR", "GIT_WORK_TREE"]);
-        assert_eq!(
-            message,
-            "GIT_DIR and GIT_WORK_TREE are set, and git would answer from wherever they point \
-             rather than from this work tree's own repository, so sync wrote nothing: git sets \
-             them for the hooks it runs, so run the `sync` task outside a git hook \
-             (the `check` task works inside one), or unset them"
-        );
     }
 
     #[test]
@@ -1198,77 +1030,6 @@ mod tests {
             super::unproven_line(&unproven),
             "plain.yml could not be compared with what git would check out for it: cannot read \
              object 0000"
-        );
-    }
-
-    #[test]
-    fn not_a_work_tree_names_the_root_and_the_remedy() {
-        let message = sync_abort_message(
-            &SyncAbort::NotAWorkTree,
-            std::path::Path::new("/path/to/root"),
-        );
-        assert_eq!(
-            message,
-            "/path/to/root is not inside a git work tree, so sync wrote nothing: without git \
-             there is no undo for what it replaces; commit the workspace to git first"
-        );
-    }
-
-    #[test]
-    fn git_unavailable_carries_its_own_detail() {
-        let message = sync_abort_message(
-            &SyncAbort::GitUnavailable {
-                detail: "no such file or directory".to_owned(),
-            },
-            std::path::Path::new("/root"),
-        );
-        assert_eq!(
-            message,
-            "running `git` failed, so sync wrote nothing: no such file or directory"
-        );
-    }
-
-    #[test]
-    fn dubious_ownership_names_safe_directory_and_carries_the_diagnostic() {
-        let message = sync_abort_message(
-            &SyncAbort::DubiousOwnership {
-                diagnostic: "detected dubious ownership in repository at '/root'".to_owned(),
-            },
-            std::path::Path::new("/root"),
-        );
-        assert_eq!(
-            message,
-            "git refuses to read this repository because another user owns it (git's \
-             safe.directory check), so sync wrote nothing: detected dubious ownership in \
-             repository at '/root'"
-        );
-    }
-
-    #[test]
-    fn git_failed_names_the_command_and_the_diagnostic() {
-        let message = sync_abort_message(
-            &SyncAbort::GitFailed {
-                command: "status",
-                diagnostic: "bad object".to_owned(),
-            },
-            std::path::Path::new("/root"),
-        );
-        assert_eq!(
-            message,
-            "git status failed, so sync wrote nothing: bad object"
-        );
-    }
-
-    #[test]
-    fn git_output_too_large_names_the_command_and_the_cap() {
-        let message = sync_abort_message(
-            &SyncAbort::GitOutputTooLarge { command: "status" },
-            std::path::Path::new("/root"),
-        );
-        assert_eq!(
-            message,
-            "git status printed more than 16 MiB, the most `skeletons` reads from git, so sync wrote \
-             nothing"
         );
     }
 

@@ -35,9 +35,9 @@ use crate::claim::ClaimPath;
 use crate::git::{self, Locale};
 use crate::subprocess::Truncated;
 
-use super::super::abort::{GitQuestion, SyncAbort};
-use super::super::work_tree::{WorkTree, run_local};
 use super::Why;
+use crate::work_tree::abort::{GitQuestion, WorkTreeAbort};
+use crate::work_tree::{WorkTree, run_local};
 
 /// `git check-ignore`'s exit status for "at least one path is ignored".
 const EXIT_IGNORED: i32 = 0;
@@ -78,7 +78,10 @@ enum Verdict {
 ///
 /// A whole-command abort (git could not be run, or ran past its time) is the
 /// outer error.
-pub(super) fn refusal(work_tree: &WorkTree, path: &ClaimPath) -> Result<Option<Why>, SyncAbort> {
+pub(super) fn refusal(
+    work_tree: &WorkTree,
+    path: &ClaimPath,
+) -> Result<Option<Why>, WorkTreeAbort> {
     let question = GitQuestion::Ignored(path.clone());
 
     let verdict = run_local(

@@ -1,5 +1,6 @@
 //! Running an external command with bounded output, and an optional bounded
-//! wait — the one place `check`/`sync` ever spawn a process (`cargo`, `git`).
+//! wait — the one place `check`, `sync` and `wear` ever spawn a process
+//! (`cargo metadata`, `cargo add` and `git`).
 //!
 //! A child's stdout and stderr are read from dedicated threads for as long
 //! as the command runs, so neither pipe can fill up and block the child
@@ -95,6 +96,26 @@ pub(crate) struct Finished {
 }
 
 impl Finished {
+    /// Builds a `Finished` directly: a command that exited with `code` and
+    /// printed `stderr` and nothing else, for a sibling module's own unit
+    /// tests that classify what a command said without spawning one.
+    #[cfg(test)]
+    pub(crate) fn for_test(code: i32, stderr: &[u8]) -> Self {
+        use std::os::unix::process::ExitStatusExt;
+
+        let captured = |bytes: &[u8]| Captured {
+            bytes: bytes.to_vec(),
+            truncated: false,
+            cap_bytes: u64::MAX,
+        };
+        Self {
+            // An exit code occupies the second byte of a wait status.
+            status: ExitStatus::from_raw(code << 8),
+            stdout: captured(b""),
+            stderr: captured(stderr),
+        }
+    }
+
     pub(crate) fn success(&self) -> bool {
         self.status.success()
     }
@@ -149,8 +170,8 @@ enum SubprocessErrorKind {
 impl SubprocessError {
     /// Whether this command was killed for running past its own timeout.
     ///
-    /// `sync` reads it to say a git command timed out rather than could not
-    /// be run (`sync::work_tree::run_local`), since the two ask the wearer for
+    /// The commands that write read it to say a git command timed out rather
+    /// than could not be run (`work_tree::run_local`), since the two ask the wearer for
     /// different things. `behind`'s git remote queries do set
     /// [`Limits::timeout`], but they report a failed query by its `Display`
     /// text alone, which reads the same as any other reason a query could not

@@ -2,8 +2,10 @@
 //! nothing here is ever stored and read back.
 
 mod cargo_metadata;
+mod crate_name;
 mod locate;
 mod pin;
+mod prospect;
 mod schema;
 mod wearing_table;
 mod worn;
@@ -11,9 +13,11 @@ mod worn;
 use std::path::{Path, PathBuf};
 
 pub(crate) use cargo_metadata::ReadWorkspaceError;
+pub(crate) use crate_name::{same_crate, underscored};
 pub(crate) use locate::PackageIdentity;
 pub(crate) use pin::{CRATES_IO_SOURCE, Pin};
-pub(crate) use wearing_table::OptionShapeRefusal;
+pub(crate) use prospect::{Declared, Member, Prospect, SkeletonsTable, read_prospect};
+pub(crate) use wearing_table::{OptionShapeRefusal, RESERVED_WEARING_KEYS};
 pub(crate) use worn::{WornDependency, WornId};
 
 use locate::LocateRefusal;
@@ -87,14 +91,14 @@ pub(crate) enum WearingRefusal {
 ///
 /// `check` always passes `Allowed`, so a fresh clone whose members were
 /// never built still works: cargo fetches exactly what the lockfile pins,
-/// which is cargo's own normal fetch, not a question `skeletons` asks. `sync`
-/// always passes `Refused` (`--offline`), because its own contract is that
-/// writing requires nothing beyond what is already locked — a clone whose
-/// sources were never fetched aborts with cargo's own offline error
-/// rather than fetching them. Each is the only call `skeletons` makes to
-/// `read`: `check.rs`'s own `run` passes `Allowed` and `sync.rs`'s own `run`
-/// passes `Refused`, and neither takes it from a caller — there is nowhere
-/// else in the crate a different choice could come from.
+/// which is cargo's own normal fetch, not a question `skeletons` asks. `wear`
+/// reads the same way, through `read_prospect` and through its read back,
+/// since `cargo add` may itself be fetching. `sync` always passes `Refused`
+/// (`--offline`), because its own contract is that writing requires nothing
+/// beyond what is already locked — a clone whose sources were never fetched
+/// aborts with cargo's own offline error rather than fetching them. Each
+/// command's own `run` makes that choice and none takes it from a caller —
+/// there is nowhere else in the crate a different choice could come from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Network {
     Allowed,
@@ -104,8 +108,15 @@ pub(crate) enum Network {
 /// Reads `directory`'s workspace (cargo walks up from it to the workspace
 /// root itself) and turns it into every wearing table any member declares.
 pub(crate) fn read(directory: &Path, network: Network) -> Result<Workspace, ReadWorkspaceError> {
-    let document = cargo_metadata::fetch(directory, network)?;
+    Ok(from_document(&cargo_metadata::fetch(directory, network)?))
+}
 
+/// Turns one `cargo metadata` document into every wearing table any member
+/// declares.
+///
+/// Shared by [`read`] and [`read_prospect`], so the two see a workspace
+/// identically and one `cargo metadata` run answers both.
+fn from_document(document: &Document) -> Workspace {
     let mut members: Vec<&Package> = document
         .packages
         .iter()
@@ -117,13 +128,13 @@ pub(crate) fn read(directory: &Path, network: Network) -> Result<Workspace, Read
 
     let mut wearing = Vec::new();
     for member in members {
-        wearing.extend(read_member(&document, member));
+        wearing.extend(read_member(document, member));
     }
 
-    Ok(Workspace {
+    Workspace {
         root: document.workspace_root.clone(),
         wearing,
-    })
+    }
 }
 
 /// Every wearing outcome (worn, or refused) declared on one workspace

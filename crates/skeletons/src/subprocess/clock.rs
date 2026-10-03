@@ -50,12 +50,22 @@ struct Wait {
 /// after a few polls however long the child would really have run. It also
 /// counts the reads and records every wait it is asked for, so a test can show
 /// that a command with no timeout never consulted it, and what pauses a
-/// bounded one asked for.
+/// bounded one asked for. A test can also hang one action on the first pause
+/// that begins at a chosen instant, so something outside the clock happens at
+/// a known point in the clock's own events.
 #[cfg(test)]
 pub(crate) struct TestClock {
     now: std::cell::Cell<Instant>,
     reads: std::cell::Cell<u32>,
     waits: std::cell::RefCell<Vec<Wait>>,
+    hook: std::cell::RefCell<Option<Hook>>,
+}
+
+/// An action waiting for the first pause that begins at or after an instant.
+#[cfg(test)]
+struct Hook {
+    instant: Instant,
+    action: Box<dyn FnOnce()>,
 }
 
 #[cfg(test)]
@@ -66,6 +76,7 @@ impl TestClock {
             now: std::cell::Cell::new(Instant::now()),
             reads: std::cell::Cell::new(0),
             waits: std::cell::RefCell::new(Vec::new()),
+            hook: std::cell::RefCell::new(None),
         }
     }
 
@@ -89,6 +100,21 @@ impl TestClock {
             .map(|wait| wait.duration)
             .collect()
     }
+
+    /// Runs `action` inside the first pause that begins at or after
+    /// `instant`, before the clock moves on. It runs at most once, and a
+    /// second call replaces an action that has not run yet.
+    ///
+    /// Tying the action to a pause rather than to a count of reads makes its
+    /// place among the clock's events something a test can name: the pause
+    /// that begins at the deadline is the first one after the deadline was
+    /// decided.
+    pub(crate) fn on_first_wait_from(&self, instant: Instant, action: impl FnOnce() + 'static) {
+        *self.hook.borrow_mut() = Some(Hook {
+            instant,
+            action: Box::new(action),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -99,10 +125,14 @@ impl Clock for TestClock {
     }
 
     fn wait(&self, duration: Duration) {
-        self.waits.borrow_mut().push(Wait {
-            began: self.now.get(),
-            duration,
-        });
+        let began = self.now.get();
+        self.waits.borrow_mut().push(Wait { began, duration });
+        // Taken out before it runs, so an action that touches this clock does
+        // not find the hook still borrowed.
+        let due = self.hook.borrow_mut().take_if(|hook| hook.instant <= began);
+        if let Some(hook) = due {
+            (hook.action)();
+        }
         self.now.set(self.now.get() + duration);
     }
 }

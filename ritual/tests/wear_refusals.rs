@@ -19,7 +19,8 @@ mod support;
 use std::os::unix::fs::PermissionsExt as _;
 
 use support::wear::{
-    ManifestAndLockfile, assert_nothing_was_undone, assert_refused_and_untouched,
+    ASSUME_UNCHANGED, BOTH_FLAGS, ManifestAndLockfile, ONE_UNCOMMITTED_CHANGE_LINE, SKIP_WORKTREE,
+    assert_a_hidden_file_is_refused, assert_nothing_was_undone, assert_refused_and_untouched,
     assert_refused_with_line, commit_everything, fixture_for_wearing, git_step,
     the_single_refusal_line, wear_passthrough_plain,
 };
@@ -165,12 +166,7 @@ fn a_work_tree_with_uncommitted_changes_is_refused_and_nothing_changes() -> Test
         "stdout must list the dirty path as its own line; stdout was:\n{}",
         report.stdout
     );
-    assert_refused_with_line(
-        &report,
-        "the working tree has 1 uncommitted change, so wear wrote nothing: it writes only into a \
-         clean working tree, where git holds the manifest it changes and any Cargo.lock git \
-         tracks; commit, stash or move it, then run the `wear` task again",
-    );
+    assert_refused_with_line(&report, ONE_UNCOMMITTED_CHANGE_LINE);
     assert_nothing_was_undone(&report);
     assert_eq!(
         ManifestAndLockfile::read(&fixture, "Cargo.toml")?,
@@ -304,78 +300,6 @@ fn a_key_that_names_a_crate_the_compiler_provides_is_refused_and_nothing_changes
 // and tells the wearer to commit them, so each must be a file git reads from
 // the work tree and tracks.
 // ---------------------------------------------------------------------
-
-/// The refusal for a file git is told not to read, worded as `sync` words it
-/// with `wear` in it. `marked` is how the line names the flags, `options` the
-/// `git update-index` options that clear exactly those.
-fn hidden_line(path: &str, marked: &str, options: &str) -> String {
-    format!(
-        "{path} is marked {marked} in git's index, so git does not read its bytes from the work \
-         tree and would ignore what wear wrote there: run `git update-index {options} -- \
-         {path}`, then run the `wear` task again"
-    )
-}
-
-const SKIP_WORKTREE: (&str, &str) = ("skip-worktree", "--no-skip-worktree");
-const ASSUME_UNCHANGED: (&str, &str) = ("assume-unchanged", "--no-assume-unchanged");
-const BOTH_FLAGS: (&str, &str) = (
-    "skip-worktree and assume-unchanged",
-    "--no-skip-worktree --no-assume-unchanged",
-);
-
-/// Builds a clean workspace, optionally gives `hidden` a local edit, marks
-/// it with `flags` (as `git update-index` options), and asserts `wear`
-/// refuses with the line for `(marked, options)` and changes nothing.
-fn assert_a_hidden_file_is_refused(
-    hidden: &str,
-    locally_edited: bool,
-    flags: &[&str],
-    (marked, options): (&str, &str),
-) -> TestOutcome {
-    let fixture = fixture_for_wearing("")?;
-    if locally_edited {
-        let mut edited = fixture.read(hidden)?;
-        edited.extend_from_slice(b"\n# a local edit git is told not to look at\n");
-        fixture.write(hidden, &edited)?;
-    }
-    // One `update-index` per flag: given both in a single call, git keeps
-    // only `--assume-unchanged`, so the state the scenario names is never
-    // built by accident.
-    for flag in flags {
-        git_step(&fixture, &["update-index", flag, "--", hidden])?;
-    }
-    let expected_tag = match (
-        flags.contains(&"--skip-worktree"),
-        flags.contains(&"--assume-unchanged"),
-    ) {
-        (true, true) => "s",
-        (true, false) => "S",
-        (false, true) => "h",
-        (false, false) => "H",
-    };
-    let listed = git_step(&fixture, &["ls-files", "-v", "--", hidden])?;
-    assert_eq!(
-        listed.split(' ').next(),
-        Some(expected_tag),
-        "precondition: git must print the tag the scenario means; it printed: {listed}"
-    );
-    assert_eq!(
-        git_step(&fixture, &["status", "--porcelain"])?,
-        "",
-        "precondition: git reports nothing for the hidden file, which is what makes it a trap"
-    );
-    let before = ManifestAndLockfile::read(&fixture, "Cargo.toml")?;
-
-    let report = wear_passthrough_plain(&fixture)?;
-
-    assert_refused_and_untouched(
-        &fixture,
-        &report,
-        &hidden_line(hidden, marked, options),
-        &before,
-        "Cargo.toml",
-    )
-}
 
 #[test]
 fn a_manifest_marked_skip_worktree_with_a_local_edit_is_refused_and_nothing_changes() -> TestOutcome
@@ -555,9 +479,7 @@ fn assert_an_untracked_file_is_an_uncommitted_change(relative: &str) -> TestOutc
     assert_refused_and_untouched(
         &fixture,
         &report,
-        "the working tree has 1 uncommitted change, so wear wrote nothing: it writes only into a \
-         clean working tree, where git holds the manifest it changes and any Cargo.lock git \
-         tracks; commit, stash or move it, then run the `wear` task again",
+        ONE_UNCOMMITTED_CHANGE_LINE,
         &before,
         "Cargo.toml",
     )?;

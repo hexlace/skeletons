@@ -287,7 +287,12 @@ fn wear_writes_into_the_command_lines_own_package_in_a_workspace_of_several() ->
     // at the workspace root.
     let fixture = Fixture::new()?;
     support::write_workspace_root(fixture.root(), &["tools/cli", "bystander"])?;
-    support::wear::write_command_line_package(fixture.root(), "tools/cli", "")?;
+    support::write_package_manifest(
+        fixture.root(),
+        "tools/cli",
+        support::wear::COMMAND_LINE_PACKAGE,
+        "",
+    )?;
     support::write_package_manifest(fixture.root(), "bystander", "bystander", "")?;
     fixture.generate_lockfile()?;
     fixture.init_git_repository()?;

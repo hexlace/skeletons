@@ -7,7 +7,7 @@
 //! back will see.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::schema::{Document, Package};
 use super::{Network, ReadWorkspaceError, Workspace, cargo_metadata, from_document, locate};
@@ -22,8 +22,9 @@ pub(crate) struct Prospect {
 
 /// The workspace member `wear` writes into.
 pub(crate) struct Member {
-    /// The member's manifest as a message shows it: relative to the workspace
-    /// root.
+    /// The member's manifest as Cargo reports it, which is absolute.
+    pub(crate) manifest_path: PathBuf,
+    /// `manifest_path` as a message shows it: relative to the workspace root.
     pub(crate) manifest: String,
     /// Every dependency the member declares, in any table of its manifest.
     pub(crate) declared: Vec<Declared>,
@@ -84,6 +85,7 @@ fn member_of(document: &Document, package_name: &str) -> Option<Member> {
         .filter(|package| package.name == package_name)
         .find(|package| document.workspace_members.contains(&package.id))?;
     Some(Member {
+        manifest_path: package.manifest_path.clone(),
         manifest: super::relative_to_root(&document.workspace_root, &package.manifest_path),
         declared: declared_by(package),
         skeletons: skeletons_table(&package.metadata),
@@ -125,6 +127,7 @@ fn skeletons_table(metadata: &serde_json::Value) -> SkeletonsTable {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::path::Path;
 
     use super::{Declared, SkeletonsTable, member_of};
     use crate::workspace::schema::Document;
@@ -209,6 +212,10 @@ mod tests {
             .expect("wearer is a member of the captured workspace");
 
         assert_eq!(member.manifest, "wearer/Cargo.toml");
+        assert_eq!(
+            member.manifest_path,
+            Path::new("/WORKSPACE/wearer/Cargo.toml")
+        );
         assert_eq!(
             member.skeletons,
             SkeletonsTable::Keys(BTreeSet::from(["plain".to_owned()]))

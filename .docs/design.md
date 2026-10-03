@@ -1397,7 +1397,7 @@ be read as an option of `cargo add`
 
 **The package it writes into is the command line's own.** A task built to
 receive its command line is told which package built it, and `wear` locates that
-package through ritual's workspace metadata, as ritual's own `add` does. There is
+package among the members of the workspace it reads `--locked`. There is
 no search for a manifest, no flag to choose one, and no case of two candidates
 to refuse: the command line that is running always knows which package it is.
 It is also the one manifest a project is certain to have that can hold
@@ -1491,7 +1491,15 @@ the directory they run in, which is where the command was run, so a relative
 
 **Everything the workspace already answers is refused before `cargo add` runs.**
 The workspace is read `--locked` first, so a stale lockfile is refused before
-`cargo add` could rewrite more of it than the skeleton, and what that read holds
+`cargo add` could rewrite more of it than the skeleton. That is the only read
+before the write, and it also finds the command line's own package, so `wear`
+is never what rewrites a lockfile Cargo would reformat: `--locked` accepts a
+current lockfile in whatever form it is written, and the files `wear` changes
+are untouched until rollback has recorded them
+(`ritual/tests/wear_lockfile_form.rs` →
+`a_lockfile_with_a_comment_does_not_make_a_dirty_tree_count_its_lockfile` and →
+`a_hidden_lockfile_with_a_comment_is_refused_before_anything_is_rewritten`).
+What that read holds
 settles a skeleton already worn, a key a dependency already holds and a wearing
 table with no dependency under it, each in `wear`'s own words and with nothing
 changed. A key is compared as `rustc` names a dependency, with `-` and `_` the

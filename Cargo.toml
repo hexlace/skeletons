@@ -19,7 +19,7 @@ resolver = "3"
 # one `rituals`.
 rituals = "0.1.2"
 ritual = { package = "rituals-core", version = "0.1.2" }
-# Ritual's metadata reader and its `rollback`, which `wear` writes through.
+# Ritual's `rollback`, which `wear` writes through.
 # Already compiled into every `ritual` binary through `rituals-core`, so it adds
 # no package to `Cargo.lock`. Released with `rituals` at one version.
 rituals-compose = "0.1.2"

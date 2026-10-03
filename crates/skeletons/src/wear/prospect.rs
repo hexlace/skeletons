@@ -13,7 +13,11 @@ use crate::workspace::{
 };
 
 /// Says whether `wear` may add `request`'s skeleton to the package `package`,
-/// the one the command line was built from, in `prospect`'s workspace.
+/// the one the command line was built from, in `prospect`'s workspace, and
+/// hands back the member it was found to be.
+///
+/// The member returned is the one place that decides the package is in the
+/// workspace: nothing after this asks again.
 ///
 /// In order, it refuses:
 ///
@@ -34,11 +38,11 @@ use crate::workspace::{
 /// # Errors
 ///
 /// Returns the [`WearRefusal`] for the first of those that holds.
-pub(crate) fn check(
+pub(crate) fn check<'prospect>(
     request: &Request,
-    prospect: &Prospect,
+    prospect: &'prospect Prospect,
     package: &str,
-) -> Result<(), WearRefusal> {
+) -> Result<&'prospect Member, WearRefusal> {
     let Some(member) = &prospect.member else {
         return Err(WearRefusal::OutsideItsProject {
             package: package.to_owned(),
@@ -49,7 +53,8 @@ pub(crate) fn check(
     refuse_skeletons_not_a_table(member)?;
     refuse_depends_without_wearing(request, member)?;
     refuse_taken_key(request, member)?;
-    refuse_table_without_dependency(request, member)
+    refuse_table_without_dependency(request, member)?;
+    Ok(member)
 }
 
 /// A skeleton some member of the workspace already wears, under any key.
@@ -189,6 +194,11 @@ mod tests {
     use crate::wear::test_workspace::{not_a_skeleton, workspace_of, worn};
     use crate::workspace::{Declared, Member, Prospect, SkeletonsTable, Wearing};
 
+    /// What [`check`] refuses, leaving out the member it hands back.
+    fn checked(request: &Request, prospect: &Prospect, package: &str) -> Result<(), WearRefusal> {
+        check(request, prospect, package).map(|_| ())
+    }
+
     fn request(skeleton: &str, key: Option<&str>) -> Request {
         Request::new(skeleton, key, Source::Registry)
             .expect("a test passes only requests it knows are valid")
@@ -215,6 +225,7 @@ mod tests {
         Prospect {
             workspace: workspace_of(wearing),
             member: Some(Member {
+                manifest_path: "/workspace/Cargo.toml".into(),
                 manifest: "Cargo.toml".to_owned(),
                 declared,
                 skeletons,
@@ -228,7 +239,23 @@ mod tests {
 
     #[test]
     fn a_workspace_with_nothing_in_the_way_is_clear() {
-        assert_eq!(check(&request("tidy", None), &empty(), "cli"), Ok(()));
+        assert_eq!(checked(&request("tidy", None), &empty(), "cli"), Ok(()));
+    }
+
+    #[test]
+    fn a_clear_workspace_hands_back_the_member_it_found() {
+        let prospect = empty();
+
+        let member = check(&request("tidy", None), &prospect, "cli")
+            .expect("nothing in this workspace is in the way");
+
+        assert!(std::ptr::eq(
+            member,
+            prospect
+                .member
+                .as_ref()
+                .expect("the prospect holds a member")
+        ));
     }
 
     #[test]
@@ -241,7 +268,7 @@ mod tests {
         };
 
         assert_eq!(
-            check(&request("tidy", None), &prospect, "cli"),
+            checked(&request("tidy", None), &prospect, "cli"),
             Err(WearRefusal::OutsideItsProject {
                 package: "cli".to_owned(),
                 root: "/workspace".to_owned(),
@@ -260,7 +287,7 @@ mod tests {
         );
 
         assert_eq!(
-            check(&request("tidy", None), &prospect, "cli"),
+            checked(&request("tidy", None), &prospect, "cli"),
             Err(WearRefusal::AlreadyWorn {
                 package: "tidy".to_owned(),
                 key: "neat".to_owned(),
@@ -278,7 +305,7 @@ mod tests {
         );
 
         assert!(matches!(
-            check(&request("tidy", Some("fresh")), &prospect, "cli"),
+            checked(&request("tidy", Some("fresh")), &prospect, "cli"),
             Err(WearRefusal::AlreadyWorn { .. })
         ));
     }
@@ -296,7 +323,7 @@ mod tests {
             );
 
             assert_eq!(
-                check(&request(requested, Some("fresh")), &prospect, "cli"),
+                checked(&request(requested, Some("fresh")), &prospect, "cli"),
                 Err(WearRefusal::AlreadyWorn {
                     package: worn_as.to_owned(),
                     key: "neat".to_owned(),
@@ -315,7 +342,7 @@ mod tests {
             keys(&["other"]),
         );
 
-        assert_eq!(check(&request("tidy", None), &prospect, "cli"), Ok(()));
+        assert_eq!(checked(&request("tidy", None), &prospect, "cli"), Ok(()));
     }
 
     #[test]
@@ -329,7 +356,7 @@ mod tests {
             keys(&["plain"]),
         );
 
-        assert_eq!(check(&request("tidy", None), &prospect, "cli"), Ok(()));
+        assert_eq!(checked(&request("tidy", None), &prospect, "cli"), Ok(()));
     }
 
     #[test]
@@ -337,7 +364,7 @@ mod tests {
         let prospect = prospect(Vec::new(), Vec::new(), SkeletonsTable::NotATable);
 
         assert_eq!(
-            check(&request("tidy", None), &prospect, "cli"),
+            checked(&request("tidy", None), &prospect, "cli"),
             Err(WearRefusal::ParentNotATable {
                 manifest: "Cargo.toml".to_owned(),
                 parent: Parent::Skeletons,
@@ -354,7 +381,7 @@ mod tests {
         );
 
         assert_eq!(
-            check(&request("tidy", Some("taken")), &prospect, "cli"),
+            checked(&request("tidy", Some("taken")), &prospect, "cli"),
             Err(WearRefusal::KeyTaken {
                 manifest: "Cargo.toml".to_owned(),
                 key: "taken".to_owned(),
@@ -374,7 +401,7 @@ mod tests {
         );
 
         assert!(matches!(
-            check(&request("tidy", None), &prospect, "cli"),
+            checked(&request("tidy", None), &prospect, "cli"),
             Err(WearRefusal::KeyTaken { .. })
         ));
     }
@@ -391,7 +418,7 @@ mod tests {
             );
 
             assert_eq!(
-                check(&request("tidy", Some(asked)), &prospect, "cli"),
+                checked(&request("tidy", Some(asked)), &prospect, "cli"),
                 Err(WearRefusal::KeyTaken {
                     manifest: "Cargo.toml".to_owned(),
                     key: asked.to_owned(),
@@ -412,7 +439,7 @@ mod tests {
         );
 
         assert_eq!(
-            check(&request("tidy", Some("a-x")), &prospect, "cli"),
+            checked(&request("tidy", Some("a-x")), &prospect, "cli"),
             Ok(())
         );
     }
@@ -428,7 +455,7 @@ mod tests {
         );
 
         assert_eq!(
-            check(&request("tidy", Some("neat")), &prospect, "cli"),
+            checked(&request("tidy", Some("neat")), &prospect, "cli"),
             Err(WearRefusal::DependsWithoutWearing {
                 manifest: "Cargo.toml".to_owned(),
                 crate_name: "tidy".to_owned(),
@@ -451,7 +478,7 @@ mod tests {
 
         for asked in [None, Some("fresh"), Some("neat")] {
             assert_eq!(
-                check(&request("tidy", asked), &prospect, "cli"),
+                checked(&request("tidy", asked), &prospect, "cli"),
                 Err(WearRefusal::DependsWithRefusedWearing {
                     manifest: "Cargo.toml".to_owned(),
                     crate_name: "tidy".to_owned(),
@@ -473,7 +500,7 @@ mod tests {
         );
 
         assert_eq!(
-            check(&request("tidy", None), &prospect, "cli"),
+            checked(&request("tidy", None), &prospect, "cli"),
             depends_without_wearing("tidy", "neat")
         );
     }
@@ -489,7 +516,7 @@ mod tests {
         );
 
         assert_eq!(
-            check(&request("foo_bar", Some("foo-bar")), &prospect, "cli"),
+            checked(&request("foo_bar", Some("foo-bar")), &prospect, "cli"),
             Err(WearRefusal::DependsWithoutWearing {
                 manifest: "Cargo.toml".to_owned(),
                 crate_name: "foo-bar".to_owned(),
@@ -510,7 +537,7 @@ mod tests {
         );
 
         assert!(matches!(
-            check(&request("tidy", Some("never")), &prospect, "cli"),
+            checked(&request("tidy", Some("never")), &prospect, "cli"),
             Err(WearRefusal::KeyTaken { .. })
         ));
     }
@@ -538,11 +565,11 @@ mod tests {
         );
 
         assert_eq!(
-            check(&request("tidy", None), &prospect, "cli"),
+            checked(&request("tidy", None), &prospect, "cli"),
             depends_without_wearing("tidy", "neat")
         );
         assert_eq!(
-            check(&request("tidy", Some("fresh")), &prospect, "cli"),
+            checked(&request("tidy", Some("fresh")), &prospect, "cli"),
             depends_without_wearing("tidy", "neat")
         );
     }
@@ -561,7 +588,7 @@ mod tests {
             );
 
             assert_eq!(
-                check(&request("tidy", None), &prospect, "cli"),
+                checked(&request("tidy", None), &prospect, "cli"),
                 depends_without_wearing("tidy", key),
                 "{key}"
             );
@@ -581,7 +608,7 @@ mod tests {
         );
 
         assert_eq!(
-            check(&request("tidy", Some("fresh")), &prospect, "cli"),
+            checked(&request("tidy", Some("fresh")), &prospect, "cli"),
             depends_without_wearing("tidy", "never")
         );
     }
@@ -598,7 +625,7 @@ mod tests {
             );
 
             assert_eq!(
-                check(&request(asked, Some("fresh")), &prospect, "cli"),
+                checked(&request(asked, Some("fresh")), &prospect, "cli"),
                 depends_without_wearing(held, "neat"),
                 "{held} against {asked}"
             );
@@ -619,7 +646,7 @@ mod tests {
         );
 
         assert_eq!(
-            check(&request("tidy", Some("taken")), &prospect, "cli"),
+            checked(&request("tidy", Some("taken")), &prospect, "cli"),
             depends_without_wearing("tidy", "neat")
         );
     }
@@ -629,7 +656,7 @@ mod tests {
         let prospect = prospect(Vec::new(), Vec::new(), keys(&["tidy", "other"]));
 
         assert_eq!(
-            check(&request("tidy", None), &prospect, "cli"),
+            checked(&request("tidy", None), &prospect, "cli"),
             Err(WearRefusal::TableWithoutDependency {
                 manifest: "Cargo.toml".to_owned(),
                 key: "tidy".to_owned(),
@@ -641,7 +668,7 @@ mod tests {
     fn a_wearing_table_under_another_key_is_no_obstacle() {
         let prospect = prospect(Vec::new(), Vec::new(), keys(&["other"]));
 
-        assert_eq!(check(&request("tidy", None), &prospect, "cli"), Ok(()));
+        assert_eq!(checked(&request("tidy", None), &prospect, "cli"), Ok(()));
     }
 
     #[test]
@@ -652,7 +679,7 @@ mod tests {
             let prospect = prospect(Vec::new(), Vec::new(), keys(&[table]));
 
             assert_eq!(
-                check(&request("tidy", Some(asked)), &prospect, "cli"),
+                checked(&request("tidy", Some(asked)), &prospect, "cli"),
                 Err(WearRefusal::TableAtOtherSpelling {
                     manifest: "Cargo.toml".to_owned(),
                     table: table.to_owned(),
@@ -670,7 +697,7 @@ mod tests {
         let prospect = prospect(Vec::new(), Vec::new(), keys(&["a_x", "a-x"]));
 
         assert_eq!(
-            check(&request("tidy", Some("a-x")), &prospect, "cli"),
+            checked(&request("tidy", Some("a-x")), &prospect, "cli"),
             Err(WearRefusal::TableWithoutDependency {
                 manifest: "Cargo.toml".to_owned(),
                 key: "a-x".to_owned(),
@@ -685,7 +712,7 @@ mod tests {
         let prospect = prospect(Vec::new(), Vec::new(), keys(&["a_b-c", "a-b_c"]));
 
         assert_eq!(
-            check(&request("tidy", Some("a-b-c")), &prospect, "cli"),
+            checked(&request("tidy", Some("a-b-c")), &prospect, "cli"),
             Err(WearRefusal::TableAtOtherSpelling {
                 manifest: "Cargo.toml".to_owned(),
                 table: "a-b_c".to_owned(),
@@ -699,7 +726,7 @@ mod tests {
         let prospect = prospect(Vec::new(), Vec::new(), keys(&["a_xy", "A_x"]));
 
         assert_eq!(
-            check(&request("tidy", Some("a-x")), &prospect, "cli"),
+            checked(&request("tidy", Some("a-x")), &prospect, "cli"),
             Ok(())
         );
     }
@@ -715,7 +742,7 @@ mod tests {
         );
 
         assert!(matches!(
-            check(&request("tidy", Some("neat")), &prospect, "cli"),
+            checked(&request("tidy", Some("neat")), &prospect, "cli"),
             Err(WearRefusal::AlreadyWorn { .. })
         ));
     }
@@ -729,7 +756,7 @@ mod tests {
         );
 
         assert!(matches!(
-            check(&request("tidy", Some("neat")), &prospect, "cli"),
+            checked(&request("tidy", Some("neat")), &prospect, "cli"),
             Err(WearRefusal::ParentNotATable { .. })
         ));
     }
@@ -743,7 +770,7 @@ mod tests {
         );
 
         assert!(matches!(
-            check(&request("tidy", Some("neat")), &prospect, "cli"),
+            checked(&request("tidy", Some("neat")), &prospect, "cli"),
             Err(WearRefusal::KeyTaken { .. })
         ));
     }
@@ -756,7 +783,7 @@ mod tests {
         };
 
         assert!(matches!(
-            check(&request("tidy", None), &prospect, "cli"),
+            checked(&request("tidy", None), &prospect, "cli"),
             Err(WearRefusal::OutsideItsProject { .. })
         ));
     }

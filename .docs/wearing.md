@@ -905,7 +905,11 @@ and, like every message in this document, prints text from outside escaped.
   causes (see [Refusals](#refusals)). `cargo metadata` is run `--locked`, so a
   stale or missing lockfile is refused before `cargo add` could rewrite more of
   it than the skeleton, and the lockfile message says why `wear` would otherwise
-  write it:
+  write it. That is the only workspace read `wear` makes before it writes, so it
+  is never what rewrites a lockfile Cargo would reformat, and the manifest and
+  `Cargo.lock` are untouched until rollback has recorded them
+  (`ritual/tests/wear_lockfile_form.rs` →
+  `a_hidden_lockfile_with_a_comment_is_refused_before_anything_is_rewritten`):
 
   ```text
   Cargo.lock is missing or out of date, and wear changes it only to add the skeleton; run `cargo update --workspace`, then run the `wear` task again

@@ -29,14 +29,14 @@ mod writable;
 use std::path::{Path, PathBuf};
 
 use rituals::{CommandLine, Failure, Outcome, Task, clap, report};
-use rituals_compose::{metadata, rollback};
+use rituals_compose::rollback;
 use rollback::Changes;
 
 use crate::check::{AbortingCommand, abort_message};
 use crate::skeleton::Escaped;
 use crate::work_tree;
 use crate::work_tree::writing_command::WritingCommand;
-use crate::workspace::{self, Network, ReadWorkspaceError, Workspace};
+use crate::workspace::{self, Member, Network, ReadWorkspaceError, Workspace};
 use confirm::Added;
 use hand_back::Tracking;
 use refusal::WearRefusal;
@@ -127,6 +127,19 @@ struct CommandLineCrate {
 }
 
 impl CommandLineCrate {
+    /// The crate of `member`, the package `package` names in the workspace
+    /// at `workspace_root`, with `Cargo.lock` beside the workspace's manifest.
+    fn new(package: &str, member: &Member, workspace_root: &Path) -> Self {
+        let lockfile_path = workspace_root.join("Cargo.lock");
+        Self {
+            package: package.to_owned(),
+            manifest_path: member.manifest_path.clone(),
+            manifest_shown: member.manifest.clone(),
+            lockfile_shown: workspace::relative_to_root(workspace_root, &lockfile_path),
+            lockfile_path,
+        }
+    }
+
     /// Replaces the two absolute paths with the relative ones a message shows,
     /// which reach the same files once the working directory is the workspace
     /// root.
@@ -138,17 +151,19 @@ impl CommandLineCrate {
 
 /// Everything `wear` can refuse before it writes anything.
 ///
-/// The workspace is read `--locked` first, so that a lockfile that is stale or
-/// missing is refused before `cargo add` can rewrite more of it than the
-/// skeleton, and so that ritual's own unlocked `cargo metadata`, which
-/// follows, is never the one to rewrite it. What that read holds then answers
-/// every refusal that is about the request and the manifest as they stand
-/// ([`prospect::check`]), so none of them waits for `cargo add` to have run.
-/// The crate it writes into is located before the work tree is asked, because
-/// git is asked about that crate's own manifest. The work tree is asked last,
-/// so a request that is wrong is refused as wrong whether or not the tree is
-/// clean, and the two files are then proven ones git can hand back
-/// ([`hand_back::check`]) and can be written in place ([`writable::check`]).
+/// The workspace is read `--locked`, and only `--locked`, so that a lockfile
+/// that is stale or missing is refused before `cargo add` can rewrite more of
+/// it than the skeleton, and so that `wear` is never what rewrites a lockfile
+/// Cargo would reformat: `--locked` accepts a current lockfile as it stands,
+/// in whatever form it is written. Nothing `wear` changes is touched until
+/// [`rollback::attempt`] has recorded it. What that read holds answers every
+/// refusal that is about the request and the manifest as they stand
+/// ([`prospect::check`]), so none of them waits for `cargo add` to have run,
+/// and it finds the crate `wear` writes into, so that no second read is made
+/// to locate it. The work tree is asked last, so a request that is wrong is
+/// refused as wrong whether or not the tree is clean, and the two files are
+/// then proven ones git can hand back ([`hand_back::check`]) and can be
+/// written in place ([`writable::check`]).
 fn prepare(command_line: &CommandLine, request: Request) -> Result<Prepared, Failure> {
     let directory = std::env::current_dir().map_err(|error| {
         Failure::new("could not read the current working directory").caused_by(error)
@@ -156,8 +171,9 @@ fn prepare(command_line: &CommandLine, request: Request) -> Result<Prepared, Fai
     let package = command_line.identity().package_name();
     let prospect =
         workspace::read_prospect(&directory, package).map_err(|error| aborted(&error))?;
-    prospect::check(&request, &prospect, package).map_err(WearRefusal::into_failure)?;
-    let command_line_crate = locate_command_line_crate(command_line, &directory)?;
+    let member =
+        prospect::check(&request, &prospect, package).map_err(WearRefusal::into_failure)?;
+    let command_line_crate = CommandLineCrate::new(package, member, &prospect.workspace.root);
     // `wear` changes the manifest and `Cargo.lock` in place, so git is the only
     // undo for a change `rollback` could not take back; whole-tree dirt counts,
     // as it does for `sync`, because the person's own uncommitted edits to those
@@ -219,28 +235,6 @@ fn could_not_enter_line(root: &Path, error: &std::io::Error) -> String {
 fn aborted(error: &ReadWorkspaceError) -> Failure {
     let (_kind, message) = abort_message(error, AbortingCommand::Wear);
     Failure::new(message)
-}
-
-/// Finds the crate the running command line was built from, through
-/// `rituals_compose`, as `add` does for the same package.
-fn locate_command_line_crate(
-    command_line: &CommandLine,
-    directory: &Path,
-) -> Result<CommandLineCrate, Failure> {
-    let package = command_line.identity().package_name();
-    let document = metadata::fetch(directory)?;
-    let project = document.locate_project(package)?;
-    let lockfile_path = project.workspace_root().join("Cargo.lock");
-    Ok(CommandLineCrate {
-        package: package.to_owned(),
-        manifest_path: project.manifest_path().to_path_buf(),
-        manifest_shown: workspace::relative_to_root(
-            project.workspace_root(),
-            project.manifest_path(),
-        ),
-        lockfile_path: lockfile_path.clone(),
-        lockfile_shown: workspace::relative_to_root(project.workspace_root(), &lockfile_path),
-    })
 }
 
 /// The whole of what `wear` changes, inside [`rollback::attempt`].

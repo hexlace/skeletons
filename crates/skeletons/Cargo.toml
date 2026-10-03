@@ -38,7 +38,7 @@ exclude = ["/test-skeletons", "/src/behind/captures", "/src/workspace/fixtures"]
 
 [dependencies]
 rituals.workspace = true
-# Ritual's metadata reader and `rollback`, which `wear` writes through: see the
+# Ritual's `rollback`, which `wear` writes through: see the
 # workspace manifest.
 rituals-compose.workspace = true
 # Writing the wearing table into the command line's manifest in place, keeping

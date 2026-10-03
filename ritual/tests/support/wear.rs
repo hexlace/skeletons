@@ -9,37 +9,13 @@
 //! meant to leave readable.
 
 use std::error::Error;
-use std::path::Path;
 
-use super::{Fixture, write, write_package_manifest};
+use super::{Fixture, write_package_manifest};
 
 /// The package the `ritual` binary under test is built from. `wear` writes
 /// into the package the running command line names, so a fixture a `wear`
 /// scenario runs in must have a workspace member called exactly this.
 pub(crate) const COMMAND_LINE_PACKAGE: &str = "skeletons-ritual";
-
-/// Writes the command line's own package under `relative_dir` of `root`
-/// (the root itself when empty): the manifest `extra` is appended to, and,
-/// beside the library every fixture package has, the binary target a command
-/// line always has, since the package `wear` writes into is the one that
-/// built the running binary.
-pub(crate) fn write_command_line_package(
-    root: &Path,
-    relative_dir: &str,
-    extra: &str,
-) -> Result<(), Box<dyn Error>> {
-    write_package_manifest(root, relative_dir, COMMAND_LINE_PACKAGE, extra)?;
-    let prefix = if relative_dir.is_empty() {
-        String::new()
-    } else {
-        format!("{relative_dir}/")
-    };
-    write(
-        root,
-        &format!("{prefix}src/main.rs"),
-        b"// nothing: a binary target is what makes a package a command line.\nfn main() {}\n",
-    )
-}
 
 /// A workspace whose root package is the command line's own package, with
 /// `extra` appended to its manifest, a committed lockfile, and a git
@@ -49,7 +25,7 @@ pub(crate) fn write_command_line_package(
 /// from a clean one and introduces whatever else it needs on purpose.
 pub(crate) fn fixture_for_wearing(extra: &str) -> Result<Fixture, Box<dyn Error>> {
     let fixture = Fixture::new()?;
-    write_command_line_package(fixture.root(), "", extra)?;
+    write_package_manifest(fixture.root(), "", COMMAND_LINE_PACKAGE, extra)?;
     fixture.generate_lockfile()?;
     fixture.init_git_repository()?;
     Ok(fixture)
@@ -121,6 +97,11 @@ pub(crate) fn assert_nothing_was_undone(report: &super::Report) {
         report.stderr
     );
 }
+
+/// The refusal for a work tree holding exactly one uncommitted change, whole.
+pub(crate) const ONE_UNCOMMITTED_CHANGE_LINE: &str = "the working tree has 1 uncommitted change, so wear wrote nothing: it writes only into a \
+         clean working tree, where git holds the manifest it changes and any Cargo.lock git \
+         tracks; commit, stash or move it, then run the `wear` task again";
 
 /// The non-blank lines of the `[header]` table in `manifest`, or `None` when
 /// the manifest has no such table. The table ends at the next line that opens
@@ -256,4 +237,76 @@ pub(crate) fn the_single_refusal_line(report: &super::Report) -> &str {
         lines[0]
     );
     &lines[0][REFUSAL_PREFIX.len()..]
+}
+
+/// The refusal for a file git is told not to read, worded as `sync` words it
+/// with `wear` in it. `marked` is how the line names the flags, `options` the
+/// `git update-index` options that clear exactly those.
+pub(crate) fn hidden_line(path: &str, marked: &str, options: &str) -> String {
+    format!(
+        "{path} is marked {marked} in git's index, so git does not read its bytes from the work \
+         tree and would ignore what wear wrote there: run `git update-index {options} -- \
+         {path}`, then run the `wear` task again"
+    )
+}
+
+pub(crate) const SKIP_WORKTREE: (&str, &str) = ("skip-worktree", "--no-skip-worktree");
+pub(crate) const ASSUME_UNCHANGED: (&str, &str) = ("assume-unchanged", "--no-assume-unchanged");
+pub(crate) const BOTH_FLAGS: (&str, &str) = (
+    "skip-worktree and assume-unchanged",
+    "--no-skip-worktree --no-assume-unchanged",
+);
+
+/// Builds a clean workspace, optionally gives `hidden` a local edit, marks
+/// it with `flags` (as `git update-index` options), and asserts `wear`
+/// refuses with the line for `(marked, options)` and changes nothing.
+pub(crate) fn assert_a_hidden_file_is_refused(
+    hidden: &str,
+    locally_edited: bool,
+    flags: &[&str],
+    (marked, options): (&str, &str),
+) -> super::TestOutcome {
+    let fixture = fixture_for_wearing("")?;
+    if locally_edited {
+        let mut edited = fixture.read(hidden)?;
+        edited.extend_from_slice(b"\n# a local edit git is told not to look at\n");
+        fixture.write(hidden, &edited)?;
+    }
+    // One `update-index` per flag: given both in a single call, git keeps
+    // only `--assume-unchanged`, so the state the scenario names is never
+    // built by accident.
+    for flag in flags {
+        git_step(&fixture, &["update-index", flag, "--", hidden])?;
+    }
+    let expected_tag = match (
+        flags.contains(&"--skip-worktree"),
+        flags.contains(&"--assume-unchanged"),
+    ) {
+        (true, true) => "s",
+        (true, false) => "S",
+        (false, true) => "h",
+        (false, false) => "H",
+    };
+    let listed = git_step(&fixture, &["ls-files", "-v", "--", hidden])?;
+    assert_eq!(
+        listed.split(' ').next(),
+        Some(expected_tag),
+        "precondition: git must print the tag the scenario means; it printed: {listed}"
+    );
+    assert_eq!(
+        git_step(&fixture, &["status", "--porcelain"])?,
+        "",
+        "precondition: git reports nothing for the hidden file, which is what makes it a trap"
+    );
+    let before = ManifestAndLockfile::read(&fixture, "Cargo.toml")?;
+
+    let report = wear_passthrough_plain(&fixture)?;
+
+    assert_refused_and_untouched(
+        &fixture,
+        &report,
+        &hidden_line(hidden, marked, options),
+        &before,
+        "Cargo.toml",
+    )
 }

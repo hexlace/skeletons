@@ -152,7 +152,11 @@ fn names_taken_by_renames(
 ) -> BTreeSet<String> {
     member_dependencies
         .iter()
-        // A package's identity, compared exactly, as `locate` explains.
+        // A package's identity, compared exactly, as `locate` explains. Here
+        // exactness also decides which declarations a rename can claim an
+        // edge from: loosened, a rename of `a_b` on the package `a_b` would
+        // claim the edge of an unrenamed `a-b` beside it
+        // (`a_rename_equal_to_its_package_name_claims_nothing_from_a_hyphenated_sibling`).
         .filter(|dependency| dependency.name == package_name)
         .filter_map(|dependency| dependency.rename.as_deref())
         .map(underscored)
@@ -386,7 +390,8 @@ mod tests {
         // Cargo resolves `a-b = { path = … }` beside `b = { path = …,
         // package = "a_b" }` to two packages, `a-b` and `a_b`, and names the
         // first one's edge `a_b`. Each declaration is its own package's:
-        // comparing package names as one crate would read `a-b` as ambiguous.
+        // comparing the candidate package's name against the declared name
+        // in `locate` as one crate would read `a-b` as ambiguous.
         let hyphenated_package = package("id-hyphenated", "a-b", "0.1.0");
         let underscored_package = package("id-underscored", "a_b", "0.1.0");
         let document = document(
@@ -415,6 +420,83 @@ mod tests {
         assert_eq!(located.id, "id-hyphenated");
         let located = locate(&document, &member, &dependency("a_b", Some("b")))
             .expect("the renamed declaration must resolve");
+        assert_eq!(located.id, "id-underscored");
+    }
+
+    #[test]
+    fn unrenamed_packages_spelt_with_a_hyphen_and_an_underscore_are_two_packages() {
+        // `a-b = { path = … }` beside `a_b = { path = … }`, neither renamed.
+        // Cargo names both resolved edges `a_b`, so only the comparison of
+        // the candidate package's name against the declared name in `locate`
+        // tells them apart: compared as one crate, each declaration would
+        // read both packages as its own and be ambiguous.
+        let document = document(
+            vec![
+                package("id-hyphenated", "a-b", "0.1.0"),
+                package("id-underscored", "a_b", "0.1.0"),
+            ],
+            vec![Node {
+                id: "id-wearer".to_owned(),
+                deps: vec![
+                    NodeDependency {
+                        name: "a_b".to_owned(),
+                        pkg: "id-hyphenated".to_owned(),
+                    },
+                    NodeDependency {
+                        name: "a_b".to_owned(),
+                        pkg: "id-underscored".to_owned(),
+                    },
+                ],
+            }],
+        );
+        let member = member(
+            "id-wearer",
+            vec![dependency("a-b", None), dependency("a_b", None)],
+        );
+
+        let located = locate(&document, &member, &dependency("a-b", None)).expect("a-b");
+        assert_eq!(located.id, "id-hyphenated");
+        let located = locate(&document, &member, &dependency("a_b", None)).expect("a_b");
+        assert_eq!(located.id, "id-underscored");
+    }
+
+    #[test]
+    fn a_rename_equal_to_its_package_name_claims_nothing_from_a_hyphenated_sibling() {
+        // `a-b = { path = "../a-b" }` beside
+        // `a_b = { path = "../a_b", package = "a_b" }`. Cargo keeps a rename
+        // equal to the package's own name, so it reports the second
+        // dependency as a rename (`rename: "a_b"`), not as unrenamed. Both
+        // resolved edges are named `a_b`. The `a_b` rename claims `a_b` only
+        // for the package `a_b`, so the unrenamed `a-b` still owns its edge:
+        // `names_taken_by_renames` compared as one crate would let that
+        // rename claim the edge for `a-b` too and leave `a-b` unresolved.
+        let document = document(
+            vec![
+                package("id-hyphenated", "a-b", "0.1.0"),
+                package("id-underscored", "a_b", "0.1.0"),
+            ],
+            vec![Node {
+                id: "id-wearer".to_owned(),
+                deps: vec![
+                    NodeDependency {
+                        name: "a_b".to_owned(),
+                        pkg: "id-hyphenated".to_owned(),
+                    },
+                    NodeDependency {
+                        name: "a_b".to_owned(),
+                        pkg: "id-underscored".to_owned(),
+                    },
+                ],
+            }],
+        );
+        let member = member(
+            "id-wearer",
+            vec![dependency("a-b", None), dependency("a_b", Some("a_b"))],
+        );
+
+        let located = locate(&document, &member, &dependency("a-b", None)).expect("a-b");
+        assert_eq!(located.id, "id-hyphenated");
+        let located = locate(&document, &member, &dependency("a_b", Some("a_b"))).expect("a_b");
         assert_eq!(located.id, "id-underscored");
     }
 

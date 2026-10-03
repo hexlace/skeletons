@@ -937,7 +937,11 @@ and, like every message in this document, prints text from outside escaped.
   ```text
   a-dependabot-skeleton is already worn, as `dependabot` in ritual/Cargo.toml; a workspace wears a skeleton once, so to change its options, edit [package.metadata.skeletons.dependabot] there
   ```
-- `[package.metadata.skeletons]` in the manifest is not a table:
+- `[package.metadata]` or `[package.metadata.skeletons]` in the manifest is
+  not a table, so there is nowhere to write a wearing table (Cargo takes a
+  `metadata` of any shape; a `package` that is not a table never gets this far,
+  because Cargo refuses the manifest itself). The message names the one that is
+  not:
 
   ```text
   [package.metadata.skeletons] in ritual/Cargo.toml is not a table, so wear cannot add a wearing table under it; make it a table, then run the `wear` task again

@@ -4,11 +4,12 @@
 //!
 //! A child's stdout and stderr are read from dedicated threads for as long
 //! as the command runs, so neither pipe can fill up and block the child
-//! while the caller is doing something else (`try_wait` polling, in
-//! particular) — the classic subprocess deadlock this module exists to
-//! avoid. Each stream is bounded independently: once its cap is crossed, the
-//! rest of that stream is drained and discarded rather than held, and the
-//! captured bytes report that they were cut short.
+//! while the caller is doing something else — blocked in [`Child::wait`], or
+//! polling [`Child::try_wait`] under a timeout — the classic subprocess
+//! deadlock this module exists to avoid. Each stream is bounded
+//! independently: once its cap is crossed, the rest of that stream is drained
+//! and discarded rather than held, and the captured bytes report that they
+//! were cut short.
 
 pub(crate) mod clock;
 
@@ -20,8 +21,8 @@ use std::time::Duration;
 pub(crate) use clock::TestClock;
 use clock::{Clock, SystemClock};
 
-/// How often the wait loop polls [`Child::try_wait`] for a command with a
-/// timeout. Small enough that a fast command is reported back promptly,
+/// How often [`wait_until_timeout`] polls [`Child::try_wait`] for a command
+/// with a timeout. Small enough that a fast command is reported back promptly,
 /// large enough that polling itself is not the loop's own hot spin.
 const SUBPROCESS_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -38,7 +39,8 @@ pub(crate) const GIT_OUTPUT_BYTES_MAX: u64 = 16 * 1024 * 1024;
 pub(crate) struct Limits {
     /// `None` for a command with nothing bounding how long it may run —
     /// `cargo metadata`, which may be downloading locked sources over the
-    /// network and has no fixed budget to finish within.
+    /// network and has no fixed budget to finish within. Such a command is
+    /// waited on with a blocking [`Child::wait`], never polled.
     pub(crate) timeout: Option<Duration>,
     pub(crate) stdout_bytes_max: u64,
     pub(crate) stderr_bytes_max: u64,
@@ -280,12 +282,39 @@ pub(crate) fn run_with_clock(
 /// Waits for `child` to finish, killing it and reporting a timeout once
 /// `timeout` (when given) elapses on `clock`.
 ///
-/// Polls rather than blocking in [`Child::wait`] so a timeout can actually
-/// be enforced — `wait` itself has no bounded form. Both the elapsed time
-/// and the pause between polls come from `clock` alone.
+/// With no timeout there is nothing to measure, so the wait blocks in
+/// [`wait_for_exit`] and never touches `clock`. With one, [`wait_until_timeout`]
+/// polls, because [`Child::wait`] has no bounded form.
 fn wait_bounded(
     child: &mut Child,
     timeout: Option<Duration>,
+    clock: &impl Clock,
+) -> Result<ExitStatus, SubprocessError> {
+    match timeout {
+        None => wait_for_exit(child),
+        Some(timeout) => wait_until_timeout(child, timeout, clock),
+    }
+}
+
+/// Blocks in [`Child::wait`] until `child` exits.
+///
+/// A `wait` that itself errors is an environment failure indistinguishable
+/// from "cannot run the program at all" to the caller, so it is reported the
+/// same way.
+fn wait_for_exit(child: &mut Child) -> Result<ExitStatus, SubprocessError> {
+    child.wait().map_err(|error| SubprocessError {
+        kind: SubprocessErrorKind::Spawn(error),
+    })
+}
+
+/// Polls `child` until it exits, killing it and reporting a timeout once
+/// `timeout` elapses on `clock`.
+///
+/// Both the elapsed time and the pause between polls come from `clock`
+/// alone.
+fn wait_until_timeout(
+    child: &mut Child,
+    timeout: Duration,
     clock: &impl Clock,
 ) -> Result<ExitStatus, SubprocessError> {
     let started = clock.now();
@@ -302,14 +331,7 @@ fn wait_bounded(
                 });
             }
         }
-        let timed_out =
-            timeout.is_some_and(|timeout| clock.now().duration_since(started) >= timeout);
-        if timed_out {
-            // Postcondition of `timed_out`: `timeout` is `Some` whenever
-            // this arm is reached.
-            let Some(timeout) = timeout else {
-                unreachable!("timed_out is only true when timeout is Some")
-            };
+        if clock.now().duration_since(started) >= timeout {
             // Best-effort: a child that has already exited between the
             // `try_wait` above and here needs no killing, and a `kill` that
             // fails leaves nothing further this function can do about it.
@@ -385,6 +407,17 @@ mod tests {
     use super::clock::Clock;
     use super::{Limits, TestClock, run, run_with_clock};
 
+    /// A command that writes enough to each stream to fill an OS pipe buffer,
+    /// on both streams at once, before it exits.
+    const FILL_BOTH_PIPES: [&str; 2] = [
+        "-c",
+        "dd if=/dev/zero bs=200000 count=1 2>/dev/null; \
+         dd if=/dev/zero bs=200000 count=1 1>&2 2>/dev/null",
+    ];
+
+    /// How many bytes [`FILL_BOTH_PIPES`] writes to each stream.
+    const FILL_BOTH_PIPES_BYTES: usize = 200_000;
+
     /// No bound at all: a fast command's own bytes and exit status are read
     /// back exactly, on both streams.
     fn unbounded_limits() -> Limits {
@@ -424,11 +457,7 @@ mod tests {
         // starting the other. `run` reads both concurrently from the start,
         // so this must complete rather than hang.
         let mut command = Command::new("sh");
-        command.args([
-            "-c",
-            "dd if=/dev/zero bs=200000 count=1 2>/dev/null; \
-             dd if=/dev/zero bs=200000 count=1 1>&2 2>/dev/null",
-        ]);
+        command.args(FILL_BOTH_PIPES);
         let finished = run(command, &unbounded_limits()).expect("sh must run");
         assert!(finished.success());
         assert_eq!(
@@ -436,9 +465,36 @@ mod tests {
                 .stdout()
                 .expect("stdout must not be truncated")
                 .len(),
-            200_000
+            FILL_BOTH_PIPES_BYTES
         );
-        assert_eq!(finished.stderr_head().len(), 200_000);
+        assert_eq!(finished.stderr_head().len(), FILL_BOTH_PIPES_BYTES);
+    }
+
+    #[test]
+    fn an_unbounded_command_is_waited_on_without_the_clock() {
+        // With no timeout there is nothing to measure, so the call must block
+        // in `Child::wait` and never read the time or pause on the clock. The
+        // child fills both pipes, so the blocking wait is also shown not to
+        // deadlock while the reader threads drain them. A fresh test clock
+        // counts every read and pause it is asked for; both counts must be
+        // zero.
+        let mut command = Command::new("sh");
+        command.args(FILL_BOTH_PIPES);
+        let clock = TestClock::new();
+
+        let finished = run_with_clock(command, &unbounded_limits(), &clock).expect("sh must run");
+
+        assert!(finished.success());
+        assert_eq!(
+            finished
+                .stdout()
+                .expect("stdout must not be truncated")
+                .len(),
+            FILL_BOTH_PIPES_BYTES
+        );
+        assert_eq!(finished.stderr_head().len(), FILL_BOTH_PIPES_BYTES);
+        assert_eq!(clock.times_read(), 0, "the clock was read");
+        assert_eq!(clock.times_waited(), 0, "the clock was waited on");
     }
 
     #[test]
@@ -477,7 +533,7 @@ mod tests {
     #[test]
     fn a_command_that_never_exits_is_killed_once_its_timeout_elapses() {
         // The child would run for a minute, but the timeout is measured on a
-        // test clock that advances only as `wait_bounded` waits through it.
+        // test clock that advances only as `wait_until_timeout` waits through it.
         // Three things are checked: the result is a timeout; the test clock
         // advanced by the timeout, so the bound was measured on the injected
         // clock and not the wall clock; and the call returned in far less

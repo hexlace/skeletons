@@ -508,9 +508,14 @@ mod tests {
             real.elapsed() < real_elapsed_max,
             "the child was waited out instead of killed"
         );
+        // The injected clock moves only in poll steps, so a timeout measured on
+        // it lands within one poll of `timeout`. Bounded on both sides, so a
+        // deadline read from the wall clock while the waits stay injected fails
+        // as surely as one measured on the wall clock throughout.
+        let measured = clock.now().duration_since(clock_before);
         assert!(
-            clock.now().duration_since(clock_before) >= timeout,
-            "the timeout was not measured on the injected clock"
+            measured >= timeout && measured < timeout + Duration::from_secs(1),
+            "the timeout was not measured on the injected clock: it advanced {measured:?}"
         );
     }
 

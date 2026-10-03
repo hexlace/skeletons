@@ -1492,13 +1492,17 @@ the directory they run in, which is where the command was run, so a relative
 **Everything the workspace already answers is refused before `cargo add` runs.**
 The workspace is read `--locked` first, so a stale lockfile is refused before
 `cargo add` could rewrite more of it than the skeleton. That is the only read
-before the write, and it also finds the command line's own package, so `wear`
-is never what rewrites a lockfile Cargo would reformat: `--locked` accepts a
-current lockfile in whatever form it is written, and the files `wear` changes
-are untouched until rollback has recorded them
+before the write, and it also finds the command line's own package. `--locked`
+accepts a current lockfile in whatever form it is written, so no read or check
+before the write rewrites it, and the files `wear` changes are untouched until
+rollback has recorded them, so a refusal or a rollback leaves the manifest and
+`Cargo.lock` byte-identical
 (`ritual/tests/wear_lockfile_form.rs` →
 `a_lockfile_with_a_comment_does_not_make_a_dirty_tree_count_its_lockfile` and →
 `a_hidden_lockfile_with_a_comment_is_refused_before_anything_is_rewritten`).
+A success is different: `cargo add` writes `Cargo.lock` in Cargo's own form, so
+a lockfile written in another form is reformatted in the same change, and the
+commit `wear` says to make carries it.
 What that read holds
 settles a skeleton already worn, a key a dependency already holds and a wearing
 table with no dependency under it, each in `wear`'s own words and with nothing

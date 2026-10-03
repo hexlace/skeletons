@@ -153,9 +153,10 @@ impl CommandLineCrate {
 ///
 /// The workspace is read `--locked`, and only `--locked`, so that a lockfile
 /// that is stale or missing is refused before `cargo add` can rewrite more of
-/// it than the skeleton, and so that `wear` is never what rewrites a lockfile
-/// Cargo would reformat: `--locked` accepts a current lockfile as it stands,
-/// in whatever form it is written. Nothing `wear` changes is touched until
+/// it than the skeleton. `--locked` also accepts a current lockfile as it
+/// stands, in whatever form it is written, so no read or check made here
+/// rewrites the lockfile: a refusal leaves it as it was. (`cargo add`, later,
+/// writes it in Cargo's own form.) Nothing `wear` changes is touched until
 /// [`rollback::attempt`] has recorded it. What that read holds answers every
 /// refusal that is about the request and the manifest as they stand
 /// ([`prospect::check`]), so none of them waits for `cargo add` to have run,

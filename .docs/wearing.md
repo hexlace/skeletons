@@ -883,6 +883,14 @@ ritual/Cargo.toml, then run the `sync` task to write its files`, because `git
 add` refuses an ignored file. Cargo's own output is not repeated. Any option
 values edited into the table go in that commit too.
 
+When `wear` succeeds, `cargo add` writes `Cargo.lock` in Cargo's own form, so a
+lockfile written in another form (a comment, another order of packages) is
+reformatted in the same change, and the commit `wear` says to make carries that
+too
+(`ritual/tests/wear_lockfile_form.rs` →
+`a_lockfile_with_a_comment_is_worn_committed_synced_and_checked`, which proves
+such a lockfile is worn, committed, synced and checked).
+
 **It refuses before it writes anything** when the request or the project is
 wrong, in this order, and each message ends by saying what to do. Every message
 below is one line on stderr after the command line's own prefix (`ritual: `),
@@ -905,9 +913,11 @@ and, like every message in this document, prints text from outside escaped.
   causes (see [Refusals](#refusals)). `cargo metadata` is run `--locked`, so a
   stale or missing lockfile is refused before `cargo add` could rewrite more of
   it than the skeleton, and the lockfile message says why `wear` would otherwise
-  write it. That is the only workspace read `wear` makes before it writes, so it
-  is never what rewrites a lockfile Cargo would reformat, and the manifest and
-  `Cargo.lock` are untouched until rollback has recorded them
+  write it. That is the only workspace read `wear` makes before it writes, and
+  `--locked` accepts a current lockfile in whatever form it is written, so no
+  read or check before the write rewrites it, and the manifest and `Cargo.lock`
+  are untouched until rollback has recorded them, so a refusal or a rollback
+  leaves both byte-identical
   (`ritual/tests/wear_lockfile_form.rs` →
   `a_hidden_lockfile_with_a_comment_is_refused_before_anything_is_rewritten`):
 

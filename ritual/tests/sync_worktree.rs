@@ -1287,7 +1287,8 @@ fn install_recording_pre_commit_hook(fixture: &Fixture) -> support::TestOutcome 
     std::fs::write(
         &hook,
         "#!/bin/sh\n\
-         \"$SKELETONS_TEST_RITUAL\" skeletons \"$SKELETONS_TEST_SUBCOMMAND\" >\"$SKELETONS_TEST_OUTPUT\" 2>&1\n\
+         \"$SKELETONS_TEST_RITUAL\" skeletons \"$SKELETONS_TEST_SUBCOMMAND\" \
+         >\"$SKELETONS_TEST_OUTPUT\" 2>&1\n\
          echo $? >\"$SKELETONS_TEST_EXIT_CODE\"\n\
          exit 0\n",
     )?;

@@ -176,7 +176,8 @@ fn an_option_type_that_is_not_enum_set_or_text_is_refused_naming_it() {
             Reason::OptionTypeUnknown { option, given }
                 if option == "cadence" && given == "flag"
         ),
-        "expected an option-type-unknown refusal naming the option and the given type, got {error:?}"
+        "expected an option-type-unknown refusal naming the option and the given type, \
+         got {error:?}"
     );
 }
 

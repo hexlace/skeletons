@@ -652,7 +652,8 @@ mod tests {
         assert_eq!(
             failure.file(),
             "files/nested",
-            "the refusal must name the directory whose listing crossed the budget, not one entry in it"
+            "the refusal must name the directory whose listing crossed the budget, not one entry \
+             in it"
         );
         assert!(matches!(failure.reason, Reason::TooManyEntries { .. }));
     }

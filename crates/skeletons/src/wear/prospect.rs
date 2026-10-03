@@ -23,7 +23,8 @@ use crate::workspace::{
 ///
 /// 1. a package that is no member of the workspace;
 /// 2. a skeleton any member already wears;
-/// 3. a `[package.metadata.skeletons]` that is not a table;
+/// 3. a `[package.metadata]` or a `[package.metadata.skeletons]` that is not a
+///    table;
 /// 4. a dependency on this skeleton's crate under any key, which is not worn,
 ///    in any dependency table, with a wearing table at its key or without;
 /// 5. a key a dependency on another crate already holds;
@@ -50,7 +51,7 @@ pub(crate) fn check<'prospect>(
         });
     };
     refuse_worn(request, &prospect.workspace)?;
-    refuse_skeletons_not_a_table(member)?;
+    refuse_parent_not_a_table(member)?;
     refuse_depends_without_wearing(request, member)?;
     refuse_taken_key(request, member)?;
     refuse_table_without_dependency(request, member)?;
@@ -75,14 +76,21 @@ fn refuse_worn(request: &Request, workspace: &Workspace) -> Result<(), WearRefus
     refusal.map_or(Ok(()), Err)
 }
 
-fn refuse_skeletons_not_a_table(member: &Member) -> Result<(), WearRefusal> {
-    match member.skeletons {
-        SkeletonsTable::NotATable => Err(WearRefusal::ParentNotATable {
-            manifest: member.manifest.clone(),
-            parent: Parent::Skeletons,
-        }),
-        SkeletonsTable::Absent | SkeletonsTable::Keys(_) => Ok(()),
-    }
+/// A table the wearing table goes under that is not a table.
+///
+/// A non-table `package` is not among them: Cargo refuses a manifest whose
+/// `package` is not a table before `wear` can read it, so none reaches here.
+/// `metadata` and `skeletons` are free-form to Cargo, so they do.
+fn refuse_parent_not_a_table(member: &Member) -> Result<(), WearRefusal> {
+    let parent = match member.skeletons {
+        SkeletonsTable::MetadataNotATable => Parent::Metadata,
+        SkeletonsTable::SkeletonsNotATable => Parent::Skeletons,
+        SkeletonsTable::Absent | SkeletonsTable::Keys(_) => return Ok(()),
+    };
+    Err(WearRefusal::ParentNotATable {
+        manifest: member.manifest.clone(),
+        parent,
+    })
 }
 
 /// A dependency on the skeleton's crate, under whatever key and in whatever
@@ -112,13 +120,14 @@ fn refuse_depends_without_wearing(request: &Request, member: &Member) -> Result<
                         key,
                     }
                 }
-                SkeletonsTable::Keys(_) | SkeletonsTable::Absent | SkeletonsTable::NotATable => {
-                    WearRefusal::DependsWithoutWearing {
-                        manifest,
-                        crate_name,
-                        key,
-                    }
-                }
+                SkeletonsTable::Keys(_)
+                | SkeletonsTable::Absent
+                | SkeletonsTable::MetadataNotATable
+                | SkeletonsTable::SkeletonsNotATable => WearRefusal::DependsWithoutWearing {
+                    manifest,
+                    crate_name,
+                    key,
+                },
             }
         });
     refusal.map_or(Ok(()), Err)
@@ -181,7 +190,9 @@ fn refuse_table_without_dependency(request: &Request, member: &Member) -> Result
                 })
             })
         }
-        SkeletonsTable::Absent | SkeletonsTable::NotATable => Ok(()),
+        SkeletonsTable::Absent
+        | SkeletonsTable::MetadataNotATable
+        | SkeletonsTable::SkeletonsNotATable => Ok(()),
     }
 }
 
@@ -361,13 +372,26 @@ mod tests {
 
     #[test]
     fn a_skeletons_entry_that_is_not_a_table_is_refused_by_its_header() {
-        let prospect = prospect(Vec::new(), Vec::new(), SkeletonsTable::NotATable);
+        let prospect = prospect(Vec::new(), Vec::new(), SkeletonsTable::SkeletonsNotATable);
 
         assert_eq!(
             checked(&request("tidy", None), &prospect, "cli"),
             Err(WearRefusal::ParentNotATable {
                 manifest: "Cargo.toml".to_owned(),
                 parent: Parent::Skeletons,
+            })
+        );
+    }
+
+    #[test]
+    fn a_metadata_that_is_not_a_table_is_refused_by_its_header() {
+        let prospect = prospect(Vec::new(), Vec::new(), SkeletonsTable::MetadataNotATable);
+
+        assert_eq!(
+            checked(&request("tidy", None), &prospect, "cli"),
+            Err(WearRefusal::ParentNotATable {
+                manifest: "Cargo.toml".to_owned(),
+                parent: Parent::Metadata,
             })
         );
     }
@@ -752,12 +776,46 @@ mod tests {
         let prospect = prospect(
             Vec::new(),
             vec![declared("neat", "enum-fill")],
-            SkeletonsTable::NotATable,
+            SkeletonsTable::SkeletonsNotATable,
         );
 
         assert!(matches!(
             checked(&request("tidy", Some("neat")), &prospect, "cli"),
             Err(WearRefusal::ParentNotATable { .. })
+        ));
+    }
+
+    #[test]
+    fn a_metadata_that_is_no_table_is_said_before_a_taken_key() {
+        let prospect = prospect(
+            Vec::new(),
+            vec![declared("neat", "enum-fill")],
+            SkeletonsTable::MetadataNotATable,
+        );
+
+        assert!(matches!(
+            checked(&request("tidy", Some("neat")), &prospect, "cli"),
+            Err(WearRefusal::ParentNotATable {
+                parent: Parent::Metadata,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn a_metadata_that_is_no_table_is_said_before_a_dependency_without_wearing() {
+        let prospect = prospect(
+            Vec::new(),
+            vec![declared("neat", "tidy")],
+            SkeletonsTable::MetadataNotATable,
+        );
+
+        assert!(matches!(
+            checked(&request("tidy", None), &prospect, "cli"),
+            Err(WearRefusal::ParentNotATable {
+                parent: Parent::Metadata,
+                ..
+            })
         ));
     }
 

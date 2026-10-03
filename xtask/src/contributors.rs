@@ -286,7 +286,10 @@ mod tests {
     }
 
     fn author(name: &str, login: Option<&str>) -> Value {
-        serde_json::json!({ "name": name, "user": login.map(|login| serde_json::json!({ "login": login })) })
+        serde_json::json!({
+            "name": name,
+            "user": login.map(|login| serde_json::json!({ "login": login })),
+        })
     }
 
     fn response(commits: &[&[Value]]) -> Value {

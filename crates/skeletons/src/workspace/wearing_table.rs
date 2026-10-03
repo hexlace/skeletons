@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
+use super::schema::{as_toml_table, is_toml_datetime};
 use crate::skeleton::{Choice, Choices};
 
 /// The reserved keys name a skeleton's own declarations, never a dependency
@@ -83,7 +84,7 @@ pub(crate) fn wearing_tables(
     let Some(skeletons) = metadata.get("skeletons") else {
         return Ok((BTreeMap::new(), Vec::new()));
     };
-    let Some(skeletons_table) = skeletons.as_object() else {
+    let Some(skeletons_table) = as_toml_table(skeletons) else {
         return Err(WholeTableRefusal::NotATable);
     };
 
@@ -102,7 +103,7 @@ pub(crate) fn wearing_tables(
             // either way, whatever shape it has.
             continue;
         }
-        match value.as_object() {
+        match as_toml_table(value) {
             Some(table) => {
                 let entries = table
                     .iter()
@@ -123,6 +124,7 @@ pub(crate) enum ShapeFound {
     Number,
     Boolean,
     Table,
+    Datetime,
     ArrayHoldingNonString,
 }
 
@@ -132,6 +134,7 @@ impl std::fmt::Display for ShapeFound {
             Self::Number => "a number",
             Self::Boolean => "a boolean",
             Self::Table => "a table",
+            Self::Datetime => "a datetime",
             Self::ArrayHoldingNonString => "an array holding a non-string",
         })
     }
@@ -165,8 +168,8 @@ impl WearingTable {
 
 /// Turns one recorded value into a [`Choice`], or names the TOML shape a
 /// wearer actually wrote when it is neither a string nor an array of
-/// strings — a TOML datetime arrives from cargo as a JSON string and is
-/// passed through the same as any other string.
+/// strings. A TOML datetime arrives from cargo as a one-key JSON object, not
+/// a string, and is named as a datetime rather than as the table it resembles.
 fn choice_of(option: &str, value: &Value) -> Result<Choice, OptionShapeRefusal> {
     match value {
         Value::String(text) => Ok(Choice::One(text.clone())),
@@ -192,6 +195,10 @@ fn choice_of(option: &str, value: &Value) -> Result<Choice, OptionShapeRefusal> 
         Value::Bool(_) => Err(OptionShapeRefusal {
             option: option.to_owned(),
             found: ShapeFound::Boolean,
+        }),
+        Value::Object(_) if is_toml_datetime(value) => Err(OptionShapeRefusal {
+            option: option.to_owned(),
+            found: ShapeFound::Datetime,
         }),
         // A TOML table arrives as a JSON object; `Value::Null` never arrives
         // from a real TOML table at all (TOML has no null), so this arm
@@ -385,7 +392,9 @@ mod tests {
     #[test]
     fn an_array_of_strings_becomes_a_many_choice_keeping_order_and_duplicates() {
         let (tables, _refusals) = wearing_tables(
-            &json!({"skeletons": {"dependabot": {"ecosystems": ["cargo", "cargo", "github-actions"]}}}),
+            &json!({
+                "skeletons": {"dependabot": {"ecosystems": ["cargo", "cargo", "github-actions"]}}
+            }),
             no_dependency,
         )
         .expect("must parse");
@@ -446,6 +455,53 @@ mod tests {
             .choices()
             .expect_err("a table is not a valid choice shape");
         assert_eq!(error.found.to_string(), "a table");
+    }
+
+    #[test]
+    fn a_datetime_value_is_refused_as_a_datetime_not_a_table() {
+        let (tables, _refusals) = wearing_tables(
+            &json!({"skeletons": {"dependabot": {
+                "cadence": {"$__toml_private_datetime": "07:32:00"}
+            }}}),
+            no_dependency,
+        )
+        .expect("must parse");
+        let table = &tables[&DependencyKey("dependabot".to_owned())];
+        let error = table
+            .choices()
+            .expect_err("a datetime is not a valid choice shape");
+        assert_eq!(error.option, "cadence");
+        assert_eq!(error.found.to_string(), "a datetime");
+    }
+
+    #[test]
+    fn a_skeletons_that_is_a_datetime_refuses_the_whole_member() {
+        let error = wearing_tables(
+            &json!({"skeletons": {"$__toml_private_datetime": "1979-05-27"}}),
+            no_dependency,
+        )
+        .expect_err("a datetime `skeletons` is not a table");
+        assert_eq!(error, WholeTableRefusal::NotATable);
+    }
+
+    #[test]
+    fn a_key_that_is_a_datetime_refuses_only_that_key_naming_it() {
+        let (tables, refusals) = wearing_tables(
+            &json!({"skeletons": {
+                "dependabot": {"$__toml_private_datetime": "1979-05-27"},
+                "lint": {}
+            }}),
+            no_dependency,
+        )
+        .expect("only one key is malformed");
+        assert_eq!(
+            refusals,
+            vec![TableEntryRefusal::NotATable {
+                key: "dependabot".to_owned()
+            }]
+        );
+        assert_eq!(tables.len(), 1);
+        assert!(tables.contains_key(&DependencyKey("lint".to_owned())));
     }
 
     #[test]

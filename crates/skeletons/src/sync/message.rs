@@ -1162,12 +1162,12 @@ mod tests {
         });
         assert_eq!(
             message,
-            ".b.yml.skeletons-sync is already there, and sync stages b.yml at exactly that path; it \
-             never overwrites or removes anything it did not create, so it wrote nothing: move \
-             .b.yml.skeletons-sync away, then run the `sync` task again; sync did not \
-             remove everything it had prepared: a.yml.skeletons-sync (it could not be removed: \
-             permission denied (os error 13)) and c.yml.skeletons-sync (it could not be removed: \
-             permission denied (os error 13)); find and remove them by hand"
+            ".b.yml.skeletons-sync is already there, and sync stages b.yml at exactly that path; \
+             it never overwrites or removes anything it did not create, so it wrote nothing: move \
+             .b.yml.skeletons-sync away, then run the `sync` task again; sync did not remove \
+             everything it had prepared: a.yml.skeletons-sync (it could not be removed: permission \
+             denied (os error 13)) and c.yml.skeletons-sync (it could not be removed: permission \
+             denied (os error 13)); find and remove them by hand"
         );
     }
 

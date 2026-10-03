@@ -182,8 +182,7 @@ fn a_claim_git_ignores_under_a_name_holding_a_newline_is_refused_on_one_line() -
 }
 
 #[test]
-fn a_file_marked_skip_worktree_under_a_name_holding_a_newline_is_refused_on_one_line() -> TestOutcome
-{
+fn a_skip_worktree_file_under_a_name_holding_a_newline_is_refused_on_one_line() -> TestOutcome {
     // The claimed file is committed with bytes that differ from the render
     // and flagged skip-worktree, so git would never see what `sync` wrote.
     // The line names the path in the refusal and in the `git update-index`

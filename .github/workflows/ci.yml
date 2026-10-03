@@ -225,8 +225,12 @@ jobs:
         # `build.rs` compiles those tests only in a checkout; a new test that
         # reads a left-out file without that gate fails here, where a checkout
         # run would not notice. Run from the repository so rust-toolchain.toml
-        # still picks the compiler.
+        # still picks the compiler. A warning fails the step: clippy's
+        # `-D warnings` sees only the checkout, so an item the unpacked build
+        # leaves unused (an import for a checkout-only test) is caught here.
         shell: bash
+        env:
+          RUSTFLAGS: "-D warnings"
         run: |
           version=$(cargo metadata --no-deps --format-version 1 | jq -er '
             .packages[] | select(.name == "skeletons") | .version')

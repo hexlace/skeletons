@@ -138,7 +138,6 @@ fn skeletons_table(metadata: &serde_json::Value) -> SkeletonsTable {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::path::Path;
 
     use super::{Declared, SkeletonsTable, member_of};
     use crate::workspace::schema::Document;
@@ -225,7 +224,7 @@ mod tests {
         assert_eq!(member.manifest, "wearer/Cargo.toml");
         assert_eq!(
             member.manifest_path,
-            Path::new("/WORKSPACE/wearer/Cargo.toml")
+            std::path::Path::new("/WORKSPACE/wearer/Cargo.toml")
         );
         assert_eq!(
             member.skeletons,

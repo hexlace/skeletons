@@ -1,6 +1,7 @@
 //! A path judged, from its own metadata, to name a regular file, and the
 //! bounded read of it. The judgement is the only way to obtain the type that
-//! can be read, so nothing is opened before its kind has been decided.
+//! can be read, so [`RegularFile::read`] never opens a path that
+//! [`RegularFile::judge`] has not passed.
 
 use std::io::Read as _;
 use std::path::Path;
@@ -10,12 +11,14 @@ use super::{ByteBudget, Reason};
 /// A path known, from its own metadata, to name a regular file: not a symbolic
 /// link, a directory, a FIFO, a socket or a device.
 ///
-/// [`judge`](Self::judge) is the only way to make one, and
-/// [`read`](Self::read) is the only way to open one, so a path cannot be
-/// opened without its kind having been decided first. The fields are private
-/// to this module, which is what makes that true. The ordering matters for a
-/// FIFO above all: opening one with nothing on its other end blocks forever,
-/// which a skeleton directory must never be able to do to its own render.
+/// [`judge`](Self::judge) is the only way to make one, so
+/// [`read`](Self::read) never opens a path whose kind has not been decided
+/// first. The fields are private to this module, which is what makes that
+/// true. It says nothing about code that opens a path without going through
+/// this type, so a reader of a skeleton's files goes through it. The ordering
+/// matters for a FIFO above all: opening one with nothing on its other end
+/// blocks forever, which a skeleton directory must never be able to do to its
+/// own render.
 #[derive(Debug)]
 pub(super) struct RegularFile<'path> {
     path: &'path Path,

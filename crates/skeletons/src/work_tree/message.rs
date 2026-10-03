@@ -270,8 +270,8 @@ mod tests {
         );
         assert_eq!(
             message,
-            "git status printed more than 16 MiB, the most `skeletons` reads from git, so sync wrote \
-             nothing"
+            "git status printed more than 16 MiB, the most `skeletons` reads from git, so sync \
+             wrote nothing"
         );
     }
 

@@ -38,7 +38,7 @@ use support::wear::{
     commit_everything, git_step, wear_passthrough_plain,
 };
 use support::{
-    Fixture, TemporaryDirectory, TestOutcome, cargo_command, checked_in_test_skeleton,
+    Fixture, Report, TemporaryDirectory, TestOutcome, cargo_command, checked_in_test_skeleton,
     isolate_from_the_enclosing_repository, write_package_manifest,
 };
 
@@ -267,20 +267,12 @@ fn assert_a_failed_cargo_add_is_rolled_back(form: LockfileForm) -> TestOutcome {
     Ok(())
 }
 
-/// A success goes through: `wear` exits 0, the commit its second line names
-/// leaves the tree clean, and `sync` and `check` agree.
-fn assert_a_success_goes_through(form: LockfileForm) -> TestOutcome {
-    let fixture = fixture_in_form(form)?;
-    let skeleton = checked_in_test_skeleton("passthrough-plain");
-    let skeleton = skeleton.to_str().ok_or("path must be UTF-8")?;
-
-    let report = fixture.run(&["skeletons", "wear", "passthrough-plain", "--path", skeleton])?;
-
-    assert_eq!(
-        report.exit_code, 0,
-        "{form:?}: wear must succeed; stderr was: {}",
-        report.stderr
-    );
+/// The files the second line of `report.stdout` tells the wearer to commit.
+/// That line reads `commit <file> and <file>, then run ...`.
+fn files_the_next_step_names(
+    form: LockfileForm,
+    report: &Report,
+) -> Result<Vec<String>, Box<dyn Error>> {
     let next_step = report
         .stdout
         .lines()
@@ -291,16 +283,25 @@ fn assert_a_success_goes_through(form: LockfileForm) -> TestOutcome {
         .and_then(|rest| rest.split_once(", then run"))
         .map(|(files, _)| files)
         .ok_or_else(|| format!("{form:?}: the next step is not a commit: {next_step}"))?;
-    let files: Vec<&str> = named.split(" and ").collect();
+    let files: Vec<String> = named.split(" and ").map(str::to_owned).collect();
     assert!(
-        files.contains(&"Cargo.toml"),
+        files.iter().any(|file| file == "Cargo.toml"),
         "{form:?}: the next step must name the manifest; it was: {next_step}"
     );
+    Ok(files)
+}
+
+/// Commits exactly `files` and asserts that leaves the work tree clean.
+fn commit_exactly_and_assert_clean(
+    fixture: &Fixture,
+    form: LockfileForm,
+    files: &[String],
+) -> TestOutcome {
     let mut add = vec!["add", "--"];
-    add.extend(&files);
-    git_step(&fixture, &add)?;
+    add.extend(files.iter().map(String::as_str));
+    git_step(fixture, &add)?;
     git_step(
-        &fixture,
+        fixture,
         &[
             "commit",
             "--quiet",
@@ -313,7 +314,12 @@ fn assert_a_success_goes_through(form: LockfileForm) -> TestOutcome {
         "",
         "{form:?}: committing exactly what wear named must leave the tree clean"
     );
+    Ok(())
+}
 
+/// Asserts `sync` succeeds and writes the skeleton's file, then that `check`
+/// agrees the written file matches.
+fn assert_sync_then_check_agree(fixture: &Fixture, form: LockfileForm) -> TestOutcome {
     let sync_report = fixture.run(&["skeletons", "sync"])?;
     assert_eq!(
         sync_report.exit_code, 0,
@@ -331,6 +337,26 @@ fn assert_a_success_goes_through(form: LockfileForm) -> TestOutcome {
         "{form:?}: check must report the written file matching; stdout: {}; stderr: {}",
         check_report.stdout, check_report.stderr
     );
+    Ok(())
+}
+
+/// A success goes through: `wear` exits 0, the commit its second line names
+/// leaves the tree clean, and `sync` and `check` agree.
+fn assert_a_success_goes_through(form: LockfileForm) -> TestOutcome {
+    let fixture = fixture_in_form(form)?;
+    let skeleton = checked_in_test_skeleton("passthrough-plain");
+    let skeleton = skeleton.to_str().ok_or("path must be UTF-8")?;
+
+    let report = fixture.run(&["skeletons", "wear", "passthrough-plain", "--path", skeleton])?;
+
+    assert_eq!(
+        report.exit_code, 0,
+        "{form:?}: wear must succeed; stderr was: {}",
+        report.stderr
+    );
+    let files = files_the_next_step_names(form, &report)?;
+    commit_exactly_and_assert_clean(&fixture, form, &files)?;
+    assert_sync_then_check_agree(&fixture, form)?;
     assert_nothing_was_undone(&report);
     Ok(())
 }

@@ -146,8 +146,8 @@ fn a_crate_that_is_not_a_skeleton_is_refused_after_cargo_ran_and_nothing_changes
 fn a_work_tree_with_uncommitted_changes_is_refused_and_nothing_changes() -> TestOutcome {
     // The command line crate's manifest has an uncommitted edit. `wear` is
     // about to write to that file, so it must refuse as `sync` does, listing
-    // the file as a line of its own and then summing up, and must leave the uncommitted edit and the lockfile exactly
-    // as they were.
+    // the file as a line of its own and then summing up, and must leave the
+    // uncommitted edit and the lockfile exactly as they were.
     let fixture = fixture_for_wearing("")?;
     let mut edited = fixture.read("Cargo.toml")?;
     edited.extend_from_slice(b"\n# an edit nobody committed\n");

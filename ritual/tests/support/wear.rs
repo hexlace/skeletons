@@ -99,9 +99,11 @@ pub(crate) fn assert_nothing_was_undone(report: &super::Report) {
 }
 
 /// The refusal for a work tree holding exactly one uncommitted change, whole.
-pub(crate) const ONE_UNCOMMITTED_CHANGE_LINE: &str = "the working tree has 1 uncommitted change, so wear wrote nothing: it writes only into a \
-         clean working tree, where git holds the manifest it changes and any Cargo.lock git \
-         tracks; commit, stash or move it, then run the `wear` task again";
+pub(crate) const ONE_UNCOMMITTED_CHANGE_LINE: &str = concat!(
+    "the working tree has 1 uncommitted change, so wear wrote nothing: it writes only into a ",
+    "clean working tree, where git holds the manifest it changes and any Cargo.lock git ",
+    "tracks; commit, stash or move it, then run the `wear` task again",
+);
 
 /// The non-blank lines of the `[header]` table in `manifest`, or `None` when
 /// the manifest has no such table. The table ends at the next line that opens

@@ -14,6 +14,10 @@ pub(crate) fn underscored(text: &str) -> String {
 /// a wearer asked for whichever of the two was typed. A dependency's key is
 /// not a crate name and is not compared here: a key is matched as written
 /// unless it is `rustc` that names it, and that is [`underscored`] alone.
+///
+/// Two packages that Cargo itself reports are not compared here either: each
+/// name is a package's own identity, and a graph can hold packages spelt
+/// `foo-bar` and `foo_bar` side by side, which are two packages.
 pub(crate) fn same_crate(left: &str, right: &str) -> bool {
     underscored(left) == underscored(right)
 }

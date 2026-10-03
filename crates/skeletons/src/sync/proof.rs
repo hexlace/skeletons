@@ -36,7 +36,7 @@ use super::fold_variant::{FoldVariant, fold_variants};
 use super::write::Write;
 use crate::work_tree::abort::{GitQuestion, WorkTreeAbort};
 use crate::work_tree::clean::CleanWorkTree;
-use crate::work_tree::index_entry::{HiddenFlag, IndexRecord, IndexTag};
+use crate::work_tree::index_entry::{HiddenFlag, IndexRecord, TagReading};
 use crate::work_tree::index_records::{self, UnusableIndexAnswer};
 use crate::work_tree::{WorkTree, run_local};
 
@@ -581,20 +581,13 @@ fn index_entry_from(records: &[IndexRecord], pathspec: &str) -> Result<(IndexMod
             });
         }
     };
-    if let Some(flag) = record.tag.hiding_flag() {
-        return Err(Why::HiddenFromWorkTree { flag });
-    }
-    match record.tag {
-        IndexTag::Tracked => Ok((mode, record.object.clone())),
+    match record.tag.reading() {
+        TagReading::Read => Ok((mode, record.object.clone())),
+        TagReading::Hidden(flag) => Err(Why::HiddenFromWorkTree { flag }),
         // A stage-0 record is never unmerged: the stage check above already
         // refused every unmerged entry. Reaching here means git printed a
         // contradiction, which is a refusal, not a guess.
-        IndexTag::Unmerged => Err(Why::Conflicted),
-        IndexTag::SkipWorktree
-        | IndexTag::AssumeUnchanged
-        | IndexTag::SkipWorktreeAndAssumeUnchanged => {
-            unreachable!("hiding_flag named a flag for every tag that hides a file: {record:?}")
-        }
+        TagReading::Unmerged => Err(Why::Conflicted),
     }
 }
 

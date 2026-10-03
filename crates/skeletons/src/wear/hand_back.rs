@@ -19,7 +19,7 @@ use crate::skeleton::Escaped;
 use crate::work_tree::WorkTree;
 use crate::work_tree::abort::WorkTreeAbort;
 use crate::work_tree::clean::CleanWorkTree;
-use crate::work_tree::index_entry::{HiddenFlag, IndexRecord, IndexTag};
+use crate::work_tree::index_entry::{HiddenFlag, IndexRecord, TagReading};
 use crate::work_tree::index_records::{self, UnusableIndexAnswer};
 use crate::work_tree::message::{abort_message, hidden_from_work_tree_line};
 
@@ -137,16 +137,10 @@ fn classify(path: &str, records: &[IndexRecord]) -> Result<Tracking, GitCannotHa
             detail: format!("git lists it as {}", String::from_utf8_lossy(&record.path)),
         });
     }
-    match (record.stage, record.tag) {
-        (0, IndexTag::Tracked) => Ok(Tracking::Tracked),
-        (0, IndexTag::SkipWorktree) => Err(GitCannotHandBack::Hidden(HiddenFlag::SkipWorktree)),
-        (0, IndexTag::AssumeUnchanged) => {
-            Err(GitCannotHandBack::Hidden(HiddenFlag::AssumeUnchanged))
-        }
-        (0, IndexTag::SkipWorktreeAndAssumeUnchanged) => {
-            Err(GitCannotHandBack::Hidden(HiddenFlag::Both))
-        }
-        (0, IndexTag::Unmerged) | (1..=u8::MAX, _) => Err(GitCannotHandBack::Unreadable {
+    match (record.stage, record.tag.reading()) {
+        (0, TagReading::Read) => Ok(Tracking::Tracked),
+        (0, TagReading::Hidden(flag)) => Err(GitCannotHandBack::Hidden(flag)),
+        (0, TagReading::Unmerged) | (1..=u8::MAX, _) => Err(GitCannotHandBack::Unreadable {
             detail: "git lists it as conflicted".to_owned(),
         }),
     }

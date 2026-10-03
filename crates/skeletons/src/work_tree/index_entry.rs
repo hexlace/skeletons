@@ -33,17 +33,30 @@ pub(crate) enum HiddenFlag {
     Both,
 }
 
+/// What a command that reads a file through git's index makes of an entry's
+/// tag: the one reading of the five letters, so that no command matches on
+/// the letters itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TagReading {
+    /// Git reads the file from the work tree.
+    Read,
+    /// Git does not read the file from the work tree, because of this flag.
+    Hidden(HiddenFlag),
+    /// The entry is unmerged.
+    Unmerged,
+}
+
 impl IndexTag {
-    /// The flag that makes git not read this entry's file from the work tree,
-    /// or `None` for an entry git does read (tracked, or unmerged). Asked of
-    /// the tag so that the three hiding letters are read in one place for
-    /// every command that refuses a hidden file.
-    pub(crate) const fn hiding_flag(self) -> Option<HiddenFlag> {
+    /// Reads the tag as whether git looks at the entry's file in the work
+    /// tree. The mapping from letters is written only here, so every command
+    /// that refuses a hidden or unmerged file agrees on which letters those are.
+    pub(crate) const fn reading(self) -> TagReading {
         match self {
-            Self::SkipWorktree => Some(HiddenFlag::SkipWorktree),
-            Self::AssumeUnchanged => Some(HiddenFlag::AssumeUnchanged),
-            Self::SkipWorktreeAndAssumeUnchanged => Some(HiddenFlag::Both),
-            Self::Tracked | Self::Unmerged => None,
+            Self::Tracked => TagReading::Read,
+            Self::SkipWorktree => TagReading::Hidden(HiddenFlag::SkipWorktree),
+            Self::AssumeUnchanged => TagReading::Hidden(HiddenFlag::AssumeUnchanged),
+            Self::SkipWorktreeAndAssumeUnchanged => TagReading::Hidden(HiddenFlag::Both),
+            Self::Unmerged => TagReading::Unmerged,
         }
     }
 
@@ -168,24 +181,30 @@ fn parse_one_index_record(record: &[u8]) -> Result<IndexRecord, MalformedIndexRe
 mod tests {
     use proptest::prelude::*;
 
-    use super::{HiddenFlag, IndexTag, parse_ls_files_tagged};
+    use super::{HiddenFlag, IndexTag, TagReading, parse_ls_files_tagged};
 
     #[test]
-    fn each_tag_that_hides_a_file_names_its_flag_and_the_others_name_none() {
+    fn each_tag_is_read_as_read_hidden_by_its_flag_or_unmerged() {
         // Every tag, so a new one cannot be left out: the three letters that
-        // make git look away name the flag that does, and tracked and
-        // unmerged entries are ones git reads.
+        // make git look away name the flag that does, tracked is read, and
+        // unmerged is its own reading.
         for (tag, expected) in [
-            (IndexTag::Tracked, None),
-            (IndexTag::SkipWorktree, Some(HiddenFlag::SkipWorktree)),
-            (IndexTag::AssumeUnchanged, Some(HiddenFlag::AssumeUnchanged)),
+            (IndexTag::Tracked, TagReading::Read),
+            (
+                IndexTag::SkipWorktree,
+                TagReading::Hidden(HiddenFlag::SkipWorktree),
+            ),
+            (
+                IndexTag::AssumeUnchanged,
+                TagReading::Hidden(HiddenFlag::AssumeUnchanged),
+            ),
             (
                 IndexTag::SkipWorktreeAndAssumeUnchanged,
-                Some(HiddenFlag::Both),
+                TagReading::Hidden(HiddenFlag::Both),
             ),
-            (IndexTag::Unmerged, None),
+            (IndexTag::Unmerged, TagReading::Unmerged),
         ] {
-            assert_eq!(tag.hiding_flag(), expected, "{tag:?}");
+            assert_eq!(tag.reading(), expected, "{tag:?}");
         }
     }
 

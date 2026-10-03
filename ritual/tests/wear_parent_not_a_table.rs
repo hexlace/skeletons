@@ -10,6 +10,11 @@
 //! table: it refuses the manifest before `wear` can read it, which is a
 //! different refusal, pinned here for what it is.
 //!
+//! A TOML datetime is not a table either, though `cargo metadata` reports one
+//! as a JSON object with the single key `$__toml_private_datetime`. A
+//! `metadata` or a `skeletons` that is a datetime is refused exactly as one
+//! that is an integer is.
+//!
 //! Each scenario puts a recording `cargo` in front of the real one, through
 //! the `CARGO` variable the command line runs cargo by, and reads back which
 //! cargo subcommands ran. The recording is proved to see calls by a scenario
@@ -177,6 +182,52 @@ fn a_skeletons_that_is_not_a_table_is_refused_before_cargo_add() -> TestOutcome 
     // `[package.metadata] skeletons = 1`: refused before `cargo add` already;
     // pinned alongside its siblings so the whole class is held together.
     let fixture = fixture_for_wearing("[package.metadata]\nskeletons = 1")?;
+    let before = ManifestAndLockfile::read(&fixture, "Cargo.toml")?;
+    let recording = RecordingCargo::new()?;
+
+    let report = recording.wear_passthrough_plain(&fixture)?;
+
+    assert_cargo_ran_but_never_added(&recording)?;
+    assert_refused_and_untouched(
+        &fixture,
+        &report,
+        &not_a_table_line("package.metadata.skeletons"),
+        &before,
+        "Cargo.toml",
+    )
+}
+
+#[test]
+fn a_metadata_that_is_a_datetime_is_refused_before_cargo_add() -> TestOutcome {
+    // `[package] metadata = 1979-05-27T07:32:00Z`: Cargo accepts it, and
+    // `cargo metadata` reports it as the object
+    // `{"$__toml_private_datetime": "1979-05-27T07:32:00Z"}`. That object is
+    // how a datetime is spelled in the JSON, not a table the manifest wrote,
+    // so no wearing table can go under it.
+    let fixture = fixture_for_wearing("metadata = 1979-05-27T07:32:00Z")?;
+    let before = ManifestAndLockfile::read(&fixture, "Cargo.toml")?;
+    let recording = RecordingCargo::new()?;
+
+    let report = recording.wear_passthrough_plain(&fixture)?;
+
+    assert_cargo_ran_but_never_added(&recording)?;
+    assert_refused_and_untouched(
+        &fixture,
+        &report,
+        &not_a_table_line("package.metadata"),
+        &before,
+        "Cargo.toml",
+    )
+}
+
+#[test]
+fn a_skeletons_that_is_a_datetime_is_refused_before_cargo_add() -> TestOutcome {
+    // `[package.metadata] skeletons = 1979-05-27`: Cargo accepts it, and
+    // `cargo metadata` reports the package's metadata as
+    // `{"skeletons": {"$__toml_private_datetime": "1979-05-27"}}`. The inner
+    // object is a datetime's JSON spelling, not a table, so no wearing table
+    // can go under `skeletons`.
+    let fixture = fixture_for_wearing("[package.metadata]\nskeletons = 1979-05-27")?;
     let before = ManifestAndLockfile::read(&fixture, "Cargo.toml")?;
     let recording = RecordingCargo::new()?;
 

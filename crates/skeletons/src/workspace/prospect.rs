@@ -9,7 +9,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use super::schema::{Document, Package};
+use super::schema::{Document, Package, as_toml_table};
 use super::{Network, ReadWorkspaceError, Workspace, cargo_metadata, from_document, locate};
 
 /// The workspace, and the member `wear` writes into, if the workspace has it.
@@ -117,22 +117,22 @@ fn declared_by(package: &Package) -> Vec<Declared> {
 ///
 /// Cargo reports a `metadata` the manifest does not have as `null`, so that
 /// is absent. Any other `metadata` that is not a table has no `skeletons` in
-/// it and none can be written under it, which is its own state.
+/// it and none can be written under it, which is its own state. A TOML
+/// datetime is not a table, though Cargo reports one as a JSON object.
 fn skeletons_table(metadata: &serde_json::Value) -> SkeletonsTable {
-    match metadata {
-        serde_json::Value::Null => SkeletonsTable::Absent,
-        serde_json::Value::Object(_) => match metadata.get("skeletons") {
-            None => SkeletonsTable::Absent,
-            Some(serde_json::Value::Object(entries)) => {
-                SkeletonsTable::Keys(entries.keys().cloned().collect())
-            }
-            Some(_) => SkeletonsTable::SkeletonsNotATable,
-        },
-        serde_json::Value::Bool(_)
-        | serde_json::Value::Number(_)
-        | serde_json::Value::String(_)
-        | serde_json::Value::Array(_) => SkeletonsTable::MetadataNotATable,
+    if metadata.is_null() {
+        return SkeletonsTable::Absent;
     }
+    let Some(metadata_table) = as_toml_table(metadata) else {
+        return SkeletonsTable::MetadataNotATable;
+    };
+    let Some(skeletons) = metadata_table.get("skeletons") else {
+        return SkeletonsTable::Absent;
+    };
+    let Some(entries) = as_toml_table(skeletons) else {
+        return SkeletonsTable::SkeletonsNotATable;
+    };
+    SkeletonsTable::Keys(entries.keys().cloned().collect())
 }
 
 #[cfg(test)]
@@ -287,6 +287,36 @@ mod tests {
             member_of(&one_member("m", r#"{"ritual": {}}"#, ""), "m").expect("m is a member");
 
         assert_eq!(member.skeletons, SkeletonsTable::Absent);
+    }
+
+    #[test]
+    fn a_metadata_that_is_a_datetime_is_not_a_table() {
+        let member = member_of(
+            &one_member(
+                "m",
+                r#"{"$__toml_private_datetime": "1979-05-27T07:32:00Z"}"#,
+                "",
+            ),
+            "m",
+        )
+        .expect("m is a member");
+
+        assert_eq!(member.skeletons, SkeletonsTable::MetadataNotATable);
+    }
+
+    #[test]
+    fn a_skeletons_that_is_a_datetime_is_not_a_table() {
+        let member = member_of(
+            &one_member(
+                "m",
+                r#"{"skeletons": {"$__toml_private_datetime": "1979-05-27"}}"#,
+                "",
+            ),
+            "m",
+        )
+        .expect("m is a member");
+
+        assert_eq!(member.skeletons, SkeletonsTable::SkeletonsNotATable);
     }
 
     #[test]

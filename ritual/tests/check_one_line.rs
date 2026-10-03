@@ -161,6 +161,44 @@ fn a_wearing_key_that_is_not_a_table_is_refused_on_one_line() -> TestOutcome {
 }
 
 #[test]
+fn a_skeletons_that_is_a_datetime_is_refused_as_not_a_table() -> TestOutcome {
+    // `[package.metadata] skeletons = 1979-05-27`: a datetime where the whole
+    // wearing table belongs. `cargo metadata` reports a datetime as the
+    // object `{"$__toml_private_datetime": "1979-05-27"}`; the refusal must
+    // be the one `skeletons = "text"` gets, about `skeletons` itself, and
+    // must not name that key, which the manifest does not have.
+    let fixture = fixture_with_manifest("[package.metadata]\nskeletons = 1979-05-27\n")?;
+
+    let reports = run_check(&fixture)?;
+
+    let human = format!("{}{}", reports.human.stdout, reports.human.stderr);
+    let expected = "[package.metadata.skeletons] in Cargo.toml is not a table; each skeleton \
+                    the manifest wears is a table under it, \
+                    [package.metadata.skeletons.<dependency>]";
+    assert!(
+        human.contains(expected),
+        "the report must give the whole-table refusal; it was: {human:?}"
+    );
+    assert!(
+        !human.contains("$__toml_private_datetime"),
+        "the report must not name a key the manifest does not have; it was: {human:?}"
+    );
+    let document = support::json::parse(&reports.json.stdout)?;
+    let refusal = only_refusal(&document)?;
+    assert_eq!(support::json::refusal_kind(refusal)?, "not-a-table");
+    let message = support::json::refusal_message(refusal)?;
+    assert!(
+        message.contains(expected),
+        "the `--json` message must give the whole-table refusal; it was: {message:?}"
+    );
+    assert!(
+        !message.contains("$__toml_private_datetime"),
+        "the `--json` message must not name a key the manifest does not have; it was: {message:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_wearing_table_that_is_no_table_in_a_newline_directory_is_refused_on_one_line() -> TestOutcome {
     // `skeletons = "text"` where the whole table belongs, in a manifest
     // under `first\nsecond/`. With no key to name, the refusal echoes only

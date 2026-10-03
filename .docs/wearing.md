@@ -63,10 +63,11 @@ the table is empty because the skeleton has no option to record, and `check` and
   (`assignee = "octocat"`); an array of strings sets a `set`
   option (`ecosystems = ["cargo", "github-actions"]`), in any order, with
   duplicates kept — the render itself refuses a duplicate. Anything
-  else — a number, a boolean, a table, an array holding something other
-  than a string — refuses that one worn skeleton, naming the option and the
-  shape actually written. A `text` option that declares no default is
-  optional: leave it unrecorded and every line holding its placeholder is
+  else — a number, a boolean, a table, a TOML date or time (named as a
+  datetime), an array holding something other than a string — refuses that one
+  worn skeleton, naming the option and the shape actually written. A `text`
+  option that declares no default is optional: leave it unrecorded and every
+  line holding its placeholder is
   dropped from the render, so a file that still holds those lines reads as
   drifted until the option is recorded or the lines are removed.
 - **A key that names no dependency of that manifest is refused**, never
@@ -939,9 +940,9 @@ and, like every message in this document, prints text from outside escaped.
   ```
 - `[package.metadata]` or `[package.metadata.skeletons]` in the manifest is
   not a table, so there is nowhere to write a wearing table (Cargo takes a
-  `metadata` of any shape; a `package` that is not a table never gets this far,
-  because Cargo refuses the manifest itself). The message names the one that is
-  not:
+  `metadata` of any shape, a TOML date or time included; a `package` that is
+  not a table never gets this far, because Cargo refuses the manifest itself).
+  The message names the one that is not:
 
   ```text
   [package.metadata.skeletons] in ritual/Cargo.toml is not a table, so wear cannot add a wearing table under it; make it a table, then run the `wear` task again

@@ -235,11 +235,7 @@ fn read_one_wearing(
         }
     };
 
-    if !skeleton
-        .metadata
-        .get("skeletons")
-        .is_some_and(serde_json::Value::is_object)
-    {
+    if !declares_skeleton(&skeleton.metadata) {
         return Wearing::Refused(WearingRefusal::NotASkeleton {
             manifest: manifest.to_owned(),
             dependency: key.to_owned(),
@@ -267,6 +263,15 @@ fn read_one_wearing(
         pin: Pin::from_source(skeleton.source.as_deref(), skeleton_directory),
         choices: table.choices(),
     })
+}
+
+/// Whether `metadata`, a package's `[package.metadata]` as raw JSON, holds a
+/// `skeletons` table: the declaration that makes a package a skeleton. A TOML
+/// datetime there is not a table.
+fn declares_skeleton(metadata: &serde_json::Value) -> bool {
+    metadata
+        .get("skeletons")
+        .is_some_and(|skeletons| schema::as_toml_table(skeletons).is_some())
 }
 
 /// Renders `path` (always absolute, as `cargo metadata` gives every path
@@ -315,7 +320,29 @@ pub(crate) fn relative_to_root(root: &Path, path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::relative_to_root;
+    use serde_json::json;
+
+    use super::{declares_skeleton, relative_to_root};
+
+    #[test]
+    fn a_package_with_a_skeletons_table_declares_a_skeleton() {
+        assert!(declares_skeleton(&json!({"skeletons": {}})));
+        assert!(declares_skeleton(&json!({"skeletons": {"options": {}}})));
+    }
+
+    #[test]
+    fn a_package_without_a_skeletons_table_declares_no_skeleton() {
+        assert!(!declares_skeleton(&json!(null)));
+        assert!(!declares_skeleton(&json!({})));
+        assert!(!declares_skeleton(&json!({"skeletons": "text"})));
+    }
+
+    #[test]
+    fn a_skeletons_that_is_a_datetime_declares_no_skeleton() {
+        let metadata = json!({"skeletons": {"$__toml_private_datetime": "1979-05-27"}});
+
+        assert!(!declares_skeleton(&metadata));
+    }
 
     #[test]
     fn a_path_directly_under_the_root_relativises_with_no_leading_dots() {

@@ -157,6 +157,23 @@ fn a_text_value_holding_a_newline_is_refused_on_one_line_with_the_newline_shown(
 }
 
 #[test]
+fn an_option_value_that_is_a_datetime_is_refused_naming_a_datetime() -> support::TestOutcome {
+    // `assignee = 07:32:00` is a TOML time, which is neither a string nor an
+    // array of strings. `cargo metadata` reports it as the one-key object
+    // `{"$__toml_private_datetime": "07:32:00"}`; the refusal must say the
+    // value is a datetime, not a table, which the manifest never wrote.
+    assert_refused_on_one_line(
+        "text-optional",
+        false,
+        "assignee = 07:32:00\n",
+        "option-refused",
+        "[package.metadata.skeletons.text-optional] in Cargo.toml: `assignee` is a datetime, not \
+         a string or an array of strings; it reads `assignee = \"weekly\"` or `assignee = \
+         [\"weekly\"]`",
+    )
+}
+
+#[test]
 fn a_wearing_table_key_holding_a_newline_is_refused_on_one_line() -> support::TestOutcome {
     // A key inside the wearing table is a name the wearer chose for an option.
     // This one holds a newline, so it can only be reported as undeclared; the

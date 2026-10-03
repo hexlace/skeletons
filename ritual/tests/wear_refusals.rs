@@ -514,6 +514,14 @@ fn a_lockfile_that_git_ignores_and_does_not_track_is_worn_and_then_synced() -> T
         "wear must succeed with an ignored lockfile; stderr was: {}",
         report.stderr
     );
+    // `git add` refuses a lockfile git ignores, so the next step names only
+    // the manifest.
+    assert_eq!(
+        report.stdout.lines().nth(1),
+        Some("commit Cargo.toml, then run the `sync` task to write its files"),
+        "the next step must leave out a Cargo.lock git does not track; stdout: {}",
+        report.stdout
+    );
     commit_everything(&fixture, "fixture: wear")?;
     let sync_report = fixture.run(&["skeletons", "sync"])?;
     assert_eq!(

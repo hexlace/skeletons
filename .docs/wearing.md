@@ -877,8 +877,11 @@ The next step names the `sync` task and nothing before it: a task is never told
 the key it is mounted under, so it cannot say how its command line reaches
 `sync`. It gives the order itself: `sync` writes only into a clean work tree, so
 the line says to commit the manifest it names, and `Cargo.lock` (always at the
-workspace root), before running it. Cargo's own output is not repeated. Any
-option values edited into the table go in that commit too.
+workspace root), before running it. When git does not track `Cargo.lock` (a
+project that ignores it), the line names the manifest alone and reads `commit
+ritual/Cargo.toml, then run the `sync` task to write its files`, because `git
+add` refuses an ignored file. Cargo's own output is not repeated. Any option
+values edited into the table go in that commit too.
 
 **It refuses before it writes anything** when the request or the project is
 wrong, in this order, and each message ends by saying what to do. Every message
@@ -1008,6 +1011,8 @@ and, like every message in this document, prints text from outside escaped.
   regenerates it, and refusing it would shut out projects that ignore their
   lockfile. (One that is untracked and not ignored shows in `git status`, and
   is refused above as an uncommitted change.)
+  The success line then leaves `Cargo.lock` out of what to commit, since git
+  would refuse to add it.
 - the manifest, or a `Cargo.lock` that exists, cannot be written in place. Cargo
   writes through a temporary file and a rename, so `cargo add` succeeds on a
   read-only file, but `wear` writes the wearing table in place and its undo

@@ -43,14 +43,26 @@ enum GitCannotHandBack {
     Unreadable { detail: String },
 }
 
+/// Whether git's index holds a file `wear` changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Tracking {
+    /// The index holds the file, so a commit can take what `wear` wrote.
+    Tracked,
+    /// The index holds nothing for the file: git ignores it, so `git add`
+    /// refuses it and a commit never takes it.
+    NotTracked,
+}
+
 /// Refuses, before anything is written, a manifest or a tracked `Cargo.lock`
-/// that git cannot hand back.
+/// that git cannot hand back, and says whether git tracks the `Cargo.lock`.
 ///
 /// `clean` is never read: its presence is what says the work tree was found
 /// clean first, which is why an untracked `Cargo.lock` that is not ignored
 /// never reaches here (git status lists it, and the clean check refuses it as
 /// an uncommitted change). What reaches here as untracked is a file git
-/// ignores, and for a lockfile that is allowed.
+/// ignores, and for a lockfile that is allowed. The answer is carried out as
+/// a value so that the success message names `Cargo.lock` as something to
+/// commit only when git will take it.
 ///
 /// Each path is asked of git as `wear` shows it, relative to the workspace
 /// root the work tree was opened at.
@@ -58,18 +70,31 @@ pub(super) fn check(
     work_tree: &WorkTree,
     _clean: &CleanWorkTree,
     command_line_crate: &CommandLineCrate,
-) -> Result<(), Failure> {
-    for (file, shown) in [
-        (File::Manifest, &command_line_crate.manifest_shown),
-        (File::Lockfile, &command_line_crate.lockfile_shown),
-    ] {
-        let aborted = |abort| Failure::new(abort_message(&abort, work_tree.root(), WRITING));
-        let records = index_records::records_for(work_tree, shown)
-            .map_err(aborted)?
-            .map_err(|unusable| aborted(abort_for(unusable)))?;
-        classify(file, shown, &records).map_err(|cannot| Failure::new(line(shown, &cannot)))?;
-    }
-    Ok(())
+) -> Result<Tracking, Failure> {
+    let manifest = check_file(
+        work_tree,
+        File::Manifest,
+        &command_line_crate.manifest_shown,
+    )?;
+    assert_eq!(
+        manifest,
+        Tracking::Tracked,
+        "a manifest git does not track is refused, never allowed"
+    );
+    check_file(
+        work_tree,
+        File::Lockfile,
+        &command_line_crate.lockfile_shown,
+    )
+}
+
+/// Asks git's index about one file, shown as `wear` shows it.
+fn check_file(work_tree: &WorkTree, file: File, shown: &str) -> Result<Tracking, Failure> {
+    let aborted = |abort| Failure::new(abort_message(&abort, work_tree.root(), WRITING));
+    let records = index_records::records_for(work_tree, shown)
+        .map_err(aborted)?
+        .map_err(|unusable| aborted(abort_for(unusable)))?;
+    classify(file, shown, &records).map_err(|cannot| Failure::new(line(shown, &cannot)))
 }
 
 /// The abort an `ls-files` answer that cannot be used amounts to.
@@ -89,15 +114,19 @@ fn abort_for(unusable: UnusableIndexAnswer) -> WorkTreeAbort {
 /// at or under it) as whether git can hand `file` back.
 ///
 /// A file is fine when its one record is at stage 0, spelled exactly as asked
-/// and tagged `H`. No record is fine for a lockfile and a refusal for a
-/// manifest. Anything that is not one such record is refused as unreadable
+/// and tagged `H`, and is then tracked. No record is fine for a lockfile, which
+/// is then not tracked, and a refusal for a manifest. Anything that is not one such record is refused as unreadable
 /// and not guessed at: the clean check has found no conflict, but this reads
 /// what git says rather than what that implies.
-fn classify(file: File, path: &str, records: &[IndexRecord]) -> Result<(), GitCannotHandBack> {
+fn classify(
+    file: File,
+    path: &str,
+    records: &[IndexRecord],
+) -> Result<Tracking, GitCannotHandBack> {
     assert!(!path.is_empty(), "a file `wear` changes has a path");
     let [record] = records else {
         return match (records.len(), file) {
-            (0, File::Lockfile) => Ok(()),
+            (0, File::Lockfile) => Ok(Tracking::NotTracked),
             (0, File::Manifest) => Err(GitCannotHandBack::Untracked),
             (listed, File::Manifest | File::Lockfile) => Err(GitCannotHandBack::Unreadable {
                 detail: format!("git listed {listed} index entries for it"),
@@ -118,7 +147,7 @@ fn classify(file: File, path: &str, records: &[IndexRecord]) -> Result<(), GitCa
         return Err(GitCannotHandBack::Hidden(flag));
     }
     match record.tag {
-        IndexTag::Tracked => Ok(()),
+        IndexTag::Tracked => Ok(Tracking::Tracked),
         IndexTag::Unmerged => Err(GitCannotHandBack::Unreadable {
             detail: "git lists it as conflicted".to_owned(),
         }),
@@ -165,7 +194,7 @@ fn untracked_line(shown: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{File, GitCannotHandBack, classify, line};
+    use super::{File, GitCannotHandBack, Tracking, classify, line};
     use crate::work_tree::index_entry::{HiddenFlag, IndexRecord, parse_ls_files_tagged};
 
     const OBJECT: &str = "7898192e4d1a1e6c0e7c8e6a1a1e6c0e7c8e6a1a";
@@ -180,14 +209,20 @@ mod tests {
         parse_ls_files_tagged(&bytes).expect("well-formed test records")
     }
 
-    fn classified(file: File, path: &str, tag: &str) -> Result<(), GitCannotHandBack> {
+    fn classified(file: File, path: &str, tag: &str) -> Result<Tracking, GitCannotHandBack> {
         classify(file, path, &listed(&[(tag, 0, path)]))
     }
 
     #[test]
     fn a_tracked_file_git_reads_is_fine_for_the_manifest_and_the_lockfile() {
-        assert_eq!(classified(File::Manifest, "Cargo.toml", "H"), Ok(()));
-        assert_eq!(classified(File::Lockfile, "Cargo.lock", "H"), Ok(()));
+        assert_eq!(
+            classified(File::Manifest, "Cargo.toml", "H"),
+            Ok(Tracking::Tracked)
+        );
+        assert_eq!(
+            classified(File::Lockfile, "Cargo.lock", "H"),
+            Ok(Tracking::Tracked)
+        );
     }
 
     #[test]
@@ -216,7 +251,10 @@ mod tests {
             classify(File::Manifest, "Cargo.toml", &[]),
             Err(GitCannotHandBack::Untracked)
         );
-        assert_eq!(classify(File::Lockfile, "Cargo.lock", &[]), Ok(()));
+        assert_eq!(
+            classify(File::Lockfile, "Cargo.lock", &[]),
+            Ok(Tracking::NotTracked)
+        );
     }
 
     #[test]

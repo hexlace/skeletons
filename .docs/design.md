@@ -1560,7 +1560,8 @@ is mounted under, so `wear` cannot say how its command line reaches `sync`, and
 the wearer recognises the subcommand on their own command line. The same holds
 for every message that asks for another run. The line opens by telling the
 wearer to commit the manifest and `Cargo.lock`, because `sync` writes only into
-a clean work tree and `wear` has just changed both.
+a clean work tree and `wear` has just changed both; it names `Cargo.lock` only
+when git tracks it, since `git add` refuses a lockfile git ignores.
 
 `wear` adds a skeleton and nothing takes one off: by hand that is two
 deletions, with no order to get wrong.

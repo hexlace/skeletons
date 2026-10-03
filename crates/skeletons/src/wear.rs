@@ -38,6 +38,7 @@ use crate::work_tree;
 use crate::work_tree::writing_command::WritingCommand;
 use crate::workspace::{self, Network, ReadWorkspaceError, Workspace};
 use confirm::Added;
+use hand_back::Tracking;
 use refusal::WearRefusal;
 use request::Request;
 use source::{Source, SourceFlags};
@@ -91,7 +92,7 @@ fn run(command_line: &CommandLine, arguments: WearArguments) -> Outcome {
     let prepared = prepare(command_line, request)?;
     let prepared = enter_the_workspace_root(prepared)?;
     let added = rollback::attempt(RETRY, |changes| write(changes, &prepared))?;
-    for line in message::added_lines(&added) {
+    for line in message::added_lines(&added, prepared.lockfile) {
         report(line);
     }
     Ok(())
@@ -104,6 +105,9 @@ struct Prepared {
     directory: PathBuf,
     workspace_root: PathBuf,
     command_line_crate: CommandLineCrate,
+    /// Whether git tracks `Cargo.lock`, which the success message needs to
+    /// say whether to commit it.
+    lockfile: Tracking,
 }
 
 /// The command line's own crate, which is the only package `wear` writes
@@ -161,13 +165,14 @@ fn prepare(command_line: &CommandLine, request: Request) -> Result<Prepared, Fai
     // says nothing about a file git is told not to read, so the two files are
     // then asked of git's index, as `sync` asks of every path it writes.
     let (work_tree, clean) = work_tree::open_clean(&prospect.workspace.root, WRITING)?;
-    hand_back::check(&work_tree, &clean, &command_line_crate)?;
+    let lockfile = hand_back::check(&work_tree, &clean, &command_line_crate)?;
     writable::check(&command_line_crate)?;
     Ok(Prepared {
         request,
         directory,
         workspace_root: prospect.workspace.root,
         command_line_crate,
+        lockfile,
     })
 }
 
@@ -292,6 +297,7 @@ mod tests {
     use rituals::{Failure, Outcome, clap};
     use rituals_compose::rollback;
 
+    use super::hand_back::Tracking;
     use super::source::Source;
     use super::test_workspace::{not_a_skeleton, workspace_of, worn};
     use super::{
@@ -335,6 +341,7 @@ mod tests {
                     lockfile_path,
                     lockfile_shown: "Cargo.lock".to_owned(),
                 },
+                lockfile: Tracking::Tracked,
             };
             Self {
                 directory,

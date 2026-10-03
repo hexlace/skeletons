@@ -90,6 +90,8 @@ pub(crate) struct SetOption {
 impl SetOption {
     /// The option's values, in declared order.
     pub(crate) fn values(&self) -> &[Key<SetValue>] {
+        #[cfg(test)]
+        SET_VALUE_LIST_READS.with(|reads| reads.set(reads.get() + 1));
         &self.values
     }
 }
@@ -832,6 +834,22 @@ impl Declarations {
             .expect("test fixture declarations must be well-formed");
         (declarations, partial_paths)
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times a `set` option's value list has been read on this
+    /// thread. Thread-local so that tests running in parallel never see one
+    /// another's reads.
+    static SET_VALUE_LIST_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many times a `set` option's value list has been read on this thread:
+/// what a test samples before and after an operation to learn how many
+/// walks of an option's values the operation started.
+#[cfg(test)]
+pub(crate) fn set_value_list_reads() -> u64 {
+    SET_VALUE_LIST_READS.with(std::cell::Cell::get)
 }
 
 #[cfg(test)]

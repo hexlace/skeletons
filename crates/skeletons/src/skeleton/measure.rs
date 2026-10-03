@@ -482,14 +482,13 @@ fn placeholder_length(fill: Fill, declarations: &Declarations, sizing: Sizing<'_
 mod tests {
     use std::collections::BTreeMap;
     use std::fmt::Write as _;
-    use std::time::{Duration, Instant};
 
     use super::{
         Sizing, check_largest, contribution_bytes, directive_totals, rendered_length,
         text_contributions,
     };
     use crate::skeleton::choices::{Choice, Choices, resolve};
-    use crate::skeleton::declarations::{Declarations, Declared};
+    use crate::skeleton::declarations::{Declarations, Declared, set_value_list_reads};
     use crate::skeleton::error::{Reason, SkeletonIdentity};
     use crate::skeleton::keyed::KeyedBuilder;
     use crate::skeleton::limits::RENDERED_BYTES_MAX;
@@ -912,61 +911,37 @@ mod tests {
         );
     }
 
-    /// How long one `check_largest` of `validated` takes.
-    fn time_check_largest(validated: &ValidatedSkeleton) -> Duration {
-        let skeleton = SkeletonIdentity::Named("test".to_owned());
-        let started = Instant::now();
-        check_largest(&skeleton, validated).expect(
-            "every directive selects nothing but empty partials; the largest render is tiny",
-        );
-        started.elapsed()
-    }
-
-    /// Directives in each timed skeleton: enough that per-directive work is
-    /// most of what gets timed.
-    const DIRECTIVES: usize = 50_000;
-
-    /// How many times each skeleton is timed. The fastest run of each is the one
-    /// least disturbed by anything else the machine was doing: noise only
-    /// ever adds time.
-    const TIMED_RUNS: u32 = 5;
-
-    /// The most the skeleton declaring a hundred times as many values may take,
-    /// as a multiple of the other: linear sizing is about 1, sizing that
-    /// walks an option's declared values at every directive about 100.
-    const RATIO_MAX: f64 = 10.0;
-
     #[test]
-    fn sizing_a_skeleton_costs_the_same_however_many_values_its_option_declares() {
-        // Two skeletons with the same 50,000 directives, all selecting from one
-        // `set` option whose partials are empty: one declares 10 values,
-        // the other 1,000. Sizing is linear in (directives + declared
-        // values + partial lines), so the two take about the same time;
-        // sizing that walked the option's declared values at every
-        // directive would take about a hundred times longer on the second.
-        // What is asserted is the ratio of the two, never a duration, so
-        // the bound holds on any machine and in any build profile. Each
-        // skeleton is timed as the fastest of several runs, taken in turn so
-        // that a slow moment on the machine lands on both, and each has
-        // been sized once already by `ValidatedSkeleton::validate`, so neither
-        // timing pays for a cold cache the other does not.
-        let few_values = many_directives_over_empty_partials(10, DIRECTIVES);
-        let many_values = many_directives_over_empty_partials(1_000, DIRECTIVES);
+    fn sizing_reads_each_set_options_values_once_however_many_directives_select_from_it() {
+        // Sizing is linear in (directives + declared values + partial lines)
+        // because each directive reads its option's precomputed total, and
+        // the option's declared values are walked once, to make that total.
+        // A walk of an option's values at every directive would instead cost
+        // directives times values. This counts reads of a `set` option's value
+        // list, once per option however many directives select from it, at one
+        // directive and at a thousand, so the verdict does not depend on how
+        // long anything takes. It sees a walk that goes through
+        // `SetOption::values`; a walk over a copy of the list, or over
+        // `Declarations::set_values`, makes no read and is not seen.
+        // Validation sizes the skeleton once already, so the count is taken
+        // after building and only the sizing under test is measured.
+        let set_options = 1;
+        for directives in [1, 1_000] {
+            let validated = many_directives_over_empty_partials(1_000, directives);
+            let skeleton = SkeletonIdentity::Named("test".to_owned());
+            let reads_before = set_value_list_reads();
 
-        let mut few = Duration::MAX;
-        let mut many = Duration::MAX;
-        for _ in 0..TIMED_RUNS {
-            few = few.min(time_check_largest(&few_values));
-            many = many.min(time_check_largest(&many_values));
+            check_largest(&skeleton, &validated).expect(
+                "every directive selects nothing but empty partials; the largest render is tiny",
+            );
+
+            assert_eq!(
+                set_value_list_reads() - reads_before,
+                set_options,
+                "sizing {directives} directives over one set option read its value list a \
+                 number of times that depends on the directives"
+            );
         }
-
-        let ratio = many.as_secs_f64() / few.as_secs_f64();
-        assert!(
-            ratio < RATIO_MAX,
-            "sizing with 1,000 declared values took {many:?} against {few:?} with 10, a ratio \
-             of {ratio:.1}: directive_length must read its option's precomputed total, not \
-             walk the option's declared values"
-        );
     }
 
     #[test]

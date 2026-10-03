@@ -385,7 +385,9 @@ mod tests {
     #[test]
     fn an_array_of_strings_becomes_a_many_choice_keeping_order_and_duplicates() {
         let (tables, _refusals) = wearing_tables(
-            &json!({"skeletons": {"dependabot": {"ecosystems": ["cargo", "cargo", "github-actions"]}}}),
+            &json!({
+                "skeletons": {"dependabot": {"ecosystems": ["cargo", "cargo", "github-actions"]}}
+            }),
             no_dependency,
         )
         .expect("must parse");

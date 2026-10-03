@@ -161,8 +161,7 @@ fn a_wearing_key_that_is_not_a_table_is_refused_on_one_line() -> TestOutcome {
 }
 
 #[test]
-fn a_wearing_table_that_is_not_a_table_in_a_newline_directory_is_refused_on_one_line() -> TestOutcome
-{
+fn a_wearing_table_that_is_no_table_in_a_newline_directory_is_refused_on_one_line() -> TestOutcome {
     // `skeletons = "text"` where the whole table belongs, in a manifest
     // under `first\nsecond/`. With no key to name, the refusal echoes only
     // the manifest's path.

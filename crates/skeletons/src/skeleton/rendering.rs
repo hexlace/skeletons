@@ -328,7 +328,8 @@ mod tests {
         assert_eq!(
             rendering.get("file.txt"),
             Some(b"before\n  lint-line\n\n  next-line\nafter\n".as_slice()),
-            "the partial's non-blank lines gain the directive's indentation; the blank line does not"
+            "the partial's non-blank lines gain the directive's indentation; the blank line does \
+             not"
         );
     }
 

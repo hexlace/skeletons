@@ -130,7 +130,8 @@ pub(crate) fn fetch(directory: &Path, network: Network) -> Result<Document, Read
 /// pinned by a unit test with no process to spawn.
 fn oversized_output_detail() -> String {
     format!(
-        "cargo metadata printed more than {METADATA_OUTPUT_MEBIBYTES_MAX} MiB, the most `skeletons` reads"
+        "cargo metadata printed more than {METADATA_OUTPUT_MEBIBYTES_MAX} MiB, the most \
+         `skeletons` reads"
     )
 }
 
@@ -146,8 +147,8 @@ fn parse(bytes: &[u8]) -> Result<Document, ReadWorkspaceError> {
     if document.version != SUPPORTED_FORMAT_VERSION {
         return Err(ReadWorkspaceError::MetadataUnreadable {
             detail: format!(
-                "cargo metadata returned format version {}, but `skeletons` understands only version \
-                 {SUPPORTED_FORMAT_VERSION}",
+                "cargo metadata returned format version {}, but `skeletons` understands only \
+                 version {SUPPORTED_FORMAT_VERSION}",
                 document.version
             ),
         });

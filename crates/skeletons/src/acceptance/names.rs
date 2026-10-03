@@ -77,7 +77,8 @@ fn write_minimal_manifest(skeleton_directory: &std::path::Path, name: &str) {
     std::fs::write(
         skeleton_directory.join("Cargo.toml"),
         format!(
-            "[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n[package.metadata.skeletons]\n"
+            "[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
+             publish = false\n\n[package.metadata.skeletons]\n"
         ),
     )
     .expect("write Cargo.toml");
@@ -121,7 +122,8 @@ fn two_file_names_equal_under_case_folding_in_the_same_directory_are_refused_nam
             error.reason(),
             Reason::NamesCollide { other } if other == "files/dependabot.yml"
         ),
-        "expected a names-collide refusal naming files/dependabot.yml as the other name, got {error:?}"
+        "expected a names-collide refusal naming files/dependabot.yml as the other name, \
+         got {error:?}"
     );
 
     std::fs::remove_dir_all(&skeleton_directory).expect("clean up scratch directory");

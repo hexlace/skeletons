@@ -284,8 +284,8 @@ fn unsafe_path_text(
             )
         }
         UnsafePathCause::Symlink => format!(
-            "{path} is a symbolic link; `skeletons` reads and writes a claimed file only as a regular \
-             file, so replace the link with the file"
+            "{path} is a symbolic link; `skeletons` reads and writes a claimed file only as a \
+             regular file, so replace the link with the file"
         ),
         UnsafePathCause::NotADirectoryAbove { at } => {
             let at = Escaped(at);
@@ -300,8 +300,8 @@ fn unsafe_path_text(
             let at = Escaped(at);
             format!(
                 "{path} is inside {at}, which holds a .git of its own and so is another git \
-                 repository; `skeletons` reads and writes a claimed file only in the repository the \
-                 workspace belongs to"
+                 repository; `skeletons` reads and writes a claimed file only in the repository \
+                 the workspace belongs to"
             )
         }
         UnsafePathCause::UntrackableName { at } => {
@@ -410,10 +410,9 @@ pub(crate) fn unsafe_path_change_clause(cause: &UnsafePathCause) -> String {
 
 /// Why `skeletons` refuses a spelling mismatch at all — the one clause every
 /// [`spelled_differently_text`] shape carries, word for word.
-const SPELLED_DIFFERENTLY_REASON: &str = "`skeletons` reads and writes a claimed path only under the \
-                                           exact spelling its skeleton gives it, since two \
-                                           spellings of one name are one file on some \
-                                           filesystems and two on others";
+const SPELLED_DIFFERENTLY_REASON: &str = "`skeletons` reads and writes a claimed path only \
+     under the exact spelling its skeleton gives it, since two spellings of one name are one \
+     file on some filesystems and two on others";
 
 /// The names a [`UnsafePathCause::SpelledDifferently`] message shows, already
 /// prepared by [`told_apart`], with the note that goes after the first clause
@@ -915,9 +914,10 @@ mod tests {
              (the two spellings differ only in Unicode normalization, so each is followed by \
              its characters as \\uXXXX code points, as bash 4.3 or later, or zsh, \
              reads them in $'…' under a UTF-8 locale); \
-             `skeletons` reads and writes a claimed path only under the exact spelling its skeleton \
-             gives it, since two spellings of one name are one file on some filesystems and two \
-             on others; rename cafe\u{301}.yml (cafe\\u0301.yml) to caf\u{e9}.yml (caf\\u00E9.yml)"
+             `skeletons` reads and writes a claimed path only under the exact spelling its \
+             skeleton gives it, since two spellings of one name are one file on some filesystems \
+             and two on others; rename cafe\u{301}.yml (cafe\\u0301.yml) to caf\u{e9}.yml \
+             (caf\\u00E9.yml)"
         );
         let present =
             spelled_differently_text("caf\u{e9}.yml", "caf\u{e9}.yml", &["cafe\u{301}.yml"], true);
@@ -1133,8 +1133,8 @@ mod tests {
                 &semver::Version::new(0, 1, 0)
             ),
             "nnnn.yml cannot be written by sync, which stages it beside itself as \
-             .nnnn.yml.skeletons-sync, 256 bytes, more than the 255 a file name can hold; this is a \
-             defect in a-skeleton 0.1.0, not in this repository"
+             .nnnn.yml.skeletons-sync, 256 bytes, more than the 255 a file name can hold; this is \
+             a defect in a-skeleton 0.1.0, not in this repository"
         );
     }
 
@@ -1164,10 +1164,10 @@ mod tests {
                 &[".github/DEPENDABOT.YML"],
                 false,
             ),
-            ".github/dependabot.yml is spelled .github/DEPENDABOT.YML on disk; `skeletons` reads and \
-             writes a claimed path only under the exact spelling its skeleton gives it, since \
-             two spellings of one name are one file on some filesystems and two on others; \
-             rename .github/DEPENDABOT.YML to .github/dependabot.yml"
+            ".github/dependabot.yml is spelled .github/DEPENDABOT.YML on disk; `skeletons` reads \
+             and writes a claimed path only under the exact spelling its skeleton gives it, since \
+             two spellings of one name are one file on some filesystems and two on others; rename \
+             .github/DEPENDABOT.YML to .github/dependabot.yml"
         );
     }
 
@@ -1176,8 +1176,8 @@ mod tests {
         assert_eq!(
             spelled_differently_text(".github/dependabot.yml", ".github", &[".GitHub"], false,),
             ".github/dependabot.yml is under .GitHub on disk, which its skeleton spells \
-             .github; `skeletons` reads and writes a claimed path only under the exact spelling its \
-             skeleton gives it, since two spellings of one name are one file on some \
+             .github; `skeletons` reads and writes a claimed path only under the exact spelling \
+             its skeleton gives it, since two spellings of one name are one file on some \
              filesystems and two on others; rename .GitHub to .github"
         );
     }
@@ -1191,11 +1191,11 @@ mod tests {
                 &["DEPENDABOT.YML", "Dependabot.Yml"],
                 false,
             ),
-            "dependabot.yml is spelled DEPENDABOT.YML and Dependabot.Yml on disk; `skeletons` reads \
-             and writes a claimed path only under the exact spelling its skeleton gives it, \
-             since two spellings of one name are one file on some filesystems and two on \
-             others; remove or rename all but one of DEPENDABOT.YML and Dependabot.Yml, and \
-             spell that one dependabot.yml"
+            "dependabot.yml is spelled DEPENDABOT.YML and Dependabot.Yml on disk; `skeletons` \
+             reads and writes a claimed path only under the exact spelling its skeleton gives it, \
+             since two spellings of one name are one file on some filesystems and two on others; \
+             remove or rename all but one of DEPENDABOT.YML and Dependabot.Yml, and spell that one \
+             dependabot.yml"
         );
     }
 
@@ -1225,10 +1225,10 @@ mod tests {
                 &["DEPENDABOT.YML"],
                 true,
             ),
-            "dependabot.yml is also present on disk as DEPENDABOT.YML; `skeletons` reads and writes a \
-             claimed path only under the exact spelling its skeleton gives it, since two \
-             spellings of one name are one file on some filesystems and two on others; remove \
-             or rename DEPENDABOT.YML"
+            "dependabot.yml is also present on disk as DEPENDABOT.YML; `skeletons` reads and \
+             writes a claimed path only under the exact spelling its skeleton gives it, since two \
+             spellings of one name are one file on some filesystems and two on others; remove or \
+             rename DEPENDABOT.YML"
         );
     }
 
@@ -1237,8 +1237,8 @@ mod tests {
         assert_eq!(
             spelled_differently_text(".github/dependabot.yml", ".github", &[".GitHub"], true,),
             ".github/dependabot.yml is under .github, which is also present on disk as \
-             .GitHub; `skeletons` reads and writes a claimed path only under the exact spelling its \
-             skeleton gives it, since two spellings of one name are one file on some \
+             .GitHub; `skeletons` reads and writes a claimed path only under the exact spelling \
+             its skeleton gives it, since two spellings of one name are one file on some \
              filesystems and two on others; remove or rename .GitHub"
         );
     }

@@ -319,7 +319,10 @@ mod tests {
         let result = locked_directory(directory.path(), &oid(HEAD));
 
         assert!(
-            matches!(&result, Err(CheckoutFailure::Unreadable { diagnostic }) if !diagnostic.is_empty()),
+            matches!(
+                &result,
+                Err(CheckoutFailure::Unreadable { diagnostic }) if !diagnostic.is_empty()
+            ),
             "expected Unreadable with a diagnostic, got {result:?}"
         );
     }

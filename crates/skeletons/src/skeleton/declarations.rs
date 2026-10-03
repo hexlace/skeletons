@@ -1150,9 +1150,10 @@ mod tests {
             "#,
         )
         .expect_err("a partial named by two values must be refused");
-        assert!(
-            matches!(error.reason(), Reason::PartialSelectedTwice { partial } if partial == "shared.yml")
-        );
+        assert!(matches!(
+            error.reason(),
+            Reason::PartialSelectedTwice { partial } if partial == "shared.yml"
+        ));
     }
 
     #[test]

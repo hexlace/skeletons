@@ -915,7 +915,9 @@ mod tests {
         ) {
             let line = format!("{indentation}# skeletons:partial {name}");
             match scan(&line) {
-                DirectiveLine::Directive(directive) => prop_assert_eq!(directive.indentation, indentation),
+                DirectiveLine::Directive(directive) => {
+                    prop_assert_eq!(directive.indentation, indentation);
+                }
                 other => prop_assert!(false, "expected a directive for {line:?}, got {other:?}"),
             }
         }

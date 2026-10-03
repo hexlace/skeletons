@@ -15,12 +15,12 @@
 //! directory, not merely a newer commit anywhere in the repository (a
 //! sibling crate's commit is not something `cargo update` would change for
 //! it), so a differing head is only the cheap first half of that question
-//! (`git_remote::branch_head`/`default_branch_head`, one `ls-remote`). When the head does differ, [`determine`] reads the locked
-//! side of the comparison from Cargo's own checkout
-//! (`cargo_checkout::locked_directory`, read-only, no network), fetches the
-//! remote head alone into a temporary repository this crate owns and removes
-//! (`snapshot::directory_trees`), and compares the two directories' own tree
-//! objects.
+//! (`git_remote::branch_head`/`default_branch_head`, one `ls-remote`). When
+//! the head does differ, [`determine`] reads the locked side of the
+//! comparison from Cargo's own checkout (`cargo_checkout::locked_directory`,
+//! read-only, no network), fetches the remote head alone into a temporary
+//! repository this crate owns and removes (`snapshot::directory_trees`), and
+//! compares the two directories' own tree objects.
 
 mod branch_directory;
 mod cargo_checkout;

@@ -182,8 +182,9 @@ fn a_directive_hidden_behind_an_invisible_character_inside_a_partial_is_refused(
     // directive-shaped: `Reason::DirectiveInPartial`, which is for a line
     // that is directive-shaped inside a partial, cannot arise for it. It is
     // refused as `HiddenDirective` naming the partial's own line, the same
-    // way a byte-order mark already does in
-    // `acceptance::byte_order_mark::a_byte_order_mark_before_skeletons_text_in_a_partial_is_refused_at_line_one`.
+    // way a byte-order mark already does, in the
+    // `a_byte_order_mark_before_skeletons_text_in_a_partial_is_refused_at_line_one`
+    // test of `acceptance::byte_order_mark`.
     // Line 3 of `partials/hidden.yml` opens `c2 a0`, immediately followed by
     // `# skeletons:partial workflows`.
     let error = render(
@@ -248,7 +249,13 @@ fn an_invisible_character_before_ordinary_text_is_not_a_directive_and_renders_by
     assert_eq!(
         rendering.get("text.txt"),
         Some(
-            "\u{a0}no-break-space line\n\u{200b}zero-width-space line\n\u{2060}word-joiner line\n\u{3000}ideographic-space line\n\x0bvertical-tab line\n\x0cform-feed line\n\u{feff}byte-order-mark line\n"
+            "\u{a0}no-break-space line\n\
+             \u{200b}zero-width-space line\n\
+             \u{2060}word-joiner line\n\
+             \u{3000}ideographic-space line\n\
+             \x0bvertical-tab line\n\
+             \x0cform-feed line\n\
+             \u{feff}byte-order-mark line\n"
                 .as_bytes()
         ),
         "a line led by an invisible character but not `# skeletons:` must pass through unchanged"

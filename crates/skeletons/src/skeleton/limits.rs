@@ -203,7 +203,10 @@ mod tests {
                 .expect("every entry up to the maximum is allowed");
         }
         assert!(
-            matches!(budget.consume(), Err(Reason::TooManyEntries { entries_max }) if entries_max == ENTRIES_MAX),
+            matches!(
+                budget.consume(),
+                Err(Reason::TooManyEntries { entries_max }) if entries_max == ENTRIES_MAX
+            ),
             "the entry past the maximum must be refused"
         );
     }
@@ -215,7 +218,10 @@ mod tests {
             .reserve(BYTES_MAX)
             .expect("reserving exactly the maximum must succeed");
         assert!(
-            matches!(ByteBudget::new().reserve(BYTES_MAX + 1), Err(Reason::TooManyBytes { bytes_max }) if bytes_max == BYTES_MAX),
+            matches!(
+                ByteBudget::new().reserve(BYTES_MAX + 1),
+                Err(Reason::TooManyBytes { bytes_max }) if bytes_max == BYTES_MAX
+            ),
             "reserving one byte past the maximum must be refused"
         );
     }

@@ -201,15 +201,16 @@ mod tests {
     use std::time::Duration;
 
     use crate::claim::ClaimPath;
-    use crate::subprocess::{Limits, Truncated, run};
+    use crate::subprocess::{Limits, TestClock, Truncated, run_with_clock};
     use crate::work_tree::abort::GitQuestion;
 
     use super::{RepositoryPrefix, WorkTreeAbort, abort_for, classify_rev_parse};
 
     #[test]
     fn a_command_killed_for_running_too_long_is_a_timeout_naming_the_question() {
-        // A real command past a real bound, so the error is the one
-        // `subprocess::run` produces and not a stand-in for it.
+        // A real command past a bound measured on a test clock, so the
+        // error is the one `subprocess::run_with_clock` produces and not a
+        // stand-in for it, and no real time passes reaching it.
         let mut command = Command::new("sh");
         command.args(["-c", "sleep 60"]);
         let limits = Limits {
@@ -217,7 +218,8 @@ mod tests {
             stdout_bytes_max: u64::MAX,
             stderr_bytes_max: u64::MAX,
         };
-        let error = run(command, &limits).expect_err("a command past its timeout is killed");
+        let error = run_with_clock(command, &limits, &TestClock::new())
+            .expect_err("a command past its timeout is killed");
         let question = GitQuestion::Checkout(
             ClaimPath::from_rendering_path("plain.yml").expect("a well-formed test path"),
         );
@@ -237,9 +239,10 @@ mod tests {
             stdout_bytes_max: u64::MAX,
             stderr_bytes_max: u64::MAX,
         };
-        let error = run(
+        let error = run_with_clock(
             Command::new("skeletons-check-nonexistent-program-xyz"),
             &limits,
+            &TestClock::new(),
         )
         .expect_err("a missing program fails to spawn");
 

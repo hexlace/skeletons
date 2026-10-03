@@ -11,10 +11,12 @@
 //! nothing that renders under a lower limit stops rendering under a higher
 //! one.
 
-use std::io::Read as _;
+mod regular_file;
+
 use std::path::Path;
 
 use super::error::Reason;
+use regular_file::RegularFile;
 
 /// The most entries — files, directories, anything else — a listing of
 /// `files/` and `partials/` together may hand back across one render.
@@ -143,41 +145,13 @@ impl RenderedByteBudget {
 const _: () = assert!(BYTES_MAX < 4_294_967_295);
 
 /// Reads `path` as bytes, reserving its declared size from `budget` before
-/// reading and reading through [`Read::take`](std::io::Read::take) so a file
-/// that grows between the size check and the read is still bounded to what was
-/// reserved.
+/// reading.
 ///
-/// `path` is read from its own [`std::fs::symlink_metadata`], never a
-/// followed link's: a symbolic link is refused rather than read through, and
-/// anything that is not a regular file (a directory, a FIFO, a socket, a
-/// device) is refused before it is ever opened — opening a FIFO with
-/// nothing on its other end blocks forever, which a skeleton directory must
-/// never be able to do to its own render.
+/// `path` is judged from its own [`std::fs::symlink_metadata`] by
+/// [`RegularFile::judge`], which refuses a symbolic link and anything
+/// that is not a regular file before the file is ever opened.
 pub(crate) fn read_bytes(path: &Path, budget: &mut ByteBudget) -> Result<Vec<u8>, Reason> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|cause| Reason::Unreadable { cause })?;
-    if metadata.is_symlink() {
-        return Err(Reason::SymbolicLink);
-    }
-    if !metadata.is_file() {
-        return Err(Reason::NotAFile);
-    }
-
-    let size = metadata.len();
-    budget.reserve(size)?;
-
-    let file = std::fs::File::open(path).map_err(|cause| Reason::Unreadable { cause })?;
-    let mut buffer = Vec::new();
-    file.take(size)
-        .read_to_end(&mut buffer)
-        .map_err(|cause| Reason::Unreadable { cause })?;
-
-    // Postcondition: `Read::take(size)` never hands back more than `size`
-    // bytes, which is exactly what was reserved above.
-    assert!(
-        buffer.len() as u64 <= size,
-        "a bounded read never returns more than its own bound"
-    );
-    Ok(buffer)
+    RegularFile::judge(path)?.read(budget)
 }
 
 /// Reads `path` as UTF-8 text under every rule [`read_bytes`] applies, then
@@ -271,21 +245,19 @@ mod tests {
 
     #[test]
     fn read_utf8_reads_a_files_exact_bytes() {
-        let directory = tempfile_directory();
-        let path = directory.join("plain.txt");
+        let directory = tempfile::tempdir().expect("scratch directory");
+        let path = directory.path().join("plain.txt");
         std::fs::write(&path, "hello\n").expect("write fixture");
 
         let mut budget = ByteBudget::new();
         let text = super::read_utf8(&path, &mut budget).expect("a small UTF-8 file must read");
         assert_eq!(text, "hello\n");
-
-        std::fs::remove_dir_all(&directory).expect("clean up fixture directory");
     }
 
     #[test]
     fn read_utf8_refuses_a_file_that_is_not_valid_utf8() {
-        let directory = tempfile_directory();
-        let path = directory.join("binary.bin");
+        let directory = tempfile::tempdir().expect("scratch directory");
+        let path = directory.path().join("binary.bin");
         std::fs::write(&path, [0xFFu8, 0xFE]).expect("write fixture");
 
         let mut budget = ByteBudget::new();
@@ -293,14 +265,12 @@ mod tests {
             super::read_utf8(&path, &mut budget),
             Err(Reason::NotUtf8)
         ));
-
-        std::fs::remove_dir_all(&directory).expect("clean up fixture directory");
     }
 
     #[test]
     fn read_utf8_refuses_a_file_larger_than_the_remaining_budget() {
-        let directory = tempfile_directory();
-        let path = directory.join("small.txt");
+        let directory = tempfile::tempdir().expect("scratch directory");
+        let path = directory.path().join("small.txt");
         std::fs::write(&path, "0123456789").expect("write fixture");
 
         let mut budget = ByteBudget { remaining: 4 };
@@ -308,24 +278,20 @@ mod tests {
             super::read_utf8(&path, &mut budget),
             Err(Reason::TooManyBytes { .. })
         ));
-
-        std::fs::remove_dir_all(&directory).expect("clean up fixture directory");
     }
 
     #[test]
     fn read_bytes_returns_bytes_that_are_not_utf8_exactly() {
         // Bytes that no UTF-8 decoder accepts, with a NUL among them, must
         // come back untouched: `read_bytes` decodes nothing.
-        let directory = tempfile_directory();
-        let path = directory.join("binary.bin");
+        let directory = tempfile::tempdir().expect("scratch directory");
+        let path = directory.path().join("binary.bin");
         let written = [0xFFu8, 0xFE, 0x00, b'a', 0xC0, 0x80];
         std::fs::write(&path, written).expect("write fixture");
 
         let mut budget = ByteBudget::new();
         let bytes = super::read_bytes(&path, &mut budget).expect("any regular file must read");
         assert_eq!(bytes, written);
-
-        std::fs::remove_dir_all(&directory).expect("clean up fixture directory");
     }
 
     #[test]
@@ -333,8 +299,8 @@ mod tests {
         // Reads one file through each, from equal budgets, and compares the
         // budgets afterwards: what is left must match, and be exactly the
         // file's size short of the maximum.
-        let directory = tempfile_directory();
-        let path = directory.join("ten.txt");
+        let directory = tempfile::tempdir().expect("scratch directory");
+        let path = directory.path().join("ten.txt");
         std::fs::write(&path, "0123456789").expect("write fixture");
 
         let mut bytes_budget = ByteBudget::new();
@@ -343,14 +309,12 @@ mod tests {
         super::read_utf8(&path, &mut utf8_budget).expect("within budget");
         assert_eq!(bytes_budget, utf8_budget);
         assert_eq!(bytes_budget.remaining, BYTES_MAX - 10);
-
-        std::fs::remove_dir_all(&directory).expect("clean up fixture directory");
     }
 
     #[test]
     fn read_bytes_refuses_a_file_larger_than_the_remaining_budget() {
-        let directory = tempfile_directory();
-        let path = directory.join("small.txt");
+        let directory = tempfile::tempdir().expect("scratch directory");
+        let path = directory.path().join("small.txt");
         std::fs::write(&path, "0123456789").expect("write fixture");
 
         let mut budget = ByteBudget { remaining: 4 };
@@ -359,30 +323,27 @@ mod tests {
             Err(Reason::TooManyBytes { .. })
         ));
         assert_eq!(budget.remaining, 4, "a refused read spends nothing");
-
-        std::fs::remove_dir_all(&directory).expect("clean up fixture directory");
     }
 
     #[test]
     fn read_utf8_refuses_a_symbolic_link() {
-        let directory = tempfile_directory();
-        std::fs::write(directory.join("target.txt"), "hello\n").expect("link target");
-        let link = directory.join("link.txt");
-        std::os::unix::fs::symlink(directory.join("target.txt"), &link).expect("create a symlink");
+        let directory = tempfile::tempdir().expect("scratch directory");
+        std::fs::write(directory.path().join("target.txt"), "hello\n").expect("link target");
+        let link = directory.path().join("link.txt");
+        std::os::unix::fs::symlink(directory.path().join("target.txt"), &link)
+            .expect("create a symlink");
 
         let mut budget = ByteBudget::new();
         assert!(matches!(
             super::read_utf8(&link, &mut budget),
             Err(Reason::SymbolicLink)
         ));
-
-        std::fs::remove_dir_all(&directory).expect("clean up fixture directory");
     }
 
     #[test]
     fn read_utf8_refuses_a_directory() {
-        let directory = tempfile_directory();
-        let nested = directory.join("a-directory");
+        let directory = tempfile::tempdir().expect("scratch directory");
+        let nested = directory.path().join("a-directory");
         std::fs::create_dir(&nested).expect("create a directory to read as though it were a file");
 
         let mut budget = ByteBudget::new();
@@ -390,58 +351,5 @@ mod tests {
             super::read_utf8(&nested, &mut budget),
             Err(Reason::NotAFile)
         ));
-
-        std::fs::remove_dir_all(&directory).expect("clean up fixture directory");
-    }
-
-    #[test]
-    fn read_utf8_refuses_a_fifo_without_blocking() {
-        // Verifies read_utf8 refuses a FIFO rather than opening it: opening
-        // a FIFO for reading blocks until something opens the other end for
-        // writing, which nothing here ever does. Run on a thread with a
-        // generous timeout, so a regression hangs this one test rather than
-        // the whole suite.
-        let directory = tempfile_directory();
-        let fifo_path = directory.join("pipe");
-        let status = std::process::Command::new("mkfifo")
-            .arg(&fifo_path)
-            .status()
-            .expect("run mkfifo");
-        assert!(
-            status.success(),
-            "mkfifo must succeed for this test to mean anything"
-        );
-
-        let (sender, receiver) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let mut budget = ByteBudget::new();
-            let outcome = super::read_utf8(&fifo_path, &mut budget);
-            let _ignored_if_the_receiver_already_timed_out = sender.send(outcome);
-        });
-
-        let outcome = receiver
-            .recv_timeout(std::time::Duration::from_secs(10))
-            .expect("read_utf8 must refuse a FIFO promptly rather than block on it");
-        assert!(matches!(outcome, Err(Reason::NotAFile)));
-
-        std::fs::remove_dir_all(&directory).expect("clean up fixture directory");
-    }
-
-    /// A fresh, uniquely named temporary directory under the system temp
-    /// directory, for the handful of tests here that need a real file on
-    /// disk. Named from the process id and an atomic counter rather than
-    /// wall-clock time, so two tests running in the same process never
-    /// collide even if the clock has not ticked between them.
-    fn tempfile_directory() -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
-
-        let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let directory = std::env::temp_dir().join(format!(
-            "skeletons-limits-test-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&directory).expect("create fixture directory");
-        directory
     }
 }

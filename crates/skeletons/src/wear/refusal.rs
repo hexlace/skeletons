@@ -395,10 +395,8 @@ mod tests {
         }
     }
 
-    /// One refusal of every kind, every piece of outside text in it poisoned.
-    /// `NotConfirmed`'s reason is a finished message, so it is the one field
-    /// that carries the escaped form already.
-    fn samples() -> Vec<WearRefusal> {
+    /// The refusals made before anything is written, poisoned as `samples` says.
+    fn samples_before_cargo_add() -> Vec<WearRefusal> {
         vec![
             WearRefusal::CrateNameInvalid {
                 crate_name: poison(),
@@ -431,6 +429,12 @@ mod tests {
                 other: poison(),
                 existing: poison(),
             },
+        ]
+    }
+
+    /// The refusals made from `cargo add` on, poisoned as `samples` says.
+    fn samples_from_cargo_add() -> Vec<WearRefusal> {
+        vec![
             WearRefusal::CargoAddUnavailable { detail: poison() },
             WearRefusal::CargoAddFailed { stderr: poison() },
             WearRefusal::NotASkeleton {
@@ -473,6 +477,18 @@ mod tests {
                 key: poison(),
             },
         ]
+    }
+
+    /// One refusal of every kind, every piece of outside text in it poisoned.
+    /// `NotConfirmed`'s reason is a finished message, so it is the one field
+    /// that carries the escaped form already.
+    ///
+    /// Built from the refusals made before anything is written and those made
+    /// from `cargo add` on.
+    fn samples() -> Vec<WearRefusal> {
+        let mut samples = samples_before_cargo_add();
+        samples.extend(samples_from_cargo_add());
+        samples
     }
 
     #[test]

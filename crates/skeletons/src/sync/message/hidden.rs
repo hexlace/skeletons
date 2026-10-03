@@ -1,7 +1,7 @@
 //! The lines for the ways git looks away from a path `sync` is about to
 //! write, other than a file git is told not to read (which `wear` meets too,
-//! so [`crate::work_tree::message::hidden_from_work_tree_line`] is shared): an entry git tracks at a
-//! directory above the claim, an entry git hides under another spelling that
+//! so [`crate::work_tree::message::hidden_from_work_tree_line`] is shared): an
+//! entry git tracks at a directory above the claim, an entry git hides under another spelling that
 //! the filesystem takes for the claim, and a file git ignores. Each names what
 //! git holds and where, and a remedy only where one works.
 

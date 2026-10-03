@@ -86,8 +86,7 @@ mod tests {
     }
 
     #[test]
-    fn both_lines_print_outside_text_on_one_line_escaped_once_whether_or_not_git_tracks_the_lockfile()
-     {
+    fn both_lines_print_outside_text_on_one_line_escaped_once_tracked_lockfile_or_not() {
         // The package name, the manifest's path and the key are all text from
         // outside: a path can hold a newline, and the manifest is named on
         // both lines.

@@ -188,8 +188,10 @@ fn prepare(command_line: &CommandLine, request: Request) -> Result<Prepared, Fai
 /// process is: `cargo add`, the read back and every `git` question are given
 /// the directory they run in (`directory`, which is where the command was
 /// run, so a relative `--path` still means what the wearer typed), and the two
-/// files are the only paths `rollback` is given. `wear` is the only task a run
-/// of the process runs, so the working directory is not moved back.
+/// files are the only paths `rollback` is given. The working directory is not
+/// moved back: `rituals`' dispatch runs the one task named on the command
+/// line, reports its outcome and exits, so nothing runs after `wear` to be
+/// handed the moved directory.
 fn enter_the_workspace_root(mut prepared: Prepared) -> Result<Prepared, Failure> {
     std::env::set_current_dir(&prepared.workspace_root)
         .map_err(|error| Failure::new(could_not_enter_line(&prepared.workspace_root, &error)))?;

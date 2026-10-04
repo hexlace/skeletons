@@ -215,9 +215,11 @@ mod tests {
         // the first pause the clock is asked for at or after the deadline,
         // which is after the kill was decided; a child that was not killed
         // would get through and leave a marker, and the test fails at once
-        // instead of waiting it out. The pauses before the deadline must also
-        // add up to exactly the timeout, so the bound was measured on the
-        // injected clock.
+        // instead of waiting it out. The pauses before the deadline must add
+        // up to exactly the timeout, so the bound was measured on the
+        // injected clock; that is checked before the marker, because a bound
+        // read from the wall clock releases the gate before the kill and the
+        // marker would blame a missing kill for it.
         let timeout = Duration::from_millis(100);
         let GatedRun {
             result,
@@ -229,16 +231,16 @@ mod tests {
             gate.was_released(),
             "the clock never paused at the deadline, so the child was never let through"
         );
-        assert!(
-            !gate.child_ran_past_release(),
-            "the child ran past its release, so it was never killed"
-        );
-        let error = result.expect_err("a command past its timeout is killed");
         let measured: Duration = clock.waits_begun_before(deadline).iter().sum();
         assert_eq!(
             measured, timeout,
             "the timeout was not measured on the injected clock"
         );
+        assert!(
+            !gate.child_ran_past_release(),
+            "the child ran past its release, so it was never killed"
+        );
+        let error = result.expect_err("a command past its timeout is killed");
         let question = GitQuestion::Checkout(
             ClaimPath::from_rendering_path("plain.yml").expect("a well-formed test path"),
         );

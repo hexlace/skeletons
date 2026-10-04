@@ -5,9 +5,17 @@
 //! lifetime in real time (`sleep 60`) makes a missing kill a minute-long hang
 //! instead of a failure. A [`Gate`] gives it a lifetime in test-clock events
 //! instead: the child blocks reading a FIFO until the test releases it, and
-//! writes a marker file only once it has read. A child that was killed before
-//! the release never writes the marker; one that was not killed does, so a
-//! missing kill is a red assertion and never a hang.
+//! writes a marker file only once it has read. Three things are true of that:
+//!
+//! - Kill detection holds whether or not the hold is exercised. A child that
+//!   was not killed writes the marker, so a missing kill is a red assertion
+//!   and never a hang.
+//! - The hold protects a correct run from a child that finishes before the
+//!   kill. Without it, a child that reached its write before the kill landed
+//!   would leave a marker on a correct run, which would be a flaky red.
+//! - On the test clock the hold is not exercised. A whole timeout passes in
+//!   microseconds of real time, so the kill can land before `sh` has started,
+//!   and no test shows that the child is held.
 //!
 //! The FIFO is made with the `mkfifo` utility, and the child is a POSIX `sh`.
 //! Both are POSIX utilities that the tests rely on being present: Linux and
@@ -32,11 +40,19 @@ use super::{Finished, Limits, SubprocessError, TestClock, run_with_clock};
 /// FIFO and then leave a file, and a one-line POSIX `sh` is the narrowest
 /// program that does both without a binary target added to the crate for
 /// tests. The `;` is deliberate: whatever makes `read` return, including a
-/// FIFO that was never made, still writes the marker, so a broken gate fails
-/// a test and never passes one.
+/// FIFO that was never made, still writes the marker, so a gate that fails to
+/// hold can never hide a missing kill. It does not follow that a broken gate
+/// fails a test: one that never holds still passes, because on the test clock
+/// the kill almost always lands before the child could have written
+/// anything.
 const GATED_SCRIPT: &str = r#"read _ < "$1"; : > "$2""#;
 
 /// A FIFO and a marker file in a temporary directory, removed when dropped.
+///
+/// The marker is what detects a missing kill, and that holds whether or not
+/// the FIFO ever holds the child. The FIFO's hold only keeps a correct run
+/// from a child that finishes before the kill, and a test on the test clock
+/// does not exercise it.
 pub(crate) struct Gate {
     directory: TempDir,
     /// The write end, held open from the release on. The release writes the
@@ -148,8 +164,11 @@ fn write_release_line(path: &Path) -> std::io::Result<File> {
 
 /// What [`run_gated_past`] leaves behind for a test to assert on.
 pub(crate) struct GatedRun {
-    /// What `run_with_clock` returned. With the kill missing this is `Ok`, so
-    /// a test checks the gate before it unwraps this.
+    /// What `run_with_clock` returned. With the kill missing this is still
+    /// `Err(TimedOut)`: the reap's first pause opens the gate, the released
+    /// child writes the marker and exits, and the reap sees it exit. The result
+    /// alone cannot tell a killed child from one that was let through, so a
+    /// test checks the gate before it trusts this.
     pub(crate) result: Result<Finished, SubprocessError>,
     pub(crate) gate: Rc<Gate>,
     pub(crate) clock: TestClock,
@@ -166,7 +185,7 @@ pub(crate) struct GatedRun {
 /// that was killed never gets through and leaves no marker; one that was not
 /// killed is let through, writes the marker and exits, and the run ends at
 /// once instead of waiting the child out. Tying the release to the deadline
-/// here, in one place, is what makes every gated test sound.
+/// here, in one place, keeps the release from landing before the kill.
 pub(crate) fn run_gated_past(timeout: Duration) -> GatedRun {
     let gate = Rc::new(Gate::new());
     let limits = Limits {

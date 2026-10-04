@@ -620,13 +620,14 @@ mod tests {
     }
 
     #[test]
-    fn the_gate_holds_its_child_until_released() {
+    fn a_released_gate_lets_its_child_write_the_marker() {
         // The positive control for every gated test below: a missing kill
         // shows up there as the marker existing, so the marker has to be
         // something a child can really write. Released before it runs, the
         // gated child must read its line, write the marker and exit cleanly.
-        // Without that, "the marker is absent" would hold for a gate that
-        // never lets anything through.
+        // Without that, "the marker is absent" would hold for a child that
+        // can never write one. This shows the release half only; no test
+        // shows that the gate holds its child.
         let gate = Gate::new();
         assert!(
             !gate.child_ran_past_release(),
@@ -652,10 +653,13 @@ mod tests {
         // was not killed is let through, writes the marker and exits, and the
         // test fails at once instead of waiting the child out. The gated run
         // is set up by `run_gated_past`. Four things are checked: the gate
-        // opened, so the test reached the deadline; the child left no
-        // marker; the result is a timeout; and the pauses before the
+        // opened, so the test reached the deadline; the pauses before the
         // deadline add up to exactly the timeout on the injected clock, so
-        // the bound was measured there and not on the wall clock.
+        // the bound was measured there and not on the wall clock; the child
+        // left no marker; and the result is a timeout. The sum comes before
+        // the marker because a bound read from the wall clock releases the
+        // gate before the kill, and the marker then blames a missing kill for
+        // what the sum names.
         let timeout = Duration::from_millis(100);
 
         let GatedRun {
@@ -669,17 +673,17 @@ mod tests {
             gate.was_released(),
             "the clock never paused at the deadline, so the child was never let through"
         );
+        let measured: Duration = clock.waits_begun_before(deadline).iter().sum();
+        assert_eq!(
+            measured, timeout,
+            "the timeout was not measured on the injected clock"
+        );
         assert!(
             !gate.child_ran_past_release(),
             "the child ran past its release, so it was never killed"
         );
         let error = result.expect_err("a command past its timeout must be killed");
         assert!(error.is_timed_out());
-        let measured: Duration = clock.waits_begun_before(deadline).iter().sum();
-        assert_eq!(
-            measured, timeout,
-            "the timeout was not measured on the injected clock"
-        );
     }
 
     #[test]
@@ -690,7 +694,9 @@ mod tests {
         // then cut to what is left of the timeout. Only the pauses begun
         // before the deadline are compared, which is the polling itself. The
         // child is a gated one, so a missing kill is a failed assertion and
-        // not a wait.
+        // not a wait. The schedule comes before the marker, because a bound
+        // read from the wall clock releases the gate before the kill and the
+        // marker would blame a missing kill for what the schedule names.
         let GatedRun {
             result,
             gate,
@@ -698,17 +704,17 @@ mod tests {
             deadline,
         } = run_gated_past(Duration::from_millis(300));
 
+        let millis = |count: u64| Duration::from_millis(count);
+        assert_eq!(
+            clock.waits_begun_before(deadline),
+            [1, 2, 4, 8, 16, 32, 50, 50, 50, 50, 37].map(millis)
+        );
         assert!(
             !gate.child_ran_past_release(),
             "the child ran past its release, so it was never killed"
         );
         let error = result.expect_err("a command past its timeout must be killed");
         assert!(error.is_timed_out());
-        let millis = |count: u64| Duration::from_millis(count);
-        assert_eq!(
-            clock.waits_begun_before(deadline),
-            [1, 2, 4, 8, 16, 32, 50, 50, 50, 50, 37].map(millis)
-        );
     }
 
     #[test]

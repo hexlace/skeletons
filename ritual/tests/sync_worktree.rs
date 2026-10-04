@@ -1284,6 +1284,13 @@ fn install_recording_pre_commit_hook(fixture: &Fixture) -> support::TestOutcome 
     let hooks = root.join(".git").join("hooks");
     std::fs::create_dir_all(&hooks)?;
     let hook = hooks.join("pre-commit");
+    // Deviation from RS-SINGLE-TOOLCHAIN (integration tests use
+    // `std::process::Command`, not shell scripts): git runs a hook itself, as
+    // an executable file under `core.hooksPath`, so the hook cannot be a
+    // `Command` the test runs; it has to be a file. The few POSIX `sh` lines
+    // only run the bundle and record its output and exit code, and a shell
+    // script is the narrowest form of that. A Rust stand-in would need a
+    // binary target added to the crate for this one test.
     std::fs::write(
         &hook,
         "#!/bin/sh\n\

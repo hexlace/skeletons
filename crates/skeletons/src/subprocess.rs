@@ -12,6 +12,8 @@
 //! were cut short.
 
 pub(crate) mod clock;
+#[cfg(test)]
+pub(crate) mod gate;
 
 use std::io::Read;
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -21,10 +23,16 @@ use std::time::Duration;
 pub(crate) use clock::TestClock;
 use clock::{Clock, SystemClock};
 
-/// How often [`wait_until_timeout`] polls [`Child::try_wait`] for a command
-/// with a timeout. Small enough that a fast command is reported back promptly,
-/// large enough that polling itself is not the loop's own hot spin.
-const SUBPROCESS_POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// The longest [`wait_until_timeout`] pauses between two polls of
+/// [`Child::try_wait`]. A command that runs this long is not about to finish,
+/// so polling it faster would only be the loop's own hot spin.
+const SUBPROCESS_POLL_INTERVAL_MAX: Duration = Duration::from_millis(50);
+
+/// The first pause [`wait_until_timeout`] takes between polls. A command that
+/// exits within about a millisecond is reported back that promptly, and
+/// because each pause doubles until [`SUBPROCESS_POLL_INTERVAL_MAX`], a slow
+/// one is still polled only a few times a second.
+const SUBPROCESS_POLL_INTERVAL_MIN: Duration = Duration::from_millis(1);
 
 /// The most this crate ever reads from one `git` invocation's stdout or
 /// stderr — large enough for any real repository's tag list or porcelain
@@ -307,10 +315,57 @@ fn wait_for_exit(child: &mut Child) -> Result<ExitStatus, SubprocessError> {
     })
 }
 
+/// Returns the poll step that follows `step`: double it, up to
+/// [`SUBPROCESS_POLL_INTERVAL_MAX`].
+fn poll_step_after(step: Duration) -> Duration {
+    assert!(
+        step >= SUBPROCESS_POLL_INTERVAL_MIN,
+        "a poll step below the minimum: {step:?}"
+    );
+    assert!(
+        step <= SUBPROCESS_POLL_INTERVAL_MAX,
+        "a poll step above the cap: {step:?}"
+    );
+    let next = step.saturating_mul(2).min(SUBPROCESS_POLL_INTERVAL_MAX);
+    assert!(
+        next >= step,
+        "the poll step shrank from {step:?} to {next:?}"
+    );
+    assert!(
+        next <= SUBPROCESS_POLL_INTERVAL_MAX,
+        "the poll step passed the cap: {next:?}"
+    );
+    next
+}
+
+/// Returns how long to pause after a poll: `step`, cut to `remaining` so the
+/// pause never carries the wait past the timeout.
+fn poll_pause(step: Duration, remaining: Duration) -> Duration {
+    assert!(
+        remaining > Duration::ZERO,
+        "a pause was asked for with no time left"
+    );
+    let pause = step.min(remaining);
+    assert!(pause > Duration::ZERO, "a zero pause from step {step:?}");
+    assert!(
+        pause <= step,
+        "a pause of {pause:?} is longer than the step {step:?}"
+    );
+    assert!(
+        pause <= remaining,
+        "a pause of {pause:?} is longer than the {remaining:?} left"
+    );
+    pause
+}
+
 /// Polls `child` until it exits, killing it and reporting a timeout once
 /// `timeout` elapses on `clock`.
 ///
-/// Both the elapsed time and the pause between polls come from `clock`
+/// The pause between polls starts at [`SUBPROCESS_POLL_INTERVAL_MIN`] and
+/// doubles up to [`SUBPROCESS_POLL_INTERVAL_MAX`], so a command that exits
+/// quickly is noticed quickly and a long one is polled gently. The last pause
+/// is cut to what is left of `timeout`, so the deadline is met exactly rather
+/// than overshot. Both the elapsed time and every pause come from `clock`
 /// alone.
 fn wait_until_timeout(
     child: &mut Child,
@@ -318,6 +373,7 @@ fn wait_until_timeout(
     clock: &impl Clock,
 ) -> Result<ExitStatus, SubprocessError> {
     let started = clock.now();
+    let mut step = SUBPROCESS_POLL_INTERVAL_MIN;
     loop {
         // A `try_wait` that itself errors (checked here on every poll) is an
         // environment failure indistinguishable from "cannot run the
@@ -331,17 +387,50 @@ fn wait_until_timeout(
                 });
             }
         }
-        if clock.now().duration_since(started) >= timeout {
+        let remaining = timeout.saturating_sub(clock.now().duration_since(started));
+        if remaining.is_zero() {
             // Best-effort: a child that has already exited between the
             // `try_wait` above and here needs no killing, and a `kill` that
-            // fails leaves nothing further this function can do about it.
+            // fails leaves nothing further this function can do about it
+            // but wait for the child, which `reap_after_kill` does.
             let _unused = child.kill();
-            let _unused = child.wait();
+            reap_after_kill(child, clock);
             return Err(SubprocessError {
                 kind: SubprocessErrorKind::TimedOut { timeout },
             });
         }
-        clock.wait(SUBPROCESS_POLL_INTERVAL);
+        clock.wait(poll_pause(step, remaining));
+        step = poll_step_after(step);
+    }
+}
+
+/// Reaps `child` after it was killed, polling through `clock` rather than
+/// blocking in [`Child::wait`].
+///
+/// The first pause comes before the first poll, so one clock event always
+/// follows the kill. A timeout test can hang an action on that event and tell
+/// a killed child from one that was never killed with no real time passing:
+/// the action lets a gated child through, and only a child that outlived the
+/// kill gets any further. A blocking `wait` leaves no such event behind it.
+///
+/// A poll that errors ends the reap as a `wait` that errored did, because
+/// nothing here can do more about a child it cannot reap. A child the kill
+/// did not end is waited for, as a blocking `wait` would have.
+fn reap_after_kill(child: &mut Child, clock: &impl Clock) {
+    let mut step = SUBPROCESS_POLL_INTERVAL_MIN;
+    // Deviation from TS-BOUNDED (all loops have a fixed upper bound): the
+    // loop ends when the child is reaped. The kill is what normally makes
+    // that prompt, but nothing here checks that it took: a child the kill
+    // did not end, such as one in uninterruptible sleep, is waited for
+    // exactly as long as the blocking `Child::wait` this replaced would have
+    // waited. A bound would mean giving up on a child that may still be
+    // running and leaving it unreaped, which is worse than waiting for it.
+    loop {
+        clock.wait(step);
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => return,
+            Ok(None) => step = poll_step_after(step),
+        }
     }
 }
 
@@ -404,8 +493,8 @@ mod tests {
     use std::process::Command;
     use std::time::Duration;
 
-    use super::clock::Clock;
-    use super::{Limits, TestClock, run, run_with_clock};
+    use super::gate::{Gate, GatedRun, run_gated_past};
+    use super::{Limits, TestClock, poll_pause, poll_step_after, run, run_with_clock};
 
     /// A command that writes enough to each stream to fill an OS pipe buffer,
     /// on both streams at once, before it exits.
@@ -494,7 +583,7 @@ mod tests {
         );
         assert_eq!(finished.stderr_head().len(), FILL_BOTH_PIPES_BYTES);
         assert_eq!(clock.times_read(), 0, "the clock was read");
-        assert_eq!(clock.times_waited(), 0, "the clock was waited on");
+        assert!(!clock.has_waited(), "the clock was waited on");
     }
 
     #[test]
@@ -531,48 +620,131 @@ mod tests {
     }
 
     #[test]
+    fn a_released_gate_lets_its_child_write_the_marker() {
+        // The positive control for every gated test below: a missing kill
+        // shows up there as the marker existing, so the marker has to be
+        // something a child can really write. Released before it runs, the
+        // gated child must read its line, write the marker and exit cleanly.
+        // Without that, "the marker is absent" would hold for a child that
+        // can never write one. This shows the release half only; no test
+        // shows that the gate holds its child.
+        let gate = Gate::new();
+        assert!(
+            !gate.child_ran_past_release(),
+            "the marker was there at once"
+        );
+        gate.release();
+
+        let finished = run(gate.command(), &unbounded_limits()).expect("sh must run");
+
+        assert!(finished.success());
+        assert!(
+            gate.child_ran_past_release(),
+            "the released child left no marker"
+        );
+    }
+
+    #[test]
     fn a_command_that_never_exits_is_killed_once_its_timeout_elapses() {
-        // The child would run for a minute, but the timeout is measured on a
-        // test clock that advances only as `wait_until_timeout` waits through it.
-        // Three things are checked: the result is a timeout; the test clock
-        // advanced by the timeout, so the bound was measured on the injected
-        // clock and not the wall clock; and the call returned in far less
-        // real time than the child would have run, so the child was killed
-        // and not waited out. The real-time bound only fails when the kill
-        // is missing; a passing run never waits on it.
-        let mut command = Command::new("sh");
-        command.args(["-c", "sleep 60"]);
+        // The child blocks on a gate that opens only inside the first pause
+        // the test clock is asked for at or after the deadline, which is the
+        // first one after `wait_until_timeout` has decided to kill. A child
+        // that was killed never gets through, so it leaves no marker; one that
+        // was not killed is let through, writes the marker and exits, and the
+        // test fails at once instead of waiting the child out. The gated run
+        // is set up by `run_gated_past`. Four things are checked: the gate
+        // opened, so the test reached the deadline; the pauses before the
+        // deadline add up to exactly the timeout on the injected clock, so
+        // the bound was measured there and not on the wall clock; the child
+        // left no marker; and the result is a timeout. The sum comes before
+        // the marker because a bound read from the wall clock releases the
+        // gate before the kill, and the marker then blames a missing kill for
+        // what the sum names.
         let timeout = Duration::from_millis(100);
-        let limits = Limits {
-            timeout: Some(timeout),
-            stdout_bytes_max: u64::MAX,
-            stderr_bytes_max: u64::MAX,
-        };
-        // Half the child's `sleep 60`: a call that returns sooner cannot have
-        // waited the child out, and the margin is wide enough for a loaded
-        // machine.
-        let real_elapsed_max = Duration::from_secs(30);
-        let clock = TestClock::new();
-        let clock_before = clock.now();
-        let real = std::time::Instant::now();
 
-        let error = run_with_clock(command, &limits, &clock)
-            .expect_err("a command past its timeout must be killed");
+        let GatedRun {
+            result,
+            gate,
+            clock,
+            deadline,
+        } = run_gated_past(timeout);
 
+        assert!(
+            gate.was_released(),
+            "the clock never paused at the deadline, so the child was never let through"
+        );
+        let measured: Duration = clock.waits_begun_before(deadline).iter().sum();
+        assert_eq!(
+            measured, timeout,
+            "the timeout was not measured on the injected clock"
+        );
+        assert!(
+            !gate.child_ran_past_release(),
+            "the child ran past its release, so it was never killed"
+        );
+        let error = result.expect_err("a command past its timeout must be killed");
         assert!(error.is_timed_out());
-        assert!(
-            real.elapsed() < real_elapsed_max,
-            "the child was waited out instead of killed"
+    }
+
+    #[test]
+    fn a_bounded_command_pauses_from_one_millisecond_doubling_to_the_cap() {
+        // A child that outlives its timeout makes `wait_until_timeout` poll
+        // all the way to the deadline, so the pauses it asks the test clock
+        // for are its whole schedule: from the minimum, doubling to the cap,
+        // then cut to what is left of the timeout. Only the pauses begun
+        // before the deadline are compared, which is the polling itself. The
+        // child is a gated one, so a missing kill is a failed assertion and
+        // not a wait. The schedule comes before the marker, because a bound
+        // read from the wall clock releases the gate before the kill and the
+        // marker would blame a missing kill for what the schedule names.
+        let GatedRun {
+            result,
+            gate,
+            clock,
+            deadline,
+        } = run_gated_past(Duration::from_millis(300));
+
+        let millis = |count: u64| Duration::from_millis(count);
+        assert_eq!(
+            clock.waits_begun_before(deadline),
+            [1, 2, 4, 8, 16, 32, 50, 50, 50, 50, 37].map(millis)
         );
-        // The injected clock moves only in poll steps, so a timeout measured on
-        // it lands within one poll of `timeout`. Bounded on both sides, so a
-        // deadline read from the wall clock while the waits stay injected fails
-        // as surely as one measured on the wall clock throughout.
-        let measured = clock.now().duration_since(clock_before);
         assert!(
-            measured >= timeout && measured < timeout + Duration::from_secs(1),
-            "the timeout was not measured on the injected clock: it advanced {measured:?}"
+            !gate.child_ran_past_release(),
+            "the child ran past its release, so it was never killed"
         );
+        let error = result.expect_err("a command past its timeout must be killed");
+        assert!(error.is_timed_out());
+    }
+
+    #[test]
+    fn the_poll_schedule_doubles_to_the_cap_and_never_passes_the_timeout() {
+        // Pure: the step doubles until it reaches the cap and stays there, and
+        // a pause is the step unless that would run past what is left of the
+        // timeout, in which case it is exactly what is left.
+        let millis = |count: u64| Duration::from_millis(count);
+        for (step, next) in [
+            (1, 2),
+            (2, 4),
+            (4, 8),
+            (8, 16),
+            (16, 32),
+            (32, 50),
+            (50, 50),
+        ] {
+            assert_eq!(
+                poll_step_after(millis(step)),
+                millis(next),
+                "after {step} ms"
+            );
+        }
+        for (step, remaining, pause) in [(8, 100, 8), (8, 8, 8), (8, 5, 5), (50, 1, 1)] {
+            assert_eq!(
+                poll_pause(millis(step), millis(remaining)),
+                millis(pause),
+                "a {step} ms step with {remaining} ms left"
+            );
+        }
     }
 
     #[test]

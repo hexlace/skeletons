@@ -26,7 +26,7 @@ rituals-compose = "0.1.2"
 # The `skeletons` bundle, declared once under the key a command line mounts it
 # by. `path` is what a build in this repository uses; `version` is what a
 # published crate's manifest keeps, since crates.io has no path to follow.
-skeletons = { path = "crates/skeletons", version = "0.1.0" }
+skeletons = { path = "crates/skeletons", version = "0.1.1" }
 # Property-based testing for the text grammars under `crates/skeletons/src/skeleton`:
 # a parser needs inputs no one would think to write by hand. Dev-only, so it
 # adds nothing to what a project depending on `skeletons` compiles. `default-features
@@ -123,7 +123,7 @@ unicode-normalization = { version = "0.1.25", default-features = false }
 unicode-properties = { version = "0.1.4", default-features = false, features = ["general-category"] }
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 # The oldest toolchain the workspace builds and passes its tests on: what the
 # code uses decides it, and CI checks it with the `msrv` job. Raising it is not a

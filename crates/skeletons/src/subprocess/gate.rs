@@ -16,14 +16,13 @@
 use std::cell::RefCell;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-use super::clock::Clock;
 use super::{Finished, Limits, SubprocessError, TestClock, run_with_clock};
 
 /// What the child reads, and what it does once it has read it.
@@ -45,6 +44,13 @@ pub(crate) struct Gate {
     /// killed; holding the descriptor keeps that line buffered for a reader
     /// that arrives late and stops a reader that left from making the write
     /// fail.
+    ///
+    /// This field must stay declared after `directory`. Fields drop in
+    /// declaration order, so the write end then outlives the directory that
+    /// holds the FIFO: a child that opened the FIFO before the directory went
+    /// finds a writer and the buffered line, and one that opens it afterwards
+    /// finds no FIFO, so its open fails. Either way it exits, where a write
+    /// end closed first would leave a late reader blocked on its open for good.
     writer: RefCell<Option<File>>,
 }
 
@@ -79,14 +85,8 @@ impl Gate {
     /// Opening a FIFO for both reading and writing never blocks, so this
     /// returns at once whether or not the child has opened its end yet.
     pub(crate) fn release(&self) {
-        let mut writer = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(self.fifo_path())
-            .expect("the FIFO opens for reading and writing");
-        writer
-            .write_all(b"\n")
-            .expect("one line fits in an empty FIFO");
+        let writer = write_release_line(&self.fifo_path())
+            .expect("the FIFO opens for reading and writing and takes one line");
         let previous = self.writer.borrow_mut().replace(writer);
         assert!(previous.is_none(), "the gate was released twice");
     }
@@ -108,6 +108,42 @@ impl Gate {
     fn marker_path(&self) -> PathBuf {
         self.directory.path().join("marker")
     }
+}
+
+/// Frees a child still blocked on the FIFO when a test ends without having
+/// released the gate, which a test that panics before its release does.
+///
+/// The child is a separate process and outlives the test process, so without
+/// this it would stay blocked on the FIFO for good. This is the one place the
+/// release is allowed to fail quietly: `drop` can run while a test is
+/// panicking, and a panic during unwinding aborts the whole process, so it
+/// neither asserts nor `expect`s. Opening a FIFO for both reading and writing
+/// never blocks, so it cannot hang either.
+///
+/// `drop` runs before any field is dropped, so the release always happens
+/// before the temporary directory holding the FIFO is removed, and the write
+/// end it leaves in `writer` is closed only after that.
+impl Drop for Gate {
+    fn drop(&mut self) {
+        if self.writer.get_mut().is_none() {
+            // A release that fails leaves nothing more to try, and the child
+            // it would have freed is no worse off than before. The file is
+            // kept rather than dropped here, because closing the only write
+            // end would discard the line before a child still starting up
+            // had opened the FIFO.
+            *self.writer.get_mut() = write_release_line(&self.fifo_path()).ok();
+        }
+    }
+}
+
+/// Opens the FIFO at `path` for both reading and writing, writes one line to
+/// it and returns the open file.
+///
+/// Opening for both never blocks, whether or not a reader has opened its end.
+fn write_release_line(path: &Path) -> std::io::Result<File> {
+    let mut writer = OpenOptions::new().read(true).write(true).open(path)?;
+    writer.write_all(b"\n")?;
+    Ok(writer)
 }
 
 /// What [`run_gated_past`] leaves behind for a test to assert on.
@@ -139,7 +175,7 @@ pub(crate) fn run_gated_past(timeout: Duration) -> GatedRun {
         stderr_bytes_max: u64::MAX,
     };
     let clock = TestClock::new();
-    let deadline = clock.now() + timeout;
+    let deadline = clock.current_instant() + timeout;
     let release = Rc::clone(&gate);
     clock.on_first_wait_from(deadline, move || release.release());
 

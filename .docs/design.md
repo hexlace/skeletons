@@ -1481,13 +1481,16 @@ and `ritual/tests/wear_refusals.rs` →
 
 Every path inside the project that `wear` puts in a message is relative to the
 workspace root (the root itself is shown whole, and what Cargo or git print in
-their own words is theirs). `rollback` prints a path exactly as it is handed it,
-so `wear` moves the process into the workspace root and hands `rollback` the
-two files as relative to it. Nothing inside the rollback run depends on the
-working directory: `cargo add`, the read back and every `git` question are given
-the directory they run in, which is where the command was run, so a relative
-`--path` still means what the wearer typed
-(`crates/skeletons/src/wear.rs` → `enter_the_workspace_root`).
+their own words is theirs). `rollback` is handed the two files as absolute
+paths, together with the workspace root, and spells its own report from that
+root, so `wear` does not change the working directory. Nothing inside the
+rollback run depends on the working directory: `cargo add`, the read back and
+every `git` question are given the directory they run in, which is where the
+command was run, so a relative `--path` still means what the wearer typed
+(`crates/skeletons/src/wear.rs` → `run`). The one exception is `rollback`'s own
+`reading <path> failed` and `writing <path> failed`, which name the path as it
+was handed; both checks before the write make them unreachable short of a race
+with another writer.
 
 **Everything the workspace already answers is refused before `cargo add` runs.**
 The workspace is read `--locked` first, so a stale lockfile is refused before

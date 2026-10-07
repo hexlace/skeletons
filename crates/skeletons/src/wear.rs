@@ -6,7 +6,8 @@
 //! `sync` needs to start writing the skeleton's files. The two pieces are
 //! written as one change: a run that fails after `cargo add` has changed the
 //! manifest and `Cargo.lock` puts both back exactly as they were, through
-//! `rituals_compose::rollback`, and says so.
+//! `rituals_compose::rollback`, which says so when it had something to put
+//! back.
 //!
 //! What it writes is the crate the running command line was built from, which
 //! is the one place a task is told about itself, so there is no manifest to
@@ -30,10 +31,9 @@ use std::path::{Path, PathBuf};
 
 use rituals::{CommandLine, Failure, Outcome, Task, clap, report};
 use rituals_compose::rollback;
-use rollback::Changes;
+use rollback::{Changes, Wording};
 
 use crate::check::{AbortingCommand, abort_message};
-use crate::skeleton::Escaped;
 use crate::work_tree;
 use crate::work_tree::writing_command::WritingCommand;
 use crate::workspace::{self, Member, Network, ReadWorkspaceError, Workspace};
@@ -90,8 +90,8 @@ fn run(command_line: &CommandLine, arguments: WearArguments) -> Outcome {
     let request = Request::new(&skeleton, key.as_deref(), Source::from_flags(source))
         .map_err(WearRefusal::into_failure)?;
     let prepared = prepare(command_line, request)?;
-    let prepared = enter_the_workspace_root(prepared)?;
-    let added = rollback::attempt(RETRY, |changes| write(changes, &prepared))?;
+    let wording = Wording::project(&prepared.workspace_root, RETRY);
+    let added = rollback::attempt(wording, |changes| write(changes, &prepared))?;
     for line in message::added_lines(&added, prepared.lockfile) {
         report(line);
     }
@@ -114,13 +114,12 @@ struct Prepared {
 /// into, and the two files it changes.
 struct CommandLineCrate {
     package: String,
-    /// Absolute until [`enter_the_workspace_root`] replaces it with
-    /// `manifest_shown`, which is the form `rollback` has to be handed.
+    /// Absolute, as `rollback` has to be handed it; it spells the path from
+    /// the workspace root itself when it reports.
     manifest_path: PathBuf,
     /// `manifest_path` as a message shows it: relative to the workspace root.
     manifest_shown: String,
-    /// Absolute until [`enter_the_workspace_root`] replaces it with
-    /// `lockfile_shown`, as `manifest_path` is.
+    /// Absolute, as `manifest_path` is.
     lockfile_path: PathBuf,
     /// `lockfile_path` as a message shows it: relative to the workspace root.
     lockfile_shown: String,
@@ -138,14 +137,6 @@ impl CommandLineCrate {
             lockfile_shown: workspace::relative_to_root(workspace_root, &lockfile_path),
             lockfile_path,
         }
-    }
-
-    /// Replaces the two absolute paths with the relative ones a message shows,
-    /// which reach the same files once the working directory is the workspace
-    /// root.
-    fn paths_as_shown(&mut self) {
-        self.manifest_path = PathBuf::from(&self.manifest_shown);
-        self.lockfile_path = PathBuf::from(&self.lockfile_shown);
     }
 }
 
@@ -191,44 +182,6 @@ fn prepare(command_line: &CommandLine, request: Request) -> Result<Prepared, Fai
         command_line_crate,
         lockfile,
     })
-}
-
-/// Moves the process into the workspace root and hands `rollback` the two
-/// files as relative to it, so that everything `rollback` prints about them
-/// ("writing X failed", "reading X failed", "put the project back except for
-/// X") shows the path as every other `wear` message does.
-///
-/// `rollback` prints a path exactly as it was handed it, and a path inside the
-/// workspace is shown relative to the workspace root, never absolute. The
-/// working directory has to be that root for the relative paths to reach the
-/// files, and nothing inside [`rollback::attempt`] depends on where the
-/// process is: `cargo add`, the read back and every `git` question are given
-/// the directory they run in (`directory`, which is where the command was
-/// run, so a relative `--path` still means what the wearer typed), and the two
-/// files are the only paths `rollback` is given. The working directory is not
-/// moved back: `rituals`' dispatch runs the one task named on the command
-/// line, reports its outcome and exits, so nothing runs after `wear` to be
-/// handed the moved directory.
-fn enter_the_workspace_root(mut prepared: Prepared) -> Result<Prepared, Failure> {
-    std::env::set_current_dir(&prepared.workspace_root)
-        .map_err(|error| Failure::new(could_not_enter_line(&prepared.workspace_root, &error)))?;
-    prepared.command_line_crate.paths_as_shown();
-    Ok(prepared)
-}
-
-/// `` could not enter the workspace at {root}, so wear wrote nothing:
-/// {error}; check that it can be entered, then run the `wear` task again ``.
-fn could_not_enter_line(root: &Path, error: &std::io::Error) -> String {
-    let root = root.display().to_string();
-    let reason = error.to_string();
-    format!(
-        "could not enter the workspace at {}, so {} wrote nothing: {}; check that it can be \
-         entered, then {}",
-        Escaped(&root),
-        WRITING.name(),
-        Escaped(&reason),
-        WRITING.run_again(),
-    )
 }
 
 /// The failure for a workspace that could not be read, in the words `check`
@@ -292,14 +245,12 @@ mod tests {
     use std::path::Path;
 
     use rituals::{Failure, Outcome, clap};
-    use rituals_compose::rollback;
+    use rituals_compose::rollback::{self, Wording};
 
     use super::hand_back::Tracking;
     use super::source::Source;
     use super::test_workspace::{not_a_skeleton, workspace_of, worn};
-    use super::{
-        CommandLineCrate, Prepared, Request, WearArguments, could_not_enter_line, write_with,
-    };
+    use super::{CommandLineCrate, Prepared, Request, WearArguments, write_with};
     use crate::workspace::{ReadWorkspaceError, Workspace};
 
     const MANIFEST: &str = "[package]\nname = \"cli\"\nversion = \"0.1.0\"\n";
@@ -389,39 +340,10 @@ mod tests {
         add: impl FnOnce() -> Outcome,
         read_back: impl FnOnce() -> Result<Workspace, ReadWorkspaceError>,
     ) -> Result<super::Added, Failure> {
-        rollback::attempt("running the `wear` task again", |changes| {
+        let wording = Wording::project(project.directory.path(), "running the `wear` task again");
+        rollback::attempt(wording, |changes| {
             write_with(changes, &project.prepared, add, read_back)
         })
-    }
-
-    #[test]
-    fn the_paths_rollback_is_handed_are_the_ones_a_message_shows() {
-        let mut command_line_crate = CommandLineCrate {
-            package: "cli".to_owned(),
-            manifest_path: "/work/project/crates/cli/Cargo.toml".into(),
-            manifest_shown: "crates/cli/Cargo.toml".to_owned(),
-            lockfile_path: "/work/project/Cargo.lock".into(),
-            lockfile_shown: "Cargo.lock".to_owned(),
-        };
-
-        command_line_crate.paths_as_shown();
-
-        assert_eq!(
-            command_line_crate.manifest_path,
-            Path::new("crates/cli/Cargo.toml")
-        );
-        assert_eq!(command_line_crate.lockfile_path, Path::new("Cargo.lock"));
-    }
-
-    #[test]
-    fn a_workspace_that_cannot_be_entered_is_one_line_naming_it_and_ending_in_what_to_do() {
-        let error = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
-
-        assert_eq!(
-            could_not_enter_line(Path::new("/work/project"), &error),
-            "could not enter the workspace at /work/project, so wear wrote nothing: permission \
-             denied; check that it can be entered, then run the `wear` task again"
-        );
     }
 
     #[test]

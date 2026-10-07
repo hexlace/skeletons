@@ -352,6 +352,26 @@ mod tests {
         }
     }
 
+    /// What `cargo add` does when it leaves a directory where each of the
+    /// manifest and `Cargo.lock` was, and fails: neither can be written back
+    /// to a path that is now a directory, however the process is privileged.
+    fn replacing_the_manifest_and_the_lockfile_with_directories(
+        directory: &Path,
+    ) -> impl FnOnce() -> Outcome {
+        let directory = directory.to_path_buf();
+        move || {
+            for name in ["Cargo.toml", "Cargo.lock"] {
+                let path = directory.join(name);
+                std::fs::remove_file(&path)
+                    .and_then(|()| std::fs::create_dir(&path))
+                    .map_err(|error| {
+                        Failure::new("the stand-in for cargo add failed").caused_by(error)
+                    })?;
+            }
+            Err(Failure::new("cargo add failed: no such crate"))
+        }
+    }
+
     fn reading_back(
         workspace: Workspace,
     ) -> impl FnOnce() -> Result<Workspace, ReadWorkspaceError> {
@@ -460,6 +480,33 @@ mod tests {
              Cargo.lock — check it before running the `wear` task again"
         );
         assert_eq!(project.manifest(), MANIFEST);
+        assert!(project.directory.path().join("Cargo.lock").is_dir());
+    }
+
+    #[test]
+    fn an_undo_that_restored_nothing_names_every_path_and_does_not_claim_a_recovery() {
+        // `cargo add` leaves a directory where the manifest was and another
+        // where `Cargo.lock` was, so neither can be put back and nothing was.
+        // The line must then say only that: no claim that the project was
+        // put back except for something. Rollback undoes in reverse of the
+        // order `wear` recorded the two files (manifest, then lockfile), so
+        // the lockfile is named first, joined with "and", and the plural
+        // "check them" ends the line.
+        let project = Project::new(None);
+
+        let failure = run(
+            &project,
+            replacing_the_manifest_and_the_lockfile_with_directories(project.directory.path()),
+            || panic!("nothing is read back after cargo add fails"),
+        )
+        .expect_err("a failing cargo add must fail the run");
+
+        assert_eq!(
+            failure.to_string(),
+            "cargo add failed: no such crate; ritual could not put back Cargo.lock and \
+             Cargo.toml — check them before running the `wear` task again"
+        );
+        assert!(project.directory.path().join("Cargo.toml").is_dir());
         assert!(project.directory.path().join("Cargo.lock").is_dir());
     }
 

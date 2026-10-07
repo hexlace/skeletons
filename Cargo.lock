@@ -579,7 +579,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "skeletons"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "caseless",
  "form_urlencoded",
@@ -599,7 +599,7 @@ dependencies = [
 
 [[package]]
 name = "skeletons-ritual"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "rituals",
  "rituals-core",
@@ -609,7 +609,7 @@ dependencies = [
 
 [[package]]
 name = "skeletons-wearer"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "rituals",
  "serde_json",
@@ -934,7 +934,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "xtask"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "serde_json",
  "toml_edit",

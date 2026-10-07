@@ -72,9 +72,11 @@ pub(crate) fn combined_output(report: &super::Report) -> String {
 /// What every message `ritual` refuses with starts with, on stderr.
 const REFUSAL_PREFIX: &str = "ritual: ";
 
-/// What `ritual` appends when it undid a change it had already made, and
-/// does not append to a refusal that came before it changed anything.
-const ROLLBACK_NOTICE: &str = "put the project back";
+/// What `ritual` appends when it undid a change it had already made, or
+/// tried to and could not, and does not append to a refusal that came before
+/// it changed anything: "put the project back as it found it", "put the
+/// project back except for …" and "could not put back …".
+const UNDO_NOTICES: [&str; 2] = ["put the project back", "could not put back"];
 
 /// Asserts that stderr holds `message` as one whole line, after the
 /// command line's prefix, and nothing else on that line.
@@ -87,12 +89,14 @@ pub(crate) fn assert_refused_with_line(report: &super::Report, message: &str) {
     );
 }
 
-/// Asserts that stderr does not claim the project was put back: a refusal
-/// made before anything changed has nothing to undo, and saying so would
-/// mean something had been changed first.
+/// Asserts that stderr reports no undo, done or failed: a refusal made before
+/// anything changed has nothing to undo, and reporting one would mean
+/// something had been changed first.
 pub(crate) fn assert_nothing_was_undone(report: &super::Report) {
     assert!(
-        !report.stderr.contains(ROLLBACK_NOTICE),
+        !UNDO_NOTICES
+            .iter()
+            .any(|notice| report.stderr.contains(notice)),
         "a refusal before any change must not report an undo; stderr was:\n{}",
         report.stderr
     );

@@ -17,12 +17,12 @@ resolver = "3"
 # would not share a `Task` type. `rituals-compose`, below, is the third crate
 # taken from that release, and the same holds for it: all three resolve to the
 # one `rituals`.
-rituals = "0.1.2"
-ritual = { package = "rituals-core", version = "0.1.2" }
+rituals = "0.2.0"
+ritual = { package = "rituals-core", version = "0.2.0" }
 # Ritual's `rollback`, which `wear` writes through.
 # Already compiled into every `ritual` binary through `rituals-core`, so it adds
 # no package to `Cargo.lock`. Released with `rituals` at one version.
-rituals-compose = "0.1.2"
+rituals-compose = "0.2.0"
 # The `skeletons` bundle, declared once under the key a command line mounts it
 # by. `path` is what a build in this repository uses; `version` is what a
 # published crate's manifest keeps, since crates.io has no path to follow.

@@ -1,6 +1,6 @@
-//! Acceptance: `wear` neither refuses nor rolls back differently, and never
-//! changes a byte of either file on the way, when the committed `Cargo.lock`
-//! is current but not in the form Cargo itself would write.
+//! Acceptance: `wear` never refuses differently, and never changes a byte of
+//! either file on the way, when the committed `Cargo.lock` is current but not
+//! in the form Cargo itself would write.
 //!
 //! A lockfile can say exactly what Cargo would resolve and still differ from
 //! what Cargo would write: the `[[package]]` entries in another order, no
@@ -13,10 +13,11 @@
 //!
 //! Each form below goes through the same four stories as a clean lockfile
 //! would: a dirty tree is refused as exactly the changes the wearer made, a
-//! failed `cargo add` is rolled back rather than refused at the clean check,
+//! failed `cargo add` is refused as `cargo add`'s own failure rather than at
+//! the clean check, with nothing to put back,
 //! a success commits as its own next step says and then `sync` and `check`
 //! agree, and a lockfile git is told to hide is refused before anything is
-//! rewritten. In every refusal and rollback the manifest and the lockfile are
+//! rewritten. In every refusal the manifest and the lockfile are
 //! byte-identical to before.
 //!
 //! The binary runs directly, never through `cargo run` or the `cargo ritual`
@@ -226,9 +227,11 @@ fn assert_a_dirty_tree_is_refused_untouched(form: LockfileForm) -> TestOutcome {
     Ok(())
 }
 
-/// A `cargo add` that fails (a `--path` holding no crate) is rolled back, not
-/// refused at the clean check, and leaves both files as they were.
-fn assert_a_failed_cargo_add_is_rolled_back(form: LockfileForm) -> TestOutcome {
+/// A `cargo add` that fails (a `--path` holding no crate) is refused as
+/// `cargo add`'s failure, not at the clean check, and leaves both files as
+/// they were. Cargo writes nothing before it refuses a path with no crate, so
+/// nothing was put back and the line makes no claim that something was.
+fn assert_a_failed_cargo_add_leaves_both_files_as_they_were(form: LockfileForm) -> TestOutcome {
     let fixture = fixture_in_form(form)?;
     let before = ManifestAndLockfile::read(&fixture, "Cargo.toml")?;
     let no_crate = TemporaryDirectory::new("holds-no-crate")?;
@@ -246,19 +249,18 @@ fn assert_a_failed_cargo_add_is_rolled_back(form: LockfileForm) -> TestOutcome {
         &no_crate,
     ])?;
 
-    // The line is `ritual: cargo add failed: <what cargo said>; ritual put
-    // the project back as it found it`. What cargo said names a path and is
-    // cargo's wording, so only the two ends are pinned.
+    // The line is `ritual: cargo add failed: <what cargo said>`. What cargo
+    // said names a path and is cargo's wording, so only the start is pinned,
+    // and the absence of any claim that the project was put back.
     assert!(
         report
             .stderr
             .lines()
-            .any(|line| line.starts_with("ritual: cargo add failed: ")
-                && line.ends_with("; ritual put the project back as it found it")),
-        "{form:?}: stderr must hold one line saying cargo add failed and that ritual put the \
-         project back; stderr was:\n{}",
+            .any(|line| line.starts_with("ritual: cargo add failed: ")),
+        "{form:?}: stderr must hold one line saying cargo add failed; stderr was:\n{}",
         report.stderr
     );
+    assert_nothing_was_undone(&report);
     assert_eq!(
         ManifestAndLockfile::read(&fixture, "Cargo.toml")?,
         before,
@@ -382,20 +384,20 @@ fn a_lockfile_with_a_comment_does_not_make_a_dirty_tree_count_its_lockfile() -> 
 }
 
 #[test]
-fn a_lockfile_without_blank_lines_still_rolls_back_a_failed_cargo_add() -> TestOutcome {
-    // The failure has to be `cargo add`'s, with the rollback notice, not the
-    // clean check refusing the lockfile `wear` itself rewrote.
-    assert_a_failed_cargo_add_is_rolled_back(LockfileForm::BlankLinesRemoved)
+fn a_lockfile_without_blank_lines_is_left_as_it_was_after_a_failed_cargo_add() -> TestOutcome {
+    // The failure has to be `cargo add`'s, not the clean check refusing the
+    // lockfile `wear` itself rewrote.
+    assert_a_failed_cargo_add_leaves_both_files_as_they_were(LockfileForm::BlankLinesRemoved)
 }
 
 #[test]
-fn a_lockfile_with_reversed_packages_still_rolls_back_a_failed_cargo_add() -> TestOutcome {
-    assert_a_failed_cargo_add_is_rolled_back(LockfileForm::PackagesReversed)
+fn a_lockfile_with_reversed_packages_is_left_as_it_was_after_a_failed_cargo_add() -> TestOutcome {
+    assert_a_failed_cargo_add_leaves_both_files_as_they_were(LockfileForm::PackagesReversed)
 }
 
 #[test]
-fn a_lockfile_with_a_comment_still_rolls_back_a_failed_cargo_add() -> TestOutcome {
-    assert_a_failed_cargo_add_is_rolled_back(LockfileForm::CommentAdded)
+fn a_lockfile_with_a_comment_is_left_as_it_was_after_a_failed_cargo_add() -> TestOutcome {
+    assert_a_failed_cargo_add_leaves_both_files_as_they_were(LockfileForm::CommentAdded)
 }
 
 #[test]

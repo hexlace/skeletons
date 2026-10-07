@@ -1051,18 +1051,32 @@ and, like every message in this document, prints text from outside escaped.
 through ritual's rollback, which records the manifest and `Cargo.lock` before
 the first change and, when the run returns a failure, writes both back exactly
 as they were: the bytes, not a `cargo remove`, which restores neither the
-lockfile nor a manifest's formatting and comments. The message then ends with
-`; ritual put the project back as it found it`:
+lockfile nor a manifest's formatting and comments. When the undo put something
+back, the message then ends with `; ritual put the project back as it found it`:
 
 ```text
-cargo add failed: error: the version provided, `v1` is not a valid SemVer requirement\n\nhelp: changing the package to `a-dependabot-skeleton@1`\n\nCaused by:\n  unexpected character 'v' while parsing major version number; ritual put the project back as it found it
 not-one 0.1.0 is not a skeleton: its manifest has no [package.metadata.skeletons] table, so it cannot be worn; wear a crate that is one; ritual put the project back as it found it
 ```
 
-These are the failures that come after the first change:
+When there was nothing to put back, because the run failed before it had
+changed either file, the message is the failure exactly as it was raised and
+makes no claim that the project was put back. A recovery that did not happen is
+not reported. Cargo refuses a version that is not valid SemVer before it writes
+anything, so that refusal reads as Cargo said it, with everything Cargo said on
+one line, escaped:
+
+```text
+cargo add failed: error: the version provided, `v1` is not a valid SemVer requirement\n\nhelp: changing the package to `a-dependabot-skeleton@1`\n\nCaused by:\n  unexpected character 'v' while parsing major version number
+```
+
+These are the failures that come after `cargo add` has run, each of which ends
+with the clause above when `cargo add` or the table write had changed
+something:
 
 - `cargo add` refuses, with everything Cargo said on one line, escaped as above,
-  or could not be run at all (``running `cargo add` failed: …``).
+  or could not be run at all (``running `cargo add` failed: …``). A refusal
+  Cargo makes before it writes anything, like the SemVer one above, has nothing
+  to put back and carries no clause.
 - the crate Cargo added has no `[package.metadata.skeletons]` table, so it is no
   skeleton. Only the read back can tell, for a source Cargo resolves itself.
 - Cargo declared the dependency under another spelling of the key, because
@@ -1089,10 +1103,19 @@ These are the failures that come after the first change:
 
 When the undo itself fails, the message names every path that was not put back,
 relative to the workspace root as every other path `wear` shows is, and says to
-check it before running the `wear` task again:
+check it before running the `wear` task again. It words that differently
+according to whether anything was put back. When some of it was, the project is
+put back except for the paths named:
 
 ```text
 <the failure>; ritual put the project back except for ritual/Cargo.toml — check it before running the `wear` task again
+```
+
+When none of it could be, the message says only that, because the project was
+not put back at all:
+
+```text
+<the failure>; ritual could not put back Cargo.lock and ritual/Cargo.toml — check them before running the `wear` task again
 ```
 
 Two things the undo cannot give back. A panic: rollback runs when the run

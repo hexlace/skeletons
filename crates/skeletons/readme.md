@@ -18,18 +18,19 @@ it is for, and how a repository wears its first skeleton.
 
 ## Mounting the bundle
 
-A project mounts the bundle as a dependency of its CLI crate, and as an
-entry in that crate's list of tasks:
+A project mounts the bundle with ritual's `import`, from anywhere inside the
+project:
 
-```toml
-[dependencies]
-skeletons = "0.1"
-
-[package.metadata.ritual]
-tasks = ["ritual", "skeletons"]
+```sh
+cargo ritual import skeletons
 ```
 
-then runs `cargo ritual regenerate`. A project with no ritual command line
+which adds the bundle as a dependency of the command line's crate and as an
+entry in that crate's list of tasks, then regenerates the command line's
+`src/main.rs`. `cargo ritual import skeletons tools` mounts it under another
+key. This version of `skeletons` is built on ritual 0.2, and mounts in a command
+line built on ritual 0.2, such as the one ritual 0.2's `new` makes;
+`skeletons` 0.1 is built on ritual 0.1. A project with no ritual command line
 yet starts with ritual's
 [Install](https://github.com/hexlace/ritual#install) and
 [Quickstart](https://github.com/hexlace/ritual#quickstart).

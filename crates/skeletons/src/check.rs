@@ -13,6 +13,7 @@ use rituals::{Failure, Outcome, Task, clap, report as write_report};
 use report::{Filter, Report};
 
 use crate::behind::{self, Remotes};
+use crate::current_directory;
 use crate::skeleton::Escaped;
 use crate::survey::{count, survey};
 use crate::workspace::{self, Network, ReadWorkspaceError};
@@ -79,9 +80,7 @@ fn run(arguments: CheckArguments) -> Outcome {
         behind: arguments.behind,
     };
 
-    let directory = std::env::current_dir().map_err(|error| {
-        Failure::new("could not read the current working directory").caused_by(error)
-    })?;
+    let directory = current_directory::read()?;
 
     let workspace = match workspace::read(&directory, Network::Allowed) {
         Ok(workspace) => workspace,

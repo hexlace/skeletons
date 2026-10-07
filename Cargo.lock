@@ -157,6 +157,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
+
+[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -353,19 +359,20 @@ dependencies = [
 
 [[package]]
 name = "rituals"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cbf1c09b4f773a3674ca3fb03551b87c83e24a89b1a6376c95ef3b605ab0958"
+checksum = "9f73a87fe7a66f4dc37e3810292d1f4e9fea6d21b2e24e6b3e7dd059256e2e72"
 dependencies = [
  "clap",
 ]
 
 [[package]]
 name = "rituals-compose"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a41941ec3e46d9e766c8563e6b69abb4e4a00947264ec3d52d0d0ef889636fbe"
+checksum = "3d853acdc393afaf61d20381baeabd9911aaf3a90e8ec444c51e1e4d7e66d785"
 dependencies = [
+ "glob",
  "rituals",
  "serde",
  "serde_json",
@@ -374,32 +381,55 @@ dependencies = [
 
 [[package]]
 name = "rituals-core"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca293029ec8d6c4e85b649e8d969b7b46bf771618b5a15a7a2e9ce1cfb680363"
+checksum = "eebf9211575d367eb3104e0e1afa7ea71e292503fae140eda326d59bb62e3b9e"
 dependencies = [
  "rituals",
  "rituals-core-add",
  "rituals-core-create",
+ "rituals-core-import",
+ "rituals-core-migrate",
  "rituals-core-new",
  "rituals-core-regenerate",
+ "rituals-core-remove",
 ]
 
 [[package]]
 name = "rituals-core-add"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8235d4c739395284d3977395a98250ac60c11263257d830b492714617610257"
+checksum = "c750bc69f72222195ce85f35ced8a3a36dca0a698628cb26bf1fc97d01591e0b"
+dependencies = [
+ "rituals",
+ "rituals-core-create",
+]
+
+[[package]]
+name = "rituals-core-create"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd122f06ca9688aacb79b79e023eb8a35a672d41871bdcc384c6579360ea01de"
 dependencies = [
  "rituals",
  "rituals-compose",
 ]
 
 [[package]]
-name = "rituals-core-create"
-version = "0.1.2"
+name = "rituals-core-import"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "480c363c011b2642ca6b9879f30b944bbc3b7bf1095d9799e694bc93464a44f8"
+checksum = "87441de5981294716e598e03ad51ba6c96fa5d8e07891b92db6878d13e5be22e"
+dependencies = [
+ "rituals",
+ "rituals-compose",
+]
+
+[[package]]
+name = "rituals-core-migrate"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe91bce99760b60f5beb7c23bc40b71713fe5fb66e8b9e568f102464927c996b"
 dependencies = [
  "rituals",
  "rituals-compose",
@@ -407,9 +437,9 @@ dependencies = [
 
 [[package]]
 name = "rituals-core-new"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dac437c0c30b58df58c56ee2254349deb18fe3ee12cbfe4dd18ace9034dd4e82"
+checksum = "35b6cce081c9cac339c37a9229f4be737c1a1a7c292ad97402192312374fd71c"
 dependencies = [
  "rituals",
  "rituals-compose",
@@ -417,9 +447,19 @@ dependencies = [
 
 [[package]]
 name = "rituals-core-regenerate"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e6c6b71010ff4babede1d316ca2d223347ffc6abb2265eb737b013d6f879f35"
+checksum = "85b176da1c1209a279474cdba4d3956387c1351d1383e9e9e81a10c2ddc92edd"
+dependencies = [
+ "rituals",
+ "rituals-compose",
+]
+
+[[package]]
+name = "rituals-core-remove"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac2cd08cd47107df140b13bf5253f2d6769b6d2a4288e8b95e81e3e0b3a06d84"
 dependencies = [
  "rituals",
  "rituals-compose",

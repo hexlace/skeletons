@@ -50,29 +50,51 @@ one, and its section on
 [importing a task from somewhere else](https://github.com/hexlace/ritual#import-a-task-from-somewhere-else)
 covers mounting a bundle from a git repository or another registry.
 
-With one in hand there is nothing else to install. A project mounts
-`skeletons` the way it would mount any bundle: as a dependency of the CLI
-crate, and as an entry in that crate's list of tasks. In `ritual/Cargo.toml`:
+With one in hand there is nothing else to install. From anywhere inside the
+project, import the bundle:
+
+```sh
+cargo ritual import skeletons
+```
+
+```text
+updated ritual/Cargo.toml
+updated Cargo.lock
+updated ritual/src/main.rs (tasks: ritual, skeletons)
+next: run cargo ritual skeletons
+```
+
+That output is from importing a checkout of this repository with `--path`,
+which `import` takes in place of the registry, as it does `--git`. `import`
+mounts `skeletons` the way a project would mount any bundle: as a dependency
+of the CLI crate (`ritual/Cargo.toml`, in a project that `ritual new` made),
+and as an entry in that crate's list of tasks. `tasks` already holds `ritual`,
+so `skeletons` goes beside it:
 
 ```toml
-[dependencies]
-skeletons = "0.1"
-
 [package.metadata.ritual]
 tasks = ["ritual", "skeletons"]
 ```
 
-`tasks` already holds `ritual` in a project that `ritual new` made, so
-`skeletons` goes beside it. The dependency key is the command name, which is
-why everything below runs as `cargo ritual skeletons …`. A project that
-depends on it as `tools = { package = "skeletons", … }` runs
-`cargo ritual tools check` instead, and the tool's own messages name only
-the `check`, `sync` and `wear` tasks, so they read the same either way. Then
-regenerate the command line's `src/main.rs`, which is written from that list:
+It then regenerates the command line's `src/main.rs`, which is written from
+that list, so there is nothing to edit by hand. The dependency key is the
+command name, which is why everything below runs as
+`cargo ritual skeletons …`. Give `import` another key and the bundle answers
+to that instead:
 
 ```sh
-cargo ritual regenerate
+cargo ritual import skeletons tools
 ```
+
+writes `tools = { package = "skeletons", … }` and `tasks = ["ritual", "tools"]`,
+and the commands run as `cargo ritual tools check`. The tool's own messages
+name only the `check`, `sync` and `wear` tasks, so they read the same either
+way.
+
+This version of `skeletons` is built on ritual 0.2, and mounts in a command
+line built on ritual 0.2, such as the one ritual 0.2's `new` makes. `import`
+refuses a bundle built on another ritual, so `skeletons` 0.1, which is built on
+ritual 0.1, belongs to a ritual 0.1 command line.
 
 Now ask it something:
 
@@ -85,7 +107,9 @@ this workspace wears no skeletons; a manifest wears one with a [package.metadata
 ```
 
 The first `cargo ritual` after a change builds the command line, so Cargo
-prints its progress before the output. Later runs reuse the build.
+prints its progress before the output. Later runs reuse the build. Commit what
+`import` changed, `Cargo.lock` included, since `sync` and `wear` refuse to run
+over uncommitted changes.
 
 ## Wearing a first skeleton
 

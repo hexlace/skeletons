@@ -233,7 +233,7 @@ pub(crate) fn write(
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
-    use rituals_compose::rollback;
+    use rituals_compose::rollback::{self, Wording};
 
     use super::{TableRefusal, with_empty_wearing_table, write};
     use crate::wear::refusal::{Parent, WearRefusal};
@@ -475,12 +475,15 @@ mod tests {
         std::fs::write(&manifest_path, PACKAGE).expect("write the manifest");
         let tidy = key("tidy");
 
-        let outcome = rollback::attempt("running again", |changes| {
-            write(changes, &manifest_path, "Cargo.toml", &tidy)?;
-            let written = std::fs::read_to_string(&manifest_path).expect("read it back");
-            assert!(written.contains("[package.metadata.skeletons.tidy]"));
-            Err::<(), _>(rituals::Failure::new("a later step failed"))
-        });
+        let outcome = rollback::attempt(
+            Wording::project(directory.path(), "running again"),
+            |changes| {
+                write(changes, &manifest_path, "Cargo.toml", &tidy)?;
+                let written = std::fs::read_to_string(&manifest_path).expect("read it back");
+                assert!(written.contains("[package.metadata.skeletons.tidy]"));
+                Err::<(), _>(rituals::Failure::new("a later step failed"))
+            },
+        );
 
         assert!(outcome.is_err());
         assert_eq!(
@@ -495,9 +498,10 @@ mod tests {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let manifest_path = directory.path().join("Cargo.toml");
 
-        let outcome = rollback::attempt("running again", |changes| {
-            write(changes, &manifest_path, "Cargo.toml", &key("tidy"))
-        });
+        let outcome = rollback::attempt(
+            Wording::project(directory.path(), "running again"),
+            |changes| write(changes, &manifest_path, "Cargo.toml", &key("tidy")),
+        );
 
         let message = outcome
             .expect_err("a missing manifest cannot take a table")

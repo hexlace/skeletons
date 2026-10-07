@@ -130,6 +130,19 @@ impl CommandLineCrate {
     /// The crate of `member`, the package `package` names in the workspace
     /// at `workspace_root`, with `Cargo.lock` beside the workspace's manifest.
     fn new(package: &str, member: &Member, workspace_root: &Path) -> Self {
+        // `cargo metadata` reports every path as absolute, and `rollback`
+        // spells the paths it reports from the absolute ones it is handed (it
+        // panics on a relative one), so the two it is given are asserted here,
+        // where they come in, and the lockfile path joined onto the root is
+        // absolute with it.
+        assert!(
+            workspace_root.is_absolute(),
+            "the workspace root is always absolute"
+        );
+        assert!(
+            member.manifest_path.is_absolute(),
+            "a member's manifest path is always absolute"
+        );
         let lockfile_path = workspace_root.join("Cargo.lock");
         Self {
             package: package.to_owned(),
@@ -460,9 +473,7 @@ mod tests {
         // `Cargo.lock` was, so the manifest can be put back and the lockfile
         // cannot. The line must say which, spelled from the workspace root
         // as `wear`'s other messages spell paths, and end with what to run
-        // again. `rollback` spells a path from an absolute one, so this also
-        // proves `wear` hands it absolute paths rather than ones it would
-        // panic on.
+        // again.
         let project = Project::new(None);
 
         let failure = run(

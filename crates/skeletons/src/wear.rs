@@ -34,6 +34,7 @@ use rituals_compose::rollback;
 use rollback::{Changes, Wording};
 
 use crate::check::{AbortingCommand, abort_message};
+use crate::current_directory;
 use crate::work_tree;
 use crate::work_tree::writing_command::WritingCommand;
 use crate::workspace::{self, Member, Network, ReadWorkspaceError, Workspace};
@@ -157,9 +158,7 @@ impl CommandLineCrate {
 /// then proven ones git can hand back ([`hand_back::check`]) and can be
 /// written in place ([`writable::check`]).
 fn prepare(command_line: &CommandLine, request: Request) -> Result<Prepared, Failure> {
-    let directory = std::env::current_dir().map_err(|error| {
-        Failure::new("could not read the current working directory").caused_by(error)
-    })?;
+    let directory = current_directory::read()?;
     let package = command_line.identity().package_name();
     let prospect =
         workspace::read_prospect(&directory, package).map_err(|error| aborted(&error))?;
@@ -329,6 +328,30 @@ mod tests {
         }
     }
 
+    /// What `cargo add` does when it refuses before it has written anything.
+    fn failing_before_writing() -> impl FnOnce() -> Outcome {
+        || Err(Failure::new("cargo add failed: no such crate"))
+    }
+
+    /// What `cargo add` does when it writes the manifest, leaves a directory
+    /// where `Cargo.lock` was, and fails: the lockfile cannot be written back
+    /// to a path that is now a directory, however the process is privileged.
+    fn writing_the_manifest_and_replacing_the_lockfile_with_a_directory(
+        directory: &Path,
+    ) -> impl FnOnce() -> Outcome {
+        let directory = directory.to_path_buf();
+        move || {
+            let lockfile = directory.join("Cargo.lock");
+            std::fs::write(directory.join("Cargo.toml"), ADDED_MANIFEST)
+                .and_then(|()| std::fs::remove_file(&lockfile))
+                .and_then(|()| std::fs::create_dir(&lockfile))
+                .map_err(|error| {
+                    Failure::new("the stand-in for cargo add failed").caused_by(error)
+                })?;
+            Err(Failure::new("cargo add failed: no such crate"))
+        }
+    }
+
     fn reading_back(
         workspace: Workspace,
     ) -> impl FnOnce() -> Result<Workspace, ReadWorkspaceError> {
@@ -385,14 +408,59 @@ mod tests {
         )
         .expect_err("a failing cargo add must fail the run");
 
-        assert!(
-            failure
-                .to_string()
-                .starts_with("cargo add failed: no such crate"),
-            "{failure}"
+        assert_eq!(
+            failure.to_string(),
+            "cargo add failed: no such crate; ritual put the project back as it found it"
         );
         assert_eq!(project.manifest(), MANIFEST);
         assert_eq!(project.lockfile(), LOCKFILE);
+    }
+
+    #[test]
+    fn a_cargo_add_that_fails_before_writing_is_refused_as_it_failed_with_nothing_put_back() {
+        // `cargo add` refuses before it has changed either file, which is how
+        // it refuses a crate it cannot find. There is nothing to put back, so
+        // the line is `cargo add`'s own and makes no claim that the project
+        // was put back; a recovery that never happened must not be reported.
+        let project = Project::new(None);
+
+        let failure = run(&project, failing_before_writing(), || {
+            panic!("nothing is read back after cargo add fails")
+        })
+        .expect_err("a failing cargo add must fail the run");
+
+        assert_eq!(failure.to_string(), "cargo add failed: no such crate");
+        assert_eq!(project.manifest(), MANIFEST);
+        assert_eq!(project.lockfile(), LOCKFILE);
+    }
+
+    #[test]
+    fn a_lockfile_that_cannot_be_put_back_is_named_with_what_to_check_and_nothing_panics() {
+        // `cargo add` writes the manifest and then leaves a directory where
+        // `Cargo.lock` was, so the manifest can be put back and the lockfile
+        // cannot. The line must say which, spelled from the workspace root
+        // as `wear`'s other messages spell paths, and end with what to run
+        // again. `rollback` spells a path from an absolute one, so this also
+        // proves `wear` hands it absolute paths rather than ones it would
+        // panic on.
+        let project = Project::new(None);
+
+        let failure = run(
+            &project,
+            writing_the_manifest_and_replacing_the_lockfile_with_a_directory(
+                project.directory.path(),
+            ),
+            || panic!("nothing is read back after cargo add fails"),
+        )
+        .expect_err("a failing cargo add must fail the run");
+
+        assert_eq!(
+            failure.to_string(),
+            "cargo add failed: no such crate; ritual put the project back except for \
+             Cargo.lock — check it before running the `wear` task again"
+        );
+        assert_eq!(project.manifest(), MANIFEST);
+        assert!(project.directory.path().join("Cargo.lock").is_dir());
     }
 
     #[test]

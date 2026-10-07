@@ -34,6 +34,7 @@ use std::path::Path;
 use rituals::{Failure, Outcome, Task, clap, report as write_report};
 
 use crate::check::{AbortingCommand, WEARS_NOTHING_LINE, abort_message};
+use crate::current_directory;
 use crate::survey::survey;
 use crate::work_tree;
 use crate::work_tree::abort::WorkTreeAbort;
@@ -63,9 +64,7 @@ pub(crate) fn task() -> Task {
 }
 
 fn run(_arguments: NoArguments) -> Outcome {
-    let directory = std::env::current_dir().map_err(|error| {
-        Failure::new("could not read the current working directory").caused_by(error)
-    })?;
+    let directory = current_directory::read()?;
 
     let workspace = match workspace::read(&directory, Network::Refused) {
         Ok(workspace) => workspace,

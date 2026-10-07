@@ -26,6 +26,7 @@ mod behind;
 mod cargo;
 mod check;
 mod claim;
+mod current_directory;
 mod git;
 mod skeleton;
 mod subprocess;

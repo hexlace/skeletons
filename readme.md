@@ -108,7 +108,7 @@ this workspace wears no skeletons; a manifest wears one with a [package.metadata
 
 The first `cargo ritual` after a change builds the command line, so Cargo
 prints its progress before the output. Later runs reuse the build. Commit what
-`import` changed, `Cargo.lock` included, since the next step refuses to run
+`import` changed, `Cargo.lock` included, since `sync` and `wear` refuse to run
 over uncommitted changes.
 
 ## Wearing a first skeleton

@@ -8,6 +8,11 @@
 //! version of their own and are never touched. The tests below check that the
 //! two kinds of site agree; this module is what keeps them agreeing when the
 //! version moves.
+//!
+//! An internal requirement keeps the shape it has: a bare version (`1.2.3`)
+//! stays bare and an exact pin (`=1.2.3`) stays exact, so a bump never loosens
+//! a pin. Any other shape is refused, because rewriting it would mean guessing
+//! what range it was meant to allow.
 
 use std::error::Error;
 use std::fmt;
@@ -33,15 +38,17 @@ pub(crate) fn workspace_version(document: &DocumentMut) -> Result<Version, Manif
 /// dependencies it rewrote.
 ///
 /// Only the version strings change: comments, key order and spacing around
-/// each value stay as they were. Nothing is written unless every site can be:
-/// an internal dependency without a `version` is refused rather than given
-/// one, since its absence means the manifest has stopped looking the way this
-/// code assumes.
+/// each value stay as they were. A requirement keeps its shape: a bare version
+/// is rewritten bare and an exact `=` pin is rewritten as an exact pin. Nothing
+/// is written unless every site can be: an internal dependency without a
+/// `version` is refused rather than given one, since its absence means the
+/// manifest has stopped looking the way this code assumes, and so is one whose
+/// requirement is neither of those two shapes.
 pub(crate) fn set_release_version(
     document: &mut DocumentMut,
     version: Version,
 ) -> Result<Vec<String>, ManifestError> {
-    let internal = internal_dependency_names(document)?;
+    let internal = internal_dependencies(document)?;
     if internal.is_empty() {
         return Err(ManifestError::NoInternalDependencies);
     }
@@ -55,27 +62,82 @@ pub(crate) fn set_release_version(
     replace_string(package_version, &text).ok_or(ManifestError::WorkspaceVersionNotAString)?;
 
     let dependencies = workspace_dependencies_mut(document)?;
-    for name in &internal {
+    for dependency in &internal {
+        let name = &dependency.name;
         let requirement = dependencies
             .get_mut(name)
             .and_then(|entry| entry.as_table_like_mut())
             .and_then(|entry| entry.get_mut("version"))
             .ok_or_else(|| ManifestError::InternalWithoutVersion(name.clone()))?;
-        replace_string(requirement, &text)
+        replace_string(requirement, &dependency.shape.requirement(version))
             .ok_or_else(|| ManifestError::InternalWithoutVersion(name.clone()))?;
     }
-    Ok(internal)
+    Ok(internal
+        .into_iter()
+        .map(|dependency| dependency.name)
+        .collect())
 }
 
-/// The keys of every `[workspace.dependencies]` entry with a `path`, each
-/// checked to carry a string `version` before anything is edited.
+/// How an internal requirement is written, which a bump keeps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shape {
+    /// `1.2.3`, which Cargo reads as `^1.2.3`.
+    Bare,
+    /// `=1.2.3`, which admits that version alone.
+    Exact,
+}
+
+impl Shape {
+    /// The shape `requirement` is written in, or `None` for any other
+    /// requirement. Only a release version after the optional `=` counts, with
+    /// nothing around it: a requirement with a space, a comma or an operator
+    /// other than `=` is a range this code does not know how to move.
+    fn of(requirement: &str) -> Option<Self> {
+        if Version::parse(requirement).is_ok() {
+            return Some(Self::Bare);
+        }
+        let pinned = requirement.strip_prefix('=')?;
+        Version::parse(pinned).is_ok().then_some(Self::Exact)
+    }
+
+    /// The requirement that asks for `version` in this shape.
+    fn requirement(self, version: Version) -> String {
+        match self {
+            Self::Bare => version.to_string(),
+            Self::Exact => format!("={version}"),
+        }
+    }
+}
+
+/// An internal dependency and the shape of the requirement a bump rewrites.
+struct InternalDependency {
+    name: String,
+    shape: Shape,
+}
+
+/// The keys of every `[workspace.dependencies]` entry with a `path`.
+///
+/// Only the tests ask for the names alone: a bump needs each dependency's
+/// shape too, from [`internal_dependencies`].
+#[cfg(test)]
 fn internal_dependency_names(document: &DocumentMut) -> Result<Vec<String>, ManifestError> {
+    Ok(internal_dependencies(document)?
+        .into_iter()
+        .map(|dependency| dependency.name)
+        .collect())
+}
+
+/// Every `[workspace.dependencies]` entry with a `path`, each checked to carry
+/// a string `version` of a shape a bump can keep, before anything is edited.
+/// The shape found here is the one the write uses, so the write cannot meet a
+/// requirement this pass did not see.
+fn internal_dependencies(document: &DocumentMut) -> Result<Vec<InternalDependency>, ManifestError> {
     let dependencies = document
         .get("workspace")
         .and_then(|workspace| workspace.get("dependencies"))
         .and_then(Item::as_table_like)
         .ok_or(ManifestError::MissingWorkspaceDependencies)?;
-    let mut names = Vec::new();
+    let mut internal = Vec::new();
     for (name, entry) in dependencies.iter() {
         let Some(entry) = entry.as_table_like() else {
             continue;
@@ -83,12 +145,21 @@ fn internal_dependency_names(document: &DocumentMut) -> Result<Vec<String>, Mani
         if entry.get("path").is_none() {
             continue;
         }
-        if entry.get("version").and_then(Item::as_str).is_none() {
+        let Some(requirement) = entry.get("version").and_then(Item::as_str) else {
             return Err(ManifestError::InternalWithoutVersion(name.to_string()));
-        }
-        names.push(name.to_string());
+        };
+        let Some(shape) = Shape::of(requirement) else {
+            return Err(ManifestError::InternalRequirementNotBareOrExact {
+                name: name.to_string(),
+                requirement: requirement.to_string(),
+            });
+        };
+        internal.push(InternalDependency {
+            name: name.to_string(),
+            shape,
+        });
     }
-    Ok(names)
+    Ok(internal)
 }
 
 fn workspace_dependencies_mut(
@@ -121,6 +192,7 @@ pub(crate) enum ManifestError {
     MissingWorkspaceDependencies,
     NoInternalDependencies,
     InternalWithoutVersion(String),
+    InternalRequirementNotBareOrExact { name: String, requirement: String },
 }
 
 impl fmt::Display for ManifestError {
@@ -144,6 +216,11 @@ impl fmt::Display for ManifestError {
             Self::InternalWithoutVersion(name) => write!(
                 formatter,
                 "[workspace.dependencies] {name} has a path but no version string"
+            ),
+            Self::InternalRequirementNotBareOrExact { name, requirement } => write!(
+                formatter,
+                "[workspace.dependencies] {name} requires {requirement:?}, which is neither a \
+                 bare version nor an exact = pin"
             ),
         }
     }
@@ -297,6 +374,90 @@ mod tests {
             ))
         );
         assert_eq!(document.to_string(), text);
+    }
+
+    #[test]
+    fn a_bump_over_a_bare_requirement_writes_the_bare_version() {
+        let mut document = parse(
+            "[workspace.package]\nversion = \"0.1.0\"\n\n[workspace.dependencies]\n\
+             skeletons = { path = \"crates/skeletons\", version = \"0.1.0\" }\n",
+        );
+        set_release_version(&mut document, release("0.1.1")).expect("the bump applies");
+        assert_eq!(
+            document.to_string(),
+            "[workspace.package]\nversion = \"0.1.1\"\n\n[workspace.dependencies]\n\
+             skeletons = { path = \"crates/skeletons\", version = \"0.1.1\" }\n",
+        );
+    }
+
+    #[test]
+    fn a_bump_over_an_exact_pin_writes_an_exact_pin_and_each_entry_keeps_its_own_shape() {
+        // One entry is pinned and one is bare, so a bump that wrote every
+        // requirement in a single shape would get one of them wrong.
+        let mut document = parse(
+            "[workspace.package]\nversion = \"0.1.0\"\n\n[workspace.dependencies]\n\
+             skeletons = { path = \"crates/skeletons\", version = \"=0.1.0\" } # pinned\n\
+             wearer = { path = \"crates/wearer\", version = \"0.1.0\" }\n",
+        );
+        let rewritten =
+            set_release_version(&mut document, release("0.1.1")).expect("the bump applies");
+        assert_eq!(rewritten, ["skeletons", "wearer"]);
+        assert_eq!(
+            document.to_string(),
+            "[workspace.package]\nversion = \"0.1.1\"\n\n[workspace.dependencies]\n\
+             skeletons = { path = \"crates/skeletons\", version = \"=0.1.1\" } # pinned\n\
+             wearer = { path = \"crates/wearer\", version = \"0.1.1\" }\n",
+        );
+    }
+
+    #[test]
+    fn an_internal_requirement_that_is_neither_bare_nor_exact_is_refused_and_nothing_changes() {
+        // Each requirement is written inside a manifest whose first internal
+        // dependency is valid, so a refusal that came after the first write
+        // would leave the document changed.
+        let requirements = [
+            "^0.1.0",
+            "~0.1.0",
+            ">=0.1.0",
+            "0.1",
+            "*",
+            "= 0.1.0",
+            " 0.1.0",
+            "0.1.0 ",
+            "=0.1.0 ",
+            ">=0.1.0, <0.2.0",
+            "=0.1.0-rc.1",
+        ];
+        for requirement in requirements {
+            let text = format!(
+                "[workspace.package]\nversion = \"0.1.0\"\n\n[workspace.dependencies]\n\
+                 skeletons = {{ path = \"crates/skeletons\", version = \"0.1.0\" }}\n\
+                 wearer = {{ path = \"crates/wearer\", version = \"{requirement}\" }}\n"
+            );
+            let mut document = parse(&text);
+            assert_eq!(
+                set_release_version(&mut document, release("0.1.1")),
+                Err(ManifestError::InternalRequirementNotBareOrExact {
+                    name: "wearer".to_string(),
+                    requirement: requirement.to_string(),
+                }),
+                "for {requirement:?}"
+            );
+            assert_eq!(document.to_string(), text, "for {requirement:?}");
+        }
+    }
+
+    #[test]
+    fn the_refusal_of_an_unsupported_requirement_names_the_dependency_and_the_requirement() {
+        let error = ManifestError::InternalRequirementNotBareOrExact {
+            name: "wearer".to_string(),
+            requirement: "^0.1.0".to_string(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "[workspace.dependencies] wearer requires \"^0.1.0\", which is neither a bare \
+             version nor an exact = pin"
+        );
     }
 
     #[test]

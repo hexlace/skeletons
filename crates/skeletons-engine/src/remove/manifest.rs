@@ -20,8 +20,24 @@
 //! leaves empty goes with its header. A table that was empty before stays, with
 //! its comments. Nothing else is touched: an inherited
 //! `[workspace.dependencies]` entry stays.
+//!
+//! No comment the wearer wrote is lost, with one exception: a comment attached
+//! to a key line that is removed. That is the comment on the lines directly
+//! above the `key = value` line, the one after the value on its line, and the
+//! same for every key line inside a table that goes, comments inside a
+//! multi-line value included. A comment on a table's header goes nowhere with
+//! the header: the comments above it and the one beside it are moved onto
+//! whatever follows it in the text, the next header that stays or, when none
+//! follows, the end of the file. That holds for every header that goes, those
+//! of tables and arrays of tables inside the wearing table and a dependency
+//! written as a table of its own (`[dev-dependencies.tidy]`) among them. A
+//! comment moved off a header can end up standing alone, which the diff shows.
+//! A textual check beside the one on values refuses the edit, naming the line,
+//! when a comment line of the manifest is gone and is not under the exception.
 
-use toml_edit::{DocumentMut, Item, TableLike};
+use std::collections::BTreeMap;
+
+use toml_edit::{DocumentMut, Item, Key, RawString, Table, TableLike};
 
 use super::names::WearingKey;
 
@@ -56,6 +72,92 @@ struct Edit<'text> {
     rewritten: &'text str,
 }
 
+/// What an edit took out of a document besides the entries themselves: the
+/// header comments that have to be moved onto what follows, and the comment
+/// lines that go with removed key lines.
+#[derive(Debug, Default)]
+struct Removals {
+    /// For each header that went: the position it had among the document's
+    /// headers, and the comment text to move onto what follows it.
+    carried: Vec<(usize, String)>,
+    /// The comment lines that went with a removed key line, as they were
+    /// written. The text check allows exactly these to be missing.
+    excepted: Vec<String>,
+}
+
+impl Removals {
+    /// Takes `name` out of `parent`, and records what that does to comments.
+    ///
+    /// Every header in the item has its comments lifted off into
+    /// [`Removals::carried`] first, so what is left of the item, rendered, holds
+    /// only the comments that go with its key lines, and those are recorded as
+    /// [`Removals::excepted`]. Returns `None`, changing nothing, when `parent`
+    /// has no `name`.
+    fn take(&mut self, parent: &mut dyn TableLike, name: &str) -> Option<Item> {
+        for table in tables_in(parent.get_mut(name)?) {
+            visit_tables(vec![table], |table| self.lift_header(table));
+        }
+        let (key, item) = parent.get_key_value(name)?;
+        self.excepted.extend(comment_lines(&rendered(key, item)));
+        self.excepted.extend(comment_lines(&key_decor_text(key)));
+        let taken = parent.remove(name);
+        assert!(taken.is_some(), "the item was found a moment ago");
+        taken
+    }
+
+    /// Moves the comments of `table`'s header, when it has one, into
+    /// [`Removals::carried`] and leaves the header without any.
+    fn lift_header(&mut self, table: &mut Table) {
+        let Some(position) = table.position() else {
+            return;
+        };
+        let decor = table.decor_mut();
+        let carried = carried_text(raw_text(decor.prefix()), raw_text(decor.suffix()));
+        decor.set_prefix("");
+        decor.set_suffix("");
+        if !carried.is_empty() {
+            self.carried.push((position, carried));
+        }
+    }
+
+    /// Puts each carried text onto the first header that stays after the one
+    /// it came from, ahead of that header's own comments, or onto the end of
+    /// the file when no header follows. Texts that land together keep the order
+    /// of the headers they came from. Returns the excepted lines.
+    fn rehome(self, document: &mut DocumentMut) -> Vec<String> {
+        let Self {
+            mut carried,
+            excepted,
+        } = self;
+        carried.sort_by_key(|&(position, _)| position);
+        let stays = header_positions(document.as_table());
+        let mut landings: BTreeMap<usize, String> = BTreeMap::new();
+        let mut at_the_end = String::new();
+        for (position, text) in carried {
+            let landing = stays.get(stays.partition_point(|&stay| stay <= position));
+            match landing {
+                Some(&landing) => landings.entry(landing).or_default().push_str(&text),
+                None => at_the_end.push_str(&text),
+            }
+        }
+        visit_tables(vec![document.as_table_mut()], |table| {
+            let Some(carried) = table
+                .position()
+                .and_then(|position| landings.get(&position))
+            else {
+                return;
+            };
+            let own = raw_text(table.decor().prefix()).to_owned();
+            table.decor_mut().set_prefix(format!("{carried}{own}"));
+        });
+        if !at_the_end.is_empty() {
+            let own = raw_text(Some(document.trailing())).to_owned();
+            document.set_trailing(format!("{at_the_end}{own}"));
+        }
+        excepted
+    }
+}
+
 /// `manifest` with the dependency under `key` and the table
 /// `[package.metadata.skeletons.<key>]` taken out.
 ///
@@ -65,13 +167,15 @@ struct Edit<'text> {
 /// The dependency is taken out of every dependency table that declares the key,
 /// and a table that the removal leaves empty is taken out with its header, as is a
 /// `skeletons` or `metadata` table that only held the wearing. On a manifest
-/// `wear` wrote this is its inverse: the manifest as it was before.
+/// `wear` wrote this is its inverse: the manifest as it was before. The comments
+/// on a header that goes are kept, moved onto what follows it; only the
+/// comments of key lines that go are lost (see the module documentation).
 ///
 /// # Errors
 ///
 /// Returns [`ManifestRefusal`] when the manifest cannot be read, when it has
 /// no wearing table under `key`, or when what was written is not the manifest
-/// as it was less the wearing.
+/// as it was less the wearing, or has lost a comment it should have kept.
 pub(crate) fn without_wearing(manifest: &str, key: &WearingKey) -> Result<String, ManifestRefusal> {
     let key = key.as_str();
     let mut document: DocumentMut =
@@ -80,22 +184,27 @@ pub(crate) fn without_wearing(manifest: &str, key: &WearingKey) -> Result<String
             .map_err(|error: toml_edit::TomlError| ManifestRefusal::Unreadable {
                 detail: error.to_string(),
             })?;
-    take_out_wearing_table(&mut document, key)?;
-    take_out_dependencies(document.as_table_mut(), key);
+    let mut removals = Removals::default();
+    take_out_wearing_table(&mut document, key, &mut removals)?;
+    take_out_dependencies(document.as_table_mut(), key, &mut removals);
+    let excepted = removals.rehome(&mut document);
     let rewritten = document.to_string();
-    verify(
-        &Edit {
-            original: manifest,
-            rewritten: &rewritten,
-        },
-        key,
-    )?;
+    let edit = Edit {
+        original: manifest,
+        rewritten: &rewritten,
+    };
+    verify(&edit, key)?;
+    comments_kept(&edit, &excepted)?;
     Ok(rewritten)
 }
 
 /// Removes `package.metadata.skeletons.<key>` from `document`, and the
 /// `skeletons` and `metadata` tables above it when that leaves them empty.
-fn take_out_wearing_table(document: &mut DocumentMut, key: &str) -> Result<(), ManifestRefusal> {
+fn take_out_wearing_table(
+    document: &mut DocumentMut,
+    key: &str,
+    removals: &mut Removals,
+) -> Result<(), ManifestRefusal> {
     let absent = || ManifestRefusal::Defect {
         detail: "the manifest has no wearing table to take out".to_owned(),
     };
@@ -112,12 +221,12 @@ fn take_out_wearing_table(document: &mut DocumentMut, key: &str) -> Result<(), M
         .get_mut(skeletons)
         .and_then(Item::as_table_like_mut)
         .ok_or_else(absent)?;
-    skeletons_table.remove(key).ok_or_else(absent)?;
+    removals.take(skeletons_table, key).ok_or_else(absent)?;
     if skeletons_table.is_empty() {
-        metadata_table.remove(skeletons);
+        removals.take(metadata_table, skeletons);
     }
     if metadata_table.is_empty() {
-        package.remove(metadata);
+        removals.take(package, metadata);
     }
     Ok(())
 }
@@ -126,8 +235,8 @@ fn take_out_wearing_table(document: &mut DocumentMut, key: &str) -> Result<(), M
 /// every dependency table in a `[target.<name>]` table of it. A table goes
 /// only when taking the key out is what emptied it, so one that was empty
 /// before stays with its header and comments.
-fn take_out_dependencies(root: &mut dyn TableLike, key: &str) {
-    take_out_of_dependency_tables(root, key);
+fn take_out_dependencies(root: &mut dyn TableLike, key: &str, removals: &mut Removals) {
+    take_out_of_dependency_tables(root, key, removals);
     let Some(targets) = root.get_mut("target").and_then(Item::as_table_like_mut) else {
         return;
     };
@@ -135,34 +244,169 @@ fn take_out_dependencies(root: &mut dyn TableLike, key: &str) {
     let mut emptied_names = Vec::new();
     for (name, target) in targets.iter_mut() {
         if let Some(target) = target.as_table_like_mut() {
-            if take_out_of_dependency_tables(target, key) {
+            if take_out_of_dependency_tables(target, key, removals) {
                 emptied_names.push(name.to_owned());
             }
         }
     }
     for name in emptied_names {
-        targets.remove(&name);
+        removals.take(targets, &name);
     }
     if !was_empty && targets.is_empty() {
-        root.remove("target");
+        removals.take(root, "target");
     }
 }
 
 /// Removes `key` from each of `parent`'s dependency tables, and each one that
 /// holding the key made non-empty and removing it left empty. Returns whether
 /// `parent` itself went from holding something to holding nothing.
-fn take_out_of_dependency_tables(parent: &mut dyn TableLike, key: &str) -> bool {
+fn take_out_of_dependency_tables(
+    parent: &mut dyn TableLike,
+    key: &str,
+    removals: &mut Removals,
+) -> bool {
     let was_empty = parent.is_empty();
     for name in DEPENDENCY_TABLES {
         let emptied = parent
             .get_mut(name)
             .and_then(Item::as_table_like_mut)
-            .is_some_and(|table| table.remove(key).is_some() && table.is_empty());
+            .is_some_and(|table| removals.take(table, key).is_some() && table.is_empty());
         if emptied {
-            parent.remove(name);
+            removals.take(parent, name);
         }
     }
     !was_empty && parent.is_empty()
+}
+
+/// The tables `item` is: itself when it is a table, each of its entries when it
+/// is an array of tables, and none otherwise.
+fn tables_in(item: &mut Item) -> Vec<&mut Table> {
+    match item {
+        Item::Table(table) => vec![table],
+        Item::ArrayOfTables(tables) => tables.iter_mut().collect(),
+        Item::Value(_) | Item::None => Vec::new(),
+    }
+}
+
+/// Calls `visit` on each of `pending` and on every table and array-of-tables
+/// entry nested in them, parents before children, with an explicit stack.
+fn visit_tables(mut pending: Vec<&mut Table>, mut visit: impl FnMut(&mut Table)) {
+    while let Some(table) = pending.pop() {
+        visit(&mut *table);
+        for (_name, child) in table.iter_mut() {
+            pending.extend(tables_in(child));
+        }
+    }
+}
+
+/// The positions, in ascending order, of every table in `root` that has a
+/// header: implicit and dotted tables have none.
+fn header_positions(root: &Table) -> Vec<usize> {
+    let mut positions = Vec::new();
+    let mut pending = vec![root];
+    while let Some(table) = pending.pop() {
+        positions.extend(table.position());
+        for (_name, child) in table {
+            match child {
+                Item::Table(table) => pending.push(table),
+                Item::ArrayOfTables(tables) => pending.extend(tables.iter()),
+                Item::Value(_) | Item::None => {}
+            }
+        }
+    }
+    positions.sort_unstable();
+    positions
+}
+
+/// The text of `raw`, empty when there is none.
+fn raw_text(raw: Option<&RawString>) -> &str {
+    raw.and_then(RawString::as_str).unwrap_or_default()
+}
+
+/// The comment text a header carries: its prefix up to and including the last
+/// comment line it holds, blank lines before that kept and whatever follows
+/// dropped, then the comment after the header on its line as a line of its own.
+fn carried_text(prefix: &str, suffix: &str) -> String {
+    let mut end = 0;
+    let mut offset = 0;
+    for line in prefix.split_inclusive('\n') {
+        offset += line.len();
+        if line.trim_start().starts_with('#') {
+            end = offset;
+        }
+    }
+    let mut text = prefix[..end].to_owned();
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    let beside = suffix.trim();
+    if beside.starts_with('#') {
+        text.push_str(beside);
+        text.push('\n');
+    }
+    text
+}
+
+/// The text `item` prints as under `key`, in a document of its own.
+fn rendered(key: &Key, item: &Item) -> String {
+    let mut document = DocumentMut::new();
+    document.as_table_mut().insert_formatted(key, item.clone());
+    document.to_string()
+}
+
+/// The text of every decor `key` holds, one after another.
+fn key_decor_text(key: &Key) -> String {
+    let mut text = String::new();
+    for decor in [key.leaf_decor(), key.dotted_decor()] {
+        text.push_str(raw_text(decor.prefix()));
+        text.push('\n');
+        text.push_str(raw_text(decor.suffix()));
+        text.push('\n');
+    }
+    text
+}
+
+/// The lines of `text` that are comments: those whose trimmed text starts
+/// with `#`.
+fn comment_lines(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.lines()
+        .filter(|line| line.trim_start().starts_with('#'))
+        .map(str::to_owned)
+}
+
+/// Checks that every comment line of the edit's `original` is still a line of
+/// its `rewritten`, counted as a multiset, except the lines in `excepted`, which
+/// went with removed key lines. A line is a comment when its trimmed text starts
+/// with `#`. This is a check on the text, beside [`verify`]'s on the values,
+/// because the values cannot see a comment.
+fn comments_kept(edit: &Edit<'_>, excepted: &[String]) -> Result<(), ManifestRefusal> {
+    let mut allowed_gone: BTreeMap<&str, usize> = BTreeMap::new();
+    for line in excepted {
+        *allowed_gone.entry(line).or_default() += 1;
+    }
+    let mut present: BTreeMap<&str, usize> = BTreeMap::new();
+    for line in edit.rewritten.lines() {
+        *present.entry(line).or_default() += 1;
+    }
+    for line in edit.original.lines() {
+        if !line.trim_start().starts_with('#') {
+            continue;
+        }
+        let allowance = allowed_gone.get_mut(line).filter(|count| **count > 0);
+        if let Some(count) = allowance {
+            *count -= 1;
+            continue;
+        }
+        match present.get_mut(line).filter(|count| **count > 0) {
+            Some(count) => *count -= 1,
+            None => {
+                return Err(ManifestRefusal::Defect {
+                    detail: format!("the edited manifest lost the comment line {line:?}"),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Checks the edit's `rewritten` against its `original`, parsed by `toml`
@@ -250,7 +494,7 @@ fn take_out_of_dependency_values(table: &mut toml::Table, key: &str) -> bool {
 mod tests {
     use proptest::prelude::*;
 
-    use super::{Edit, ManifestRefusal, verify, without_wearing};
+    use super::{Edit, ManifestRefusal, comments_kept, verify, without_wearing};
     use crate::remove::names::WearingKey;
     use crate::wear::{Key, with_empty_wearing_table};
 
@@ -697,6 +941,441 @@ mod tests {
         ));
         assert!(matches!(
             verified(original, "[package]\nname = \"c\"\n[target]\n"),
+            Err(ManifestRefusal::Defect { .. })
+        ));
+    }
+
+    /// The manifest head every comment case builds on.
+    const HEAD: &str = "[package]\nname = \"c\"\n";
+
+    /// The wearing table for `tidy`, header only.
+    const WEARING: &str = "[package.metadata.skeletons.tidy]\n";
+
+    /// Runs `without_wearing` for `tidy` over each case (a label, a manifest and
+    /// the text it must come out as) and compares the whole text.
+    fn assert_removals(cases: &[(&str, String, String)]) {
+        for (what, manifest, left) in cases {
+            assert_eq!(
+                removed(manifest).as_deref(),
+                Ok(left.as_str()),
+                "{what}, from the manifest:\n{manifest}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_comments_around_the_wearing_tables_header_move_to_what_follows() {
+        // The header is the one thing removed, so a comment above it, one on
+        // its line and one directly below it (the next header's, since the
+        // table is empty) all stay; a comment above the table's own key line
+        // goes with that line. When nothing follows, the text moves to the end
+        // of the file, whether or not the file ended in a newline.
+        assert_removals(&[
+            (
+                "above",
+                format!(
+                    "{HEAD}\n# above\n{WEARING}\n[dev-dependencies]\nother = \"1\"\ntidy = \"1\"\n"
+                ),
+                format!("{HEAD}\n# above\n\n[dev-dependencies]\nother = \"1\"\n"),
+            ),
+            (
+                "beside",
+                format!(
+                    "{HEAD}\n[package.metadata.skeletons.tidy] # beside\n\n[dev-dependencies]\n\
+                    other = \"1\"\ntidy = \"1\"\n"
+                ),
+                format!("{HEAD}# beside\n\n[dev-dependencies]\nother = \"1\"\n"),
+            ),
+            (
+                "under, on an empty table",
+                format!(
+                    "{HEAD}\n{WEARING}# under\n\n[dev-dependencies]\nother = \"1\"\ntidy = \"1\"\n"
+                ),
+                format!("{HEAD}# under\n\n[dev-dependencies]\nother = \"1\"\n"),
+            ),
+            (
+                "under, on a key line the table holds",
+                format!(
+                    "{HEAD}\n{WEARING}# the key's\nsome = 1\n\n[dev-dependencies]\n\
+                    other = \"1\"\ntidy = \"1\"\n"
+                ),
+                format!("{HEAD}\n[dev-dependencies]\nother = \"1\"\n"),
+            ),
+            (
+                "last in the file",
+                format!("{HEAD}\n# above\n[package.metadata.skeletons.tidy] # beside\n"),
+                format!("{HEAD}\n# above\n# beside\n"),
+            ),
+            (
+                "last in a file with no final newline",
+                format!("{HEAD}\n# above\n[package.metadata.skeletons.tidy] # beside"),
+                format!("{HEAD}\n# above\n# beside\n"),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn the_comments_around_each_header_inside_the_wearing_table_move_to_what_follows() {
+        // The wearing table holds a sub-table and two entries of an array of
+        // tables, each with a comment above and one beside its header. Every
+        // one of them survives, in file order, ahead of the next header; the
+        // comment below a sub-table's header is that table's key line comment,
+        // which goes.
+        let manifest = format!(
+            "{HEAD}\n{WEARING}some = 1\n\n# about options\n\
+             [package.metadata.skeletons.tidy.options] # beside options\n# its key\na = 1\n\n\
+             # about items\n[[package.metadata.skeletons.tidy.items]] # beside items\nb = 2\n\n\
+             # about second\n[[package.metadata.skeletons.tidy.items]]\nb = 3\n\n\
+             [dev-dependencies]\nother = \"1\"\ntidy = \"1\"\n"
+        );
+        let left = format!(
+            "{HEAD}\n# about options\n# beside options\n\n# about items\n# beside items\n\n\
+             # about second\n\n[dev-dependencies]\nother = \"1\"\n"
+        );
+
+        assert_removals(&[("sub-tables and arrays of tables", manifest, left)]);
+    }
+
+    #[test]
+    fn the_comments_around_the_header_of_a_skeletons_or_metadata_table_that_goes_move_on() {
+        // A `[package.metadata.skeletons]` or `[package.metadata]` header the
+        // wearing leaves empty goes too, and its comments follow the same
+        // rule: above and beside it move to what follows.
+        assert_removals(&[
+            (
+                "skeletons, above and beside",
+                format!(
+                    "{HEAD}\n# above skeletons\n[package.metadata.skeletons] # beside skeletons\n\
+                     {WEARING}\n[dev-dependencies]\nother = \"1\"\ntidy = \"1\"\n"
+                ),
+                format!(
+                    "{HEAD}\n# above skeletons\n# beside skeletons\n\n[dev-dependencies]\n\
+                     other = \"1\"\n"
+                ),
+            ),
+            (
+                "skeletons, under",
+                format!(
+                    "{HEAD}\n[package.metadata.skeletons]\n# under skeletons\n{WEARING}\n\
+                     [dev-dependencies]\nother = \"1\"\ntidy = \"1\"\n"
+                ),
+                format!("{HEAD}# under skeletons\n\n[dev-dependencies]\nother = \"1\"\n"),
+            ),
+            (
+                "metadata, above and beside",
+                format!(
+                    "{HEAD}\n# above metadata\n[package.metadata] # beside metadata\n\
+                     {WEARING}\n[dev-dependencies]\nother = \"1\"\ntidy = \"1\"\n"
+                ),
+                format!(
+                    "{HEAD}\n# above metadata\n# beside metadata\n\n[dev-dependencies]\n\
+                     other = \"1\"\n"
+                ),
+            ),
+            (
+                "metadata, under",
+                format!(
+                    "{HEAD}\n[package.metadata]\n# under metadata\n{WEARING}\n\
+                     [dev-dependencies]\nother = \"1\"\ntidy = \"1\"\n"
+                ),
+                format!("{HEAD}# under metadata\n\n[dev-dependencies]\nother = \"1\"\n"),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn the_comments_around_a_dependency_written_as_a_table_of_its_own_move_on() {
+        // `[dev-dependencies.tidy]` is a header that goes while its parent
+        // stays: a comment above and one beside it move to the end of the file,
+        // and the comment below it is its key line's, which goes.
+        let manifest = format!(
+            "{HEAD}\n{WEARING}\n[dev-dependencies]\nother = \"1\"\n\n# above tidy\n\
+             [dev-dependencies.tidy] # beside tidy\n# under tidy\nversion = \"1\"\n"
+        );
+        let left =
+            format!("{HEAD}\n[dev-dependencies]\nother = \"1\"\n\n# above tidy\n# beside tidy\n");
+
+        assert_removals(&[("a table of its own", manifest, left)]);
+    }
+
+    #[test]
+    fn the_comments_around_a_dependency_table_the_removal_emptied_move_on() {
+        // `[dev-dependencies]` held only the key, so its header goes. A
+        // comment above it and one beside it move to what follows; the one
+        // below is the removed key line's, which goes. The same holds under a
+        // `[target.…]` table, which goes with it.
+        let tail = "\n[dependencies]\nx = \"1\"\n";
+        assert_removals(&[
+            (
+                "above",
+                format!("{HEAD}\n{WEARING}\n# above\n[dev-dependencies]\ntidy = \"1\"\n{tail}"),
+                format!("{HEAD}\n# above\n\n[dependencies]\nx = \"1\"\n"),
+            ),
+            (
+                "beside",
+                format!("{HEAD}\n{WEARING}\n[dev-dependencies] # beside\ntidy = \"1\"\n{tail}"),
+                format!("{HEAD}# beside\n\n[dependencies]\nx = \"1\"\n"),
+            ),
+            (
+                "under",
+                format!("{HEAD}\n{WEARING}\n[dev-dependencies]\n# under\ntidy = \"1\"\n{tail}"),
+                format!("{HEAD}\n[dependencies]\nx = \"1\"\n"),
+            ),
+            (
+                "above, under a target",
+                format!(
+                    "{HEAD}\n{WEARING}\n# above\n[target.'cfg(unix)'.dev-dependencies]\n\
+                     tidy = \"1\"\n{tail}"
+                ),
+                format!("{HEAD}\n# above\n\n[dependencies]\nx = \"1\"\n"),
+            ),
+            (
+                "beside, under a target",
+                format!(
+                    "{HEAD}\n{WEARING}\n[target.'cfg(unix)'.dev-dependencies] # beside\n\
+                     tidy = \"1\"\n{tail}"
+                ),
+                format!("{HEAD}# beside\n\n[dependencies]\nx = \"1\"\n"),
+            ),
+            (
+                "under, under a target",
+                format!(
+                    "{HEAD}\n{WEARING}\n[target.'cfg(unix)'.dev-dependencies]\n# under\n\
+                     tidy = \"1\"\n{tail}"
+                ),
+                format!("{HEAD}\n[dependencies]\nx = \"1\"\n"),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn the_comments_around_a_target_table_that_goes_with_its_dependencies_move_on_in_order() {
+        // `[target.'cfg(unix)']` and the dependency table below it both go,
+        // each with a comment above and one beside. They are adjacent headers,
+        // so their text lands together, the target's first, as in the file.
+        let manifest = format!(
+            "{HEAD}\n{WEARING}\n# above target\n[target.'cfg(unix)'] # beside target\n\
+             # above dependencies\n[target.'cfg(unix)'.dev-dependencies] # beside dependencies\n\
+             tidy = \"1\"\n\n[dependencies]\nx = \"1\"\n"
+        );
+        let left = format!(
+            "{HEAD}\n# above target\n# beside target\n# above dependencies\n\
+             # beside dependencies\n\n[dependencies]\nx = \"1\"\n"
+        );
+
+        assert_removals(&[("two adjacent removed headers", manifest, left)]);
+    }
+
+    #[test]
+    fn the_comments_around_the_target_table_that_goes_with_its_children_move_on() {
+        // `[target]` itself has a header here, and a comment above it, beside
+        // it and below it. The table under it goes, so `target` goes too, and
+        // all three stay: the one below is the next header's, not a key line's.
+        let manifest = format!(
+            "{HEAD}\n{WEARING}\n# above target\n[target] # beside target\n# under target\n\
+             [target.'cfg(unix)'.dev-dependencies]\ntidy = \"1\"\n\n[dependencies]\nx = \"1\"\n"
+        );
+        let left = format!(
+            "{HEAD}\n# above target\n# beside target\n# under target\n\n\
+             [dependencies]\nx = \"1\"\n"
+        );
+
+        assert_removals(&[("target", manifest, left)]);
+    }
+
+    #[test]
+    fn a_comment_under_an_empty_table_that_stays_is_kept_when_the_next_header_goes() {
+        // `[build-dependencies]` was empty already and stays; the comment under
+        // its header is the header after it, which the removal empties and
+        // takes out. The comment must outlive that header.
+        let manifest = format!(
+            "{HEAD}\n{WEARING}\n[build-dependencies]\n# was empty before\n\n\
+             [target.\"cfg(unix)\".dev-dependencies]\ntidy = \"1\"\n"
+        );
+        let left = format!("{HEAD}\n[build-dependencies]\n# was empty before\n");
+
+        assert_removals(&[("first shape", manifest, left)]);
+    }
+
+    #[test]
+    fn a_comment_that_reads_as_the_end_of_package_is_kept_when_the_wearing_after_it_goes() {
+        let manifest =
+            format!("{HEAD}publish = false\n# publish stays false until the audit\n{WEARING}");
+        let left = format!("{HEAD}publish = false\n# publish stays false until the audit\n");
+
+        assert_removals(&[("second shape", manifest, left)]);
+    }
+
+    #[test]
+    fn the_comments_above_and_beside_an_emptied_table_are_kept_and_the_one_inside_goes() {
+        // The comment above `[dev-dependencies]` and the one beside it stay;
+        // the one inside is the removed key line's and goes.
+        let manifest = format!(
+            "{HEAD}\n{WEARING}\n# My dev deps, keep this note\n[dev-dependencies] # trailing\n\
+             # inside note\ntidy = \"1\"\n"
+        );
+        let left = format!("{HEAD}\n# My dev deps, keep this note\n# trailing\n");
+
+        assert_removals(&[("third shape", manifest, left)]);
+    }
+
+    #[test]
+    fn a_comment_above_a_removed_key_line_goes_in_every_form_a_key_line_takes() {
+        // Where no header goes there is nothing to carry. The comment above the
+        // removed `tidy` line goes with it and the comment above the line that
+        // stays, `other`, stays, in a dependency table, an inline table, and
+        // dotted keys at the root.
+        assert_removals(&[
+            (
+                "a table",
+                format!(
+                    "{HEAD}\n{WEARING}\n[dev-dependencies]\n# about other\nother = \"1\"\n\
+                    # about tidy\ntidy = \"1\"\n"
+                ),
+                format!("{HEAD}\n[dev-dependencies]\n# about other\nother = \"1\"\n"),
+            ),
+            (
+                "an inline table",
+                format!(
+                    "dev-dependencies = {{ tidy = \"1\", other = \"1\" }} # about both\n{HEAD}\n\
+                    {WEARING}"
+                ),
+                format!("dev-dependencies = {{ other = \"1\" }} # about both\n{HEAD}"),
+            ),
+            (
+                "dotted keys",
+                format!(
+                    "# about other\ndev-dependencies.other = \"1\"\n# about tidy\n\
+                    dev-dependencies.tidy = \"1\"\n{HEAD}\n{WEARING}"
+                ),
+                format!("# about other\ndev-dependencies.other = \"1\"\n{HEAD}"),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn the_comments_that_go_with_a_removed_key_line_include_those_inside_its_value() {
+        // A comment inside a multi-line array, and a line that starts with `#`
+        // inside a multi-line string, are part of the removed key line, so the
+        // check must not count them as lost; and the only dotted key of its
+        // table takes the comment above it with it.
+        assert_removals(&[
+            (
+                "a multi-line array",
+                format!(
+                    "{HEAD}\n{WEARING}\n[dev-dependencies]\nother = \"1\"\ntidy = [\n\
+                      # inside\n  \"1\",\n]\n"
+                ),
+                format!("{HEAD}\n[dev-dependencies]\nother = \"1\"\n"),
+            ),
+            (
+                "a multi-line string",
+                format!(
+                    "{HEAD}\n{WEARING}\n[dev-dependencies]\nother = \"1\"\ntidy = \"\"\"\n\
+                    # not a comment\n\"\"\"\n"
+                ),
+                format!("{HEAD}\n[dev-dependencies]\nother = \"1\"\n"),
+            ),
+            (
+                "the only dotted key",
+                format!("# about tidy\ndev-dependencies.tidy = \"1\"\n{HEAD}\n{WEARING}"),
+                HEAD.to_owned(),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn the_comments_of_a_header_that_goes_land_on_an_array_of_tables_entry_that_stays() {
+        // The next header that stays may be an entry of an array of tables;
+        // the carried comment goes ahead of that entry's own.
+        let manifest =
+            format!("{HEAD}\n# about wearing\n{WEARING}\n# about bin\n[[bin]]\nname = \"x\"\n");
+        let left = format!("{HEAD}\n# about wearing\n\n# about bin\n[[bin]]\nname = \"x\"\n");
+
+        assert_removals(&[("an array of tables entry", manifest, left)]);
+    }
+
+    /// [`comments_kept`] over an edit of `original` into `rewritten`, where
+    /// the lines `excepted` go with removed key lines.
+    fn comments_checked(
+        original: &str,
+        rewritten: &str,
+        excepted: &[&str],
+    ) -> Result<(), ManifestRefusal> {
+        let excepted: Vec<String> = excepted.iter().map(|line| (*line).to_owned()).collect();
+        comments_kept(
+            &Edit {
+                original,
+                rewritten,
+            },
+            &excepted,
+        )
+    }
+
+    #[test]
+    fn the_comment_check_refuses_an_edit_that_loses_a_comment_and_names_the_line() {
+        // The original holds three comment lines. Each wrong rewrite loses one
+        // that is not excepted (or one of two equal lines), and the refusal
+        // must name it; the right rewrite loses only the excepted one.
+        let original = "# first\n[a]\n# second\nx = 1\n  # third\n[b]\n# first\n";
+
+        for (what, rewritten, lost) in [
+            (
+                "a first line lost",
+                "# first\n[a]\nx = 1\n  # third\n[b]\n# first\n",
+                "# second",
+            ),
+            (
+                "an indented line lost",
+                "# first\n[a]\n# second\nx = 1\n[b]\n# first\n",
+                "  # third",
+            ),
+            (
+                "one of two equal lines lost",
+                "# first\n[a]\n# second\nx = 1\n  # third\n[b]\n",
+                "# first",
+            ),
+        ] {
+            let Err(ManifestRefusal::Defect { detail }) =
+                comments_checked(original, rewritten, &[])
+            else {
+                panic!("{what}: an edit that loses a comment must be refused");
+            };
+            assert!(detail.contains(lost), "{what}: the detail was {detail:?}");
+        }
+        assert_eq!(
+            comments_checked(
+                original,
+                "# first\n[a]\nx = 1\n  # third\n[b]\n# first\n",
+                &["# second"]
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn the_comment_check_accepts_an_edit_that_loses_only_excepted_lines() {
+        // Positive control for the check above: nothing lost, comments moved
+        // within the file, and the excepted lines lost, are all accepted.
+        let original = "# a\n[x]\n# b\nk = 1\n# c\n";
+
+        assert_eq!(comments_checked(original, original, &[]), Ok(()));
+        assert_eq!(comments_checked(original, "# c\n# a\n# b\n", &[]), Ok(()));
+        assert_eq!(comments_checked(original, "# a\n", &["# b", "# c"]), Ok(()));
+    }
+
+    #[test]
+    fn the_comment_check_counts_an_excepted_line_once_for_each_time_it_was_removed() {
+        // `# same` is in the original twice. Excepting it once leaves one to
+        // keep, so losing both is refused and losing one is accepted.
+        let original = "# same\n[x]\n# same\nk = 1\n";
+
+        assert_eq!(
+            comments_checked(original, "# same\n[x]\n", &["# same"]),
+            Ok(())
+        );
+        assert!(matches!(
+            comments_checked(original, "[x]\n", &["# same"]),
             Err(ManifestRefusal::Defect { .. })
         ));
     }

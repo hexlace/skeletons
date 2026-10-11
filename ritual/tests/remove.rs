@@ -10,10 +10,11 @@
 mod support;
 
 use support::remove::{
-    MANIFEST, Worn, assert_check_wears_nothing, assert_printed, commit_line, keys_check_lists,
-    run_remove, stopped_wearing_line, wear,
+    MANIFEST, Worn, assert_check_wears_nothing, assert_printed, commit_line, dependency_under_key,
+    keys_check_lists, run_remove, stopped_wearing_line, sync_and_commit, wear,
 };
-use support::{Sandbox, TestOutcome, run_ritual};
+use support::wear::{COMMAND_LINE_PACKAGE, fixture_for_wearing};
+use support::{Sandbox, TestOutcome, run_ritual, wearing_table};
 
 #[test]
 fn removing_by_key_takes_out_the_dependency_and_the_table_and_the_files() -> TestOutcome {
@@ -112,6 +113,44 @@ fn removing_one_wearing_leaves_the_other_worn_and_the_manifest_as_it_was_between
         "check must list only the skeleton still worn"
     );
     Ok(())
+}
+
+#[test]
+fn the_comments_on_the_headers_the_removal_takes_out_stay_in_the_manifest() -> TestOutcome {
+    // The wearer wrote `passthrough-plain`'s dependency table and wearing
+    // table by hand, with a comment above each header and one beside the
+    // first. Removing the wearing empties `[dev-dependencies]` and takes both
+    // headers out, so the three comments must still be in the manifest, in
+    // file order, where the headers were; nothing else of theirs is.
+    let extra = format!(
+        "# the tools the checks need\n[dev-dependencies] # kept sorted\n{}\n\
+         # what the skeleton recorded\n{}",
+        dependency_under_key("passthrough-plain", "passthrough-plain")?,
+        wearing_table("passthrough-plain", ""),
+    );
+    let fixture = fixture_for_wearing(&extra)?;
+    sync_and_commit(&fixture)?;
+
+    let report = run_remove(&fixture, &["passthrough-plain"])?;
+
+    assert_printed(
+        &report,
+        &[
+            stopped_wearing_line("passthrough-plain", "passthrough-plain", MANIFEST),
+            "deleted plain.yml".to_owned(),
+            commit_line(MANIFEST, true, 1),
+        ],
+    );
+    assert_eq!(
+        String::from_utf8(fixture.read(MANIFEST)?)?,
+        format!(
+            "[package]\nname = \"{COMMAND_LINE_PACKAGE}\"\nversion = \"0.1.0\"\n\
+             edition = \"2021\"\npublish = false\n\n# the tools the checks need\n\
+             # kept sorted\n\n# what the skeleton recorded\n\n"
+        ),
+        "the comments must stay and the headers and the entry must go"
+    );
+    assert_check_wears_nothing(&fixture)
 }
 
 /// The exact text `skeletons remove --help`/`-h` must print, word for word.

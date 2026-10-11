@@ -1858,6 +1858,31 @@ value is refused
 `a_dependency_in_each_shape_of_dependency_table_is_removed_and_nothing_else`,
 and →
 `the_check_refuses_an_edit_that_leaves_something_out_puts_something_back_or_changes_a_value`).
+No comment the wearer wrote is lost, with one exception. A header that goes
+takes none of its comments with it: the comments above it and the one beside it
+are moved onto whatever follows it in the text, the next header that stays or,
+when none does, the end of the file, in the order the headers had. That holds
+for every header that goes, those inside the wearing table (sub-tables and
+arrays of tables) and a dependency written as a table of its own among them
+(`crates/skeletons-engine/src/remove/manifest.rs` →
+`the_comments_around_the_wearing_tables_header_move_to_what_follows`, →
+`the_comments_around_each_header_inside_the_wearing_table_move_to_what_follows`,
+→ `the_comments_around_a_dependency_table_the_removal_emptied_move_on`, and →
+`the_comments_around_a_target_table_that_goes_with_its_dependencies_move_on_in_order`).
+The exception is a comment attached to a key line that is removed: the comment
+lines directly above the `key = value` line, the one after its value on its line,
+and the same for every key line inside a table that goes and inside a
+multi-line value. Those go with the line
+(`crates/skeletons-engine/src/remove/manifest.rs` →
+`a_comment_on_the_removed_entry_goes_with_it_and_other_comments_stay`, →
+`the_comments_that_go_with_a_removed_key_line_include_those_inside_its_value`).
+A check on the text, run beside the comparison of values, refuses the edit and
+names the line when a comment line of the original (one whose trimmed text
+starts with `#`) is no longer a line of the result, counted line for line,
+unless it is one of those that went with a key line
+(`crates/skeletons-engine/src/remove/manifest.rs` →
+`the_comment_check_refuses_an_edit_that_loses_a_comment_and_names_the_line`, →
+`the_comment_check_accepts_an_edit_that_loses_only_excepted_lines`).
 This rebuilds the part of `cargo remove` that finds the tables a dependency can
 be declared in, and says so. It does not rebuild its clean-up of `[features]`: a
 feature that still names the key makes Cargo refuse what is left, and that is

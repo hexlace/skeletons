@@ -1266,11 +1266,21 @@ directory above it. The workspace root is never removed.
    its header, as does a `[target.…]` table, or `target`, that it leaves empty,
    and `[package.metadata.skeletons.<key>]` comes out whatever it holds, along
    with a `metadata` or `skeletons` table that held nothing else. A table that
-   was already empty before the removal stays, with its comments. A comment
-   attached to a removed entry goes with it, and everything else stays. The
-   result is compared against an independent parse of the manifest before it is
-   kept: it must be the original less those entries. `cargo remove` is not used
-   (see the limits at the end of this section).
+   was already empty before the removal stays, with its comments. No comment
+   the wearer wrote is lost, with one exception. A header that goes takes none
+   of its comments with it: the comments above it and the one beside it are
+   moved onto whatever follows it, the next header that stays or, when none
+   does, the end of the file. That holds for every header that goes, those of
+   tables and arrays of tables inside the wearing table and of a dependency
+   written as a table of its own among them. The exception is a comment attached
+   to a key line that is removed: the comment lines directly above the
+   `key = value` line, the one after its value on its line, and the same for
+   every key line inside a table that goes and inside a multi-line value. Those
+   go with the line. The result is compared against an independent parse of the
+   manifest before it is kept: it must be the original less those entries. A
+   check on the text, beside it, refuses the edit when a comment line of the
+   original is no longer in the result and is not one that went with a key
+   line. `cargo remove` is not used (see the limits at the end of this section).
 2. `Cargo.lock`, brought current by running `cargo metadata` without `--locked`,
    which drops the package entries only the removed dependency needed and
    rewrites the file in Cargo's own form. It makes no index update when the

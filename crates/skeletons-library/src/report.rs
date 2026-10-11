@@ -274,3 +274,267 @@ fn hand_to_skeletons(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::fs;
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    use std::path::Path;
+    use std::process::Command;
+
+    use tempfile::TempDir;
+
+    use super::Report;
+    use crate::files::Files;
+    use crate::refusal::{Refusal, RefusalKind};
+    use crate::skeletons_named::SkeletonsNamed;
+
+    type TestOutcome = Result<(), Box<dyn Error>>;
+
+    /// A member of the workspace a test writes: its name, the dependencies it
+    /// declares as `(key, package)`, and the keys it gives a wearing table.
+    struct Member<'a> {
+        name: &'a str,
+        dependencies: &'a [(&'a str, &'a str)],
+        wearing_tables: &'a [&'a str],
+    }
+
+    fn hash_of(refusal: &Refusal) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        refusal.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn write(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, contents)?;
+        Ok(())
+    }
+
+    /// Writes a crate `name` beside the project, with a library and, when
+    /// `skeleton` is true, the metadata and one file that make it a skeleton.
+    fn write_crate(base: &Path, name: &str, skeleton: bool) -> Result<(), Box<dyn Error>> {
+        let directory = base.join("skeletons").join(name);
+        let metadata = if skeleton {
+            "\n[package.metadata.skeletons]\n"
+        } else {
+            ""
+        };
+        write(
+            &directory.join("Cargo.toml"),
+            &format!(
+                "[package]\nname = \"{name}\"\nversion = \"1.0.0\"\nedition = \"2021\"\n\
+                 publish = false\n{metadata}"
+            ),
+        )?;
+        write(&directory.join("src/lib.rs"), "")?;
+        if skeleton {
+            write(&directory.join("files/notes/house.txt"), "house rules\n")?;
+        }
+        Ok(())
+    }
+
+    /// Writes a workspace of `members` beside two crates, `house-rules`, a
+    /// skeleton, and `plain-one` and `plain-two`, which are not, makes its
+    /// lockfile offline with a `CARGO_HOME` and `HOME` of the child's own, and
+    /// reads it with [`crate::check`]. The directory is returned beside the
+    /// report so that it outlives the read.
+    fn checked(members: &[Member<'_>]) -> Result<(TempDir, Report), Box<dyn Error>> {
+        let base = tempfile::Builder::new()
+            .prefix("skeletons-library-report-")
+            .tempdir()?;
+        for (name, skeleton) in [
+            ("house-rules", true),
+            ("plain-one", false),
+            ("plain-two", false),
+        ] {
+            write_crate(base.path(), name, skeleton)?;
+        }
+        let project = base.path().join("project");
+        let names: Vec<String> = members
+            .iter()
+            .map(|member| format!("\"{}\"", member.name))
+            .collect();
+        write(
+            &project.join("Cargo.toml"),
+            &format!(
+                "[workspace]\nmembers = [{}]\nresolver = \"3\"\n",
+                names.join(", ")
+            ),
+        )?;
+        for member in members {
+            let dependencies: Vec<String> = member
+                .dependencies
+                .iter()
+                .map(|(key, package)| {
+                    let directory = base.path().join("skeletons").join(package);
+                    format!(
+                        "{key} = {{ package = \"{package}\", path = \"{}\" }}\n",
+                        directory.display()
+                    )
+                })
+                .collect();
+            let tables: Vec<String> = member
+                .wearing_tables
+                .iter()
+                .map(|key| format!("\n[package.metadata.skeletons.{key}]\n"))
+                .collect();
+            let manifest = format!(
+                "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\
+                 publish = false\n\n[dependencies]\n{}{}",
+                member.name,
+                dependencies.concat(),
+                tables.concat()
+            );
+            write(&project.join(member.name).join("Cargo.toml"), &manifest)?;
+            write(&project.join(member.name).join("src/lib.rs"), "")?;
+        }
+        let output = Command::new(env!("CARGO"))
+            .current_dir(&project)
+            .env("CARGO_HOME", base.path().join("cargo-home"))
+            .env("HOME", base.path().join("home"))
+            .env_remove("CARGO_TARGET_DIR")
+            .args(["generate-lockfile", "--offline"])
+            .output()?;
+        if !output.status.success() {
+            return Err(format!(
+                "cargo failed ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into());
+        }
+        let report = crate::check(&project)?;
+        Ok((base, report))
+    }
+
+    #[test]
+    fn an_overlap_is_one_value_in_every_skeleton_and_in_the_report() -> TestOutcome {
+        // Given `house-rules` worn by two members, the one path it claims
+        // collides with itself and is refused as one `Overlap` naming both
+        // wearings. That refusal is handed to both worn skeletons and is also
+        // in the report's own list. All three must be the same value, so that
+        // handing a refusal on copies a pointer and never its wearings and
+        // paths. Each skeleton's list is read through `files()`, as a caller
+        // does.
+        let (_base, report) = checked(&[
+            Member {
+                name: "tools",
+                dependencies: &[("rules", "house-rules")],
+                wearing_tables: &["rules"],
+            },
+            Member {
+                name: "more-tools",
+                dependencies: &[("rules", "house-rules")],
+                wearing_tables: &["rules"],
+            },
+        ])?;
+
+        let [overlap] = report.refusals() else {
+            return Err(format!("expected one refusal, found {:?}", report.refusals()).into());
+        };
+        assert_eq!(overlap.kind(), RefusalKind::Overlap);
+        assert_eq!(overlap.wearings().len(), 2, "{overlap:?}");
+        assert_eq!(report.skeletons().len(), 2, "{:?}", report.skeletons());
+        for skeleton in report.skeletons() {
+            let Files::Refused { refusals, .. } = skeleton.files() else {
+                return Err(format!("{} was not refused", skeleton.manifest().display()).into());
+            };
+            let [held] = refusals else {
+                return Err(format!("expected one refusal, found {refusals:?}").into());
+            };
+            assert!(
+                held.shares_data_with(overlap),
+                "{} holds a copy of the report's refusal",
+                skeleton.manifest().display()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_refusal_naming_no_package_is_one_value_in_every_packages_lookup() -> TestOutcome {
+        // Given two packages that are not skeletons, each declared and given a
+        // wearing table, and a third wearing table under a key no dependency
+        // has, the report holds three refusals: two that name a package and
+        // one, `NamesNoDependency`, that names none. Asking for either package
+        // is `Undetermined` with its own refusal and then the one naming none.
+        // That last refusal must be the very value in the report's list in
+        // both lookups, and each package's own refusal must be the report's
+        // too.
+        let (_base, report) = checked(&[Member {
+            name: "tools",
+            dependencies: &[("one", "plain-one"), ("two", "plain-two")],
+            wearing_tables: &["one", "two", "rulez"],
+        }])?;
+
+        let unnamed: Vec<&Refusal> = report
+            .refusals()
+            .iter()
+            .filter(|refusal| refusal.kind() == RefusalKind::NamesNoDependency)
+            .collect();
+        let [unnamed] = unnamed.as_slice() else {
+            return Err(format!("expected one unnamed refusal in {:?}", report.refusals()).into());
+        };
+        for package in ["plain-one", "plain-two"] {
+            let SkeletonsNamed::Undetermined(refusals) = report.skeletons_named(package) else {
+                return Err(format!("{package} was not Undetermined").into());
+            };
+            let [own, shared] = refusals else {
+                return Err(format!("{package}: expected two refusals, found {refusals:?}").into());
+            };
+            assert_eq!(own.kind(), RefusalKind::NotASkeleton, "{package}");
+            assert!(
+                report
+                    .refusals()
+                    .iter()
+                    .any(|refusal| refusal.shares_data_with(own)),
+                "{package}: its own refusal is a copy of the report's"
+            );
+            assert!(
+                shared.shares_data_with(unnamed),
+                "{package}: the refusal naming no package is a copy of the report's"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn refusals_are_equal_by_value_and_not_by_the_data_they_share() -> TestOutcome {
+        // Given the same workspace read twice, each report holds an `Overlap`
+        // built from its own survey. A refusal equals its clone, which shares
+        // its data, and equals the one in the other report, which does not:
+        // equality and hashing follow the kind, wearings and paths.
+        let members = [
+            Member {
+                name: "tools",
+                dependencies: &[("rules", "house-rules")],
+                wearing_tables: &["rules"],
+            },
+            Member {
+                name: "more-tools",
+                dependencies: &[("rules", "house-rules")],
+                wearing_tables: &["rules"],
+            },
+        ];
+        let (_first_base, first) = checked(&members)?;
+        let (_second_base, second) = checked(&members)?;
+        let (Some(original), Some(other)) = (first.refusals().first(), second.refusals().first())
+        else {
+            return Err("a report held no refusal".into());
+        };
+
+        let copy = original.clone();
+
+        assert!(copy.shares_data_with(original));
+        assert_eq!(&copy, original);
+        assert_eq!(hash_of(&copy), hash_of(original));
+        assert!(!other.shares_data_with(original));
+        assert_eq!(other, original);
+        assert_eq!(hash_of(other), hash_of(original));
+        Ok(())
+    }
+}

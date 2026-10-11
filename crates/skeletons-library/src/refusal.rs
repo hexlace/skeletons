@@ -1,6 +1,8 @@
 //! Something the check could not determine, and what it concerns.
 
+use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use skeletons_engine::{RefusalRecord, RefusedWearing};
 
@@ -176,9 +178,17 @@ impl Wearing {
 ///
 /// A refusal is a finding, not a failure of the call: every other wearing in
 /// the workspace is still reported.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Refusal {
+    data: Arc<RefusalData>,
+}
+
+/// What a [`Refusal`] holds, built once. A refusal is handed to every worn
+/// skeleton it names and to every package it could concern, and each of those
+/// holds the same data rather than a copy of its wearings and paths.
+#[derive(PartialEq, Eq, Hash)]
+struct RefusalData {
     kind: RefusalKind,
     wearings: Vec<Wearing>,
     paths: Vec<PathBuf>,
@@ -186,29 +196,38 @@ pub struct Refusal {
 
 impl Refusal {
     pub(crate) fn from_record(record: &RefusalRecord) -> Self {
-        let refusal = Self {
+        let data = RefusalData {
             kind: RefusalKind::from(record.kind),
             wearings: record.wearings.iter().map(Wearing::from_engine).collect(),
             paths: record.paths.iter().map(PathBuf::from).collect(),
         };
         assert!(
-            !refusal.wearings.is_empty(),
+            !data.wearings.is_empty(),
             "every refusal concerns at least one wearing"
         );
-        refusal
+        Self {
+            data: Arc::new(data),
+        }
+    }
+
+    /// Whether `other` holds the very data this refusal holds, which two
+    /// refusals that merely compare equal do not.
+    #[cfg(test)]
+    pub(crate) fn shares_data_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.data, &other.data)
     }
 
     /// What kind of refusal this is.
     #[must_use]
     pub fn kind(&self) -> RefusalKind {
-        self.kind
+        self.data.kind
     }
 
     /// The wearings this refusal concerns: one, or every claimant for an
     /// overlap. Never empty.
     #[must_use]
     pub fn wearings(&self) -> &[Wearing] {
-        &self.wearings
+        &self.data.wearings
     }
 
     /// The paths a skeleton renders that this refusal concerns, relative to the
@@ -219,20 +238,33 @@ impl Refusal {
     /// never became a claimed file.
     #[must_use]
     pub fn paths(&self) -> &[PathBuf] {
-        &self.paths
+        &self.data.paths
     }
 
     /// The package named by the one wearing of a refusal about a wearing that
     /// resolved to no skeleton, or `None` when that wearing names none.
     pub(crate) fn package_named(&self) -> Option<&str> {
         assert!(
-            self.kind.concerns_unidentified_wearing(),
+            self.data.kind.concerns_unidentified_wearing(),
             "only a refusal about an unidentified wearing has exactly one wearing"
         );
-        let [wearing] = self.wearings.as_slice() else {
+        let [wearing] = self.data.wearings.as_slice() else {
             unreachable!("a refusal about an unidentified wearing concerns one wearing")
         };
         wearing.package()
+    }
+}
+
+impl fmt::Debug for Refusal {
+    // Written out so that the shared data is not a level of its own in what
+    // `{:?}` and `{:#?}` print: a refusal shows its kind, wearings and paths.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Refusal")
+            .field("kind", &self.data.kind)
+            .field("wearings", &self.data.wearings)
+            .field("paths", &self.data.paths)
+            .finish()
     }
 }
 

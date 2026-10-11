@@ -781,6 +781,39 @@ fn bare_leaves_a_claimed_lockfile_that_still_matches_what_the_skeleton_renders()
 }
 
 #[test]
+fn a_claimed_file_the_project_needs_to_build_is_deleted_like_any_other() -> TestOutcome {
+    // The skeleton claims `src/lib.rs`, the source the command line's package
+    // builds from, and the work tree already holds exactly what it renders.
+    // Bare `remove` deletes it and succeeds: nothing reads the workspace after
+    // the deletes, so nothing refuses or reports what the project is left
+    // without. The directory it emptied goes, and git shows the deletion
+    // beside the manifest and the lockfile.
+    let fixture = fixture_wearing_a_skeleton_that_claims(&[("src/lib.rs", "# replaced below\n")])?;
+    make_the_skeleton_render_what_is_there(&fixture, "src/lib.rs")?;
+
+    let report = run_remove(&fixture, &[CLAIMING])?;
+
+    assert_printed(
+        &report,
+        &[
+            stopped_wearing_line(CLAIMING, CLAIMING, MANIFEST),
+            "deleted src/lib.rs".to_owned(),
+            commit_line(MANIFEST, true, 1),
+        ],
+    );
+    assert!(
+        !fs::exists(fixture.root().join("src"))?,
+        "the file and the directory it emptied must be gone"
+    );
+    assert_eq!(
+        porcelain(&fixture)?,
+        ["M Cargo.lock", "M Cargo.toml", "D src/lib.rs"],
+        "git must see the manifest, the lockfile and the deletion, and nothing else"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_claim_that_spells_the_lockfile_in_another_case_is_refused_rather_than_deleted() -> TestOutcome
 {
     // The skeleton claims `cargo.lock`, and the work tree lists `Cargo.lock`.

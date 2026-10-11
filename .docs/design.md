@@ -1891,7 +1891,9 @@ does not edit would show (`crates/skeletons-engine/src/remove/confirm.rs` →
 `a_read_back_that_still_finds_a_dependency_says_to_take_it_out_by_hand`).
 Nothing compiles the project, and nothing reads the workspace after the files
 are deleted. Removing a skeleton deletes the files it claims, including one the
-project needs to build, and git has them.
+project needs to build, and git has them
+(`ritual/tests/remove_files.rs` →
+`a_claimed_file_the_project_needs_to_build_is_deleted_like_any_other`).
 
 **Everything the workspace and the survey already answer is refused before
 anything is written.** The workspace is read `--locked` and only `--locked`

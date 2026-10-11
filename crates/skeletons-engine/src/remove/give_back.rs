@@ -5,10 +5,11 @@
 //! rules hide, a file the index flags so that git does not read it from the
 //! work tree, and a file under a content filter that does not write back what
 //! it was handed all report clean while holding bytes no commit has. So each
-//! file about to be deleted is put to the proof `sync` requires before it
+//! file in the work tree is put to the proof `sync` requires before it
 //! overwrites one ([`prove_held`]): the file holds exactly what git would check
-//! out for its index entry. A file that passes is deleted; one that does not is
-//! left where it is, and the reason is the one the success line names.
+//! out for its index entry. A file that passes is one the run may delete; one
+//! that does not is left where it is, and the reason is the one the success
+//! line names.
 
 use super::files::{Fate, LeftBecause};
 use crate::claim::ClaimPath;

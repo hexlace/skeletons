@@ -19,8 +19,8 @@ use std::fs;
 
 use support::remove::{
     Entry, HOLDING_DIRECTORY, MANIFEST, Worn, assert_check_wears_nothing, assert_printed,
-    assert_refused, commit_line, kept_summary, mark, no_dependency_line, porcelain, run_remove,
-    stopped_wearing_line, took_out_line, tree_state,
+    assert_refused, commit_line, kept_other_summary, kept_summary, mark, no_dependency_line,
+    porcelain, run_remove, stopped_wearing_line, took_out_line, tree_state,
 };
 use support::wear::{commit_everything, fixture_for_wearing, git_step};
 use support::{Fixture, TestOutcome, json, path_dependency_on_test_skeleton, wearing_table};
@@ -410,6 +410,173 @@ fn a_claimed_file_marked_skip_worktree_is_left_and_named() -> TestOutcome {
 #[test]
 fn a_claimed_file_marked_assume_unchanged_is_left_and_named() -> TestOutcome {
     assert_a_hidden_file_is_left("--assume-unchanged", "assume-unchanged")
+}
+
+/// The line for `a/b/deep.yml` when it is left in place for `why`.
+fn left_deep_line(why: &str) -> String {
+    format!(
+        "left a/b/deep.yml in place: {why}, so git could not give it back; delete it by hand if \
+         it should go"
+    )
+}
+
+#[test]
+fn an_ignored_claimed_file_that_has_changed_is_left_and_does_not_make_the_others_stay()
+-> TestOutcome {
+    // `a/b/deep.yml` is taken out of git's index and ignored, then edited on
+    // disk, so it differs from the render and git reports nothing. The other
+    // two are tracked and match. Git could not give the edited file back, so
+    // it is not a change to the project that bare `remove` would protect: the
+    // two tracked files are deleted, the ignored one stays with its edit, and
+    // it is named with its reason.
+    let worn = Worn::synced(NESTED, None)?;
+    git_step(
+        &worn.fixture,
+        &["rm", "--cached", "--quiet", "--", "a/b/deep.yml"],
+    )?;
+    support::git::ignore(worn.fixture.root(), "a/b/deep.yml")?;
+    commit_everything(&worn.fixture, "fixture: ignore a claimed file")?;
+    worn.fixture.write("a/b/deep.yml", b"nested: mine\n")?;
+    assert_eq!(
+        porcelain(&worn.fixture)?,
+        Vec::<String>::new(),
+        "precondition: git reports nothing, so the edit to the ignored file is no dirt"
+    );
+
+    let report = run_remove(&worn.fixture, &[NESTED])?;
+
+    assert_printed(
+        &report,
+        &[
+            stopped_nested(),
+            "deleted .github/dependabot.yml".to_owned(),
+            left_deep_line("git does not track it"),
+            "deleted root.yml".to_owned(),
+            commit_line(MANIFEST, true, 2),
+        ],
+    );
+    assert_eq!(
+        worn.fixture.read("a/b/deep.yml")?,
+        b"nested: mine\n",
+        "the ignored file must stay with the edit it holds"
+    );
+    for gone in [".github/dependabot.yml", "root.yml"] {
+        assert!(!fs::exists(worn.fixture.root().join(gone))?, "{gone}");
+    }
+    assert_check_wears_nothing(&worn.fixture)
+}
+
+#[test]
+fn a_skip_worktree_claimed_file_that_has_changed_is_left_and_does_not_make_the_others_stay()
+-> TestOutcome {
+    // `a/b/deep.yml` is marked skip-worktree and then edited locally, which
+    // git does not report. Git would not read the edit, so it could not give
+    // the file back: it is left, named, and the two matching tracked files are
+    // deleted.
+    let worn = Worn::synced(NESTED, None)?;
+    mark(&worn.fixture, "a/b/deep.yml", "--skip-worktree")?;
+    worn.fixture.write("a/b/deep.yml", b"nested: mine\n")?;
+    assert_eq!(
+        porcelain(&worn.fixture)?,
+        Vec::<String>::new(),
+        "precondition: git reports nothing for the marked file"
+    );
+
+    let report = run_remove(&worn.fixture, &[NESTED])?;
+
+    assert_printed(
+        &report,
+        &[
+            stopped_nested(),
+            "deleted .github/dependabot.yml".to_owned(),
+            left_deep_line("it is marked skip-worktree in git's index"),
+            "deleted root.yml".to_owned(),
+            commit_line(MANIFEST, true, 2),
+        ],
+    );
+    assert_eq!(
+        worn.fixture.read("a/b/deep.yml")?,
+        b"nested: mine\n",
+        "the marked file must stay with the edit it holds"
+    );
+    assert_check_wears_nothing(&worn.fixture)
+}
+
+#[test]
+fn a_tracked_file_that_changed_keeps_the_others_and_the_file_git_could_not_give_back_is_named()
+-> TestOutcome {
+    // `a/b/deep.yml` is ignored and edited (git could not give it back),
+    // `root.yml` is tracked and has a committed edit, and
+    // `.github/dependabot.yml` matches. The tracked edit is the project's own,
+    // so the two files git can give back are kept and nothing is deleted; the
+    // ignored file is still named with its reason, in its place in path order,
+    // and the summary counts only the files kept for the edit.
+    let worn = Worn::synced(NESTED, None)?;
+    git_step(
+        &worn.fixture,
+        &["rm", "--cached", "--quiet", "--", "a/b/deep.yml"],
+    )?;
+    support::git::ignore(worn.fixture.root(), "a/b/deep.yml")?;
+    commit_everything(&worn.fixture, "fixture: ignore a claimed file")?;
+    worn.fixture.write("a/b/deep.yml", b"nested: mine\n")?;
+    change_and_commit(&worn.fixture, "root.yml", b"root-file: no\n")?;
+    let before = tree_state(worn.fixture.root())?;
+
+    let report = run_remove(&worn.fixture, &[NESTED])?;
+
+    assert_printed(
+        &report,
+        &[
+            stopped_nested(),
+            "kept .github/dependabot.yml, which matches the skeleton".to_owned(),
+            left_deep_line("git does not track it"),
+            "kept root.yml, which has changed".to_owned(),
+            kept_other_summary(2, 1),
+            commit_line(MANIFEST, true, 0),
+        ],
+    );
+    assert_only_the_manifest_and_lockfile_differ(&worn.fixture, &before)?;
+    assert_check_wears_nothing(&worn.fixture)
+}
+
+#[test]
+fn when_git_could_not_give_back_any_present_file_each_is_named_and_nothing_else_is_said()
+-> TestOutcome {
+    // All three claimed files are ignored and edited, so there is nothing for
+    // the rule to keep or delete: the three `left` lines stand alone, with no
+    // summary, and the last line names no deleted file.
+    let worn = Worn::synced(NESTED, None)?;
+    let paths = [".github/dependabot.yml", "a/b/deep.yml", "root.yml"];
+    for path in paths {
+        git_step(&worn.fixture, &["rm", "--cached", "--quiet", "--", path])?;
+        support::git::ignore(worn.fixture.root(), path)?;
+    }
+    commit_everything(&worn.fixture, "fixture: ignore every claimed file")?;
+    for path in paths {
+        worn.fixture.write(path, b"mine: yes\n")?;
+    }
+    let before = tree_state(worn.fixture.root())?;
+
+    let report = run_remove(&worn.fixture, &[NESTED])?;
+
+    let left = |path: &str| {
+        format!(
+            "left {path} in place: git does not track it, so git could not give it back; delete \
+             it by hand if it should go"
+        )
+    };
+    assert_printed(
+        &report,
+        &[
+            stopped_nested(),
+            left(".github/dependabot.yml"),
+            left("a/b/deep.yml"),
+            left("root.yml"),
+            commit_line(MANIFEST, true, 0),
+        ],
+    );
+    assert_only_the_manifest_and_lockfile_differ(&worn.fixture, &before)?;
+    assert_check_wears_nothing(&worn.fixture)
 }
 
 /// A workspace wearing `nested-dotfiles` with an option the skeleton does not

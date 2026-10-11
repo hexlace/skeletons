@@ -164,6 +164,22 @@ pub(crate) fn kept_summary(total: usize, changed: usize) -> String {
     )
 }
 
+/// The summary line after the lines of a bare `remove` that kept the files it
+/// could delete and left at least one more: `kept` files kept, `changed` of
+/// them changed.
+pub(crate) fn kept_other_summary(kept: usize, changed: usize) -> String {
+    if kept == 1 {
+        return "kept its other file, because it has changed from what the skeleton renders: it \
+                is the project's own now, to keep or to delete by hand"
+            .to_owned();
+    }
+    let verb = if changed == 1 { "has" } else { "have" };
+    format!(
+        "kept its other {kept} files, because {changed} {verb} changed from what the skeleton \
+         renders: they are the project's own now, to keep or to delete by hand"
+    )
+}
+
 /// Asserts `remove` succeeded and printed exactly `lines` on stdout.
 pub(crate) fn assert_printed(report: &Report, lines: &[String]) {
     assert_eq!(

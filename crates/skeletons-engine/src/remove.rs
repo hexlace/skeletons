@@ -16,15 +16,16 @@
 //!   words are wrong for an empty one;
 //! - [`resolve`] reads the name the wearer typed as a key or a crate, and
 //!   finds the one wearing it means;
-//! - [`files`] decides from the typed flag and the survey which files go, are
-//!   kept or are left, and which cannot be known at all;
+//! - [`files`] decides from the typed flag and the survey which files git is
+//!   asked about, then from git's answers which go, are kept or are left, and
+//!   which cannot be known at all;
 //! - [`manifest`] edits the manifest's text and checks the edit against an
 //!   independent parse;
 //! - [`refusal`] and [`message`] are the one place each refusal, failure and
 //!   success line is worded;
 //! - [`confirm`] reads the workspace back and checks that the wearing is gone;
 //! - [`give_back`] asks git whether it could give each file back, which
-//!   settles the files [`files`] plans to delete;
+//!   settles the files [`files`] plans to put to git;
 //! - [`deletion`] moves those files out of the work tree where a failure can
 //!   move them back, and deletes them for good once the run has succeeded.
 //!
@@ -175,9 +176,13 @@ impl Prepared {
 /// and every other flag refuses it. The work tree is asked after those,
 /// so a request that is wrong is refused as wrong whether or not the tree is
 /// clean, and then the manifest and lockfile are proven ones git can hand back
-/// ([`hand_back::check`]) and can be written in place ([`writable::check`]),
-/// each file to be deleted is asked of git ([`give_back::fate`]), and the
-/// holding path is shown to be free when any file is to be deleted.
+/// ([`hand_back::check`]) and can be written in place ([`writable::check`]).
+/// Every file that is in the work tree is then asked of git
+/// ([`give_back::fate`]), and only with git's answers is it decided whether a
+/// bare run keeps the files that changed or deletes them: a file git could not
+/// give back is left whatever the flag and counts for nothing in that
+/// decision. The holding path is shown to be free when any file is to be
+/// deleted.
 fn prepare(
     command_line: &CommandLine,
     name: &str,
@@ -234,8 +239,8 @@ fn prepare(
     // the person's own uncommitted edits would otherwise be mixed into what
     // `remove` wrote or deleted. A clean tree says nothing about a file git is
     // told not to read, so the two files are then asked of git's index, and
-    // each file to be deleted is put to the proof that git holds exactly what
-    // is there.
+    // each file in the work tree is put to the proof that git holds exactly
+    // what is there, before it is decided which of them are kept.
     let (work_tree, clean) = work_tree::open_clean(&prospect.workspace.root, WRITING)?;
     let lockfile = hand_back::check(&work_tree, &clean, &command_line_crate, WRITING)?;
     writable::check(&command_line_crate, WRITING)?;

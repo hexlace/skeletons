@@ -1179,11 +1179,12 @@ which exits with status 2 before `remove` looks at the project.
 
 - **Neither flag** deletes the files when that is plainly what was asked and
   never guesses when it is not. If every claimed file that is in the work tree
-  still matches what the skeleton renders, they are the skeleton's files,
-  unchanged, and stopping wearing it means they go: all of them are deleted. If
-  any one has changed, `remove` deletes none of them, not even the ones that
-  match, and says which have changed and where all of them are, so the project
-  can keep them as its own or clear them out by hand.
+  and that git could give back (see below) still matches what the skeleton
+  renders, they are the skeleton's files, unchanged, and stopping wearing it
+  means they go: all of them are deleted. If any one has changed, `remove`
+  deletes none of them, not even the ones that match, and says which have
+  changed and where all of them are, so the project can keep them as its own or
+  clear them out by hand.
 - **`--delete-files`** deletes every claimed file that is in the work tree,
   changed or not. It is for a project that wore a large skeleton, edited a few
   of its files and now wants all of it gone.
@@ -1198,12 +1199,16 @@ Whatever flag deletes a file, it deletes it only if git could give it back. A
 clean work tree does not say that: an untracked file git ignores, a file git is told
 not to read from the work tree, and a file under a content filter that does not
 write back what it was handed all read clean while holding bytes no commit has.
-So each file about to be deleted is put to the proof `sync` requires before it
-overwrites one (see [Sync](#sync)): the file holds exactly what git would check
-out for its index entry. A file that passes is deleted. One that does not is
-**left in place and named, with the reason**, and the wearing is still removed.
-A file left like this does not count as changed, so it does not make a bare
-`remove` keep the others. The reasons are:
+So `remove` first puts every claimed file that is in the work tree, changed or
+not, to the proof `sync` requires before it overwrites one (see
+[Sync](#sync)): the file holds exactly what git would check out for its index
+entry. Only then does it judge the files. A file that passes is one the flag
+may delete. One that does not is **left in place and named, with the reason**,
+under every flag, and the wearing is still removed. A file left like this does
+not count as changed, whatever it holds, so it does not make a bare `remove`
+keep the others: whether any file has changed is judged over the files that
+passed alone. If none of those has, they are deleted, and if one has, they are
+all kept and listed, and the files left are still named. The reasons are:
 
 | The line says | Because |
 |---|---|
@@ -1271,7 +1276,7 @@ that has a dependency, and a refused wearing that has none. The last line says
 what to commit: the manifest always, `Cargo.lock` when this run changed it and
 git tracks it (`git add` refuses a lockfile git ignores, and a lockfile Cargo
 left alone has nothing to commit), and the deleted files when there are any. The
-lines between them depend on the flag.
+lines between them depend on the flag and on which files git could give back.
 
 A bare `remove` with every file matching, for a skeleton worn as `toolchain`
 that claims `rust-toolchain.toml` and `rustfmt.toml`:
@@ -1320,7 +1325,8 @@ commit ritual/Cargo.toml and Cargo.lock to record it
 
 A file git could not give back is named in the place of its `deleted` line,
 and the others are deleted as they would have been. Here `rustfmt.toml` is
-ignored by git and untracked:
+ignored by git and untracked. Whether it matches what the skeleton renders makes
+no difference:
 
 ```text
 stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
@@ -1328,6 +1334,30 @@ deleted rust-toolchain.toml
 left rustfmt.toml in place: git does not track it, so git could not give it back; delete it by hand if it should go
 commit ritual/Cargo.toml, Cargo.lock and the 1 deleted file to record it
 ```
+
+A bare `remove` for the same skeleton when it claims a third file,
+`clippy.toml`, which is tracked and has changed, while `rustfmt.toml` is ignored
+and untracked as above. The changed file is one git could give back, so the files
+git could give back are kept, and the file git could not is named with its reason
+where it falls in path order. The summary counts only the files kept, and says
+`other` so that it does not read as all of them:
+
+```text
+stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
+kept clippy.toml, which has changed
+kept rust-toolchain.toml, which matches the skeleton
+left rustfmt.toml in place: git does not track it, so git could not give it back; delete it by hand if it should go
+kept its other 2 files, because 1 has changed from what the skeleton renders: they are the project's own now, to keep or to delete by hand
+commit ritual/Cargo.toml and Cargo.lock to record it
+```
+
+With one file kept the summary is `kept its other file, because it has changed
+from what the skeleton renders: it is the project's own now, to keep or to
+delete by hand`, and with several `kept its other 3 files, because 2 have
+changed from what the skeleton renders: ...`. When git could not give back any
+of the files that are there, nothing is kept or deleted by the rule: each is
+named with its reason, no summary follows, and the last line names no deleted
+files.
 
 The other reasons take the place of `git does not track it`, each word for word
 as the table above gives it, with `it is marked skip-worktree and

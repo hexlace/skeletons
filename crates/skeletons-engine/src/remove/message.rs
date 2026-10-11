@@ -5,7 +5,7 @@
 //! or a key from outside only through [`Escaped`], so each is one line however
 //! its words came.
 
-use super::files::{Fate, Kept, LeftBecause, Presence, Settlement};
+use super::files::{Fate, LeftBecause, Presence, Present, Remaining, Settlement};
 use super::names::ManifestShown;
 use super::resolve::{Candidate, Standing};
 use crate::command_line_crate::hand_back::Tracking;
@@ -81,9 +81,15 @@ fn taken_out_line(wearing: &Candidate, manifest: &ManifestShown) -> String {
 fn file_lines(files: &Settlement) -> Vec<String> {
     match files {
         Settlement::LeftAll => vec!["left every file it claims in place".to_owned()],
-        Settlement::Kept(kept) => {
-            let mut lines: Vec<String> = kept.iter().map(kept_line).collect();
-            lines.push(kept_summary(kept));
+        Settlement::Kept(remaining) => {
+            let mut lines: Vec<String> = remaining
+                .iter()
+                .map(|file| match file {
+                    Remaining::Kept(kept) => kept_line(kept),
+                    Remaining::Left { path, because } => left_line(path.as_str(), *because),
+                })
+                .collect();
+            lines.push(kept_summary(remaining));
             lines
         }
         Settlement::Deleting(dispositions) if dispositions.is_empty() => {
@@ -102,7 +108,7 @@ fn file_lines(files: &Settlement) -> Vec<String> {
 }
 
 /// `` kept {path}, which {matches the skeleton|has changed} ``.
-fn kept_line(kept: &Kept) -> String {
+fn kept_line(kept: &Present) -> String {
     let which = match kept.state {
         Presence::Matches => "matches the skeleton",
         Presence::Changed => "has changed",
@@ -110,29 +116,50 @@ fn kept_line(kept: &Kept) -> String {
     format!("kept {}, which {which}", Escaped(kept.path.as_str()))
 }
 
-/// Why every file that is there was kept, when the project changed some.
+/// Why the files were kept, when the project changed one that git could give
+/// back.
 ///
 /// With one file the sentence is about it; with several it counts the ones that
-/// changed. A file that is missing is not counted: the sentence is about the
-/// files that are there, which are the ones kept.
-fn kept_summary(kept: &[Kept]) -> String {
-    let total = kept.len();
-    let changed = kept
+/// changed. Only the files kept are counted: a file that is missing is not
+/// there, and a file that was left is not kept, so when some were left the
+/// sentence says it is about the `other` files, which are the ones it counts.
+fn kept_summary(remaining: &[Remaining]) -> String {
+    let kept: Vec<&Present> = remaining
         .iter()
-        .filter(|file| file.state == Presence::Changed)
-        .count();
+        .filter_map(|file| match file {
+            Remaining::Kept(kept) => Some(kept),
+            Remaining::Left { .. } => None,
+        })
+        .collect();
+    let (total, changed) = (
+        kept.len(),
+        kept.iter()
+            .filter(|file| file.state == Presence::Changed)
+            .count(),
+    );
     assert!(changed > 0, "files are kept only because one has changed");
     assert!(changed <= total, "no more files changed than there are");
-    if total == 1 {
-        return "kept its file, because it has changed from what the skeleton renders: it is the \
-                project's own now, to keep or to delete by hand"
-            .to_owned();
+    let some_were_left = kept.len() < remaining.len();
+    match (some_were_left, total) {
+        (false, 1) => {
+            "kept its file, because it has changed from what the skeleton renders: it is \
+                       the project's own now, to keep or to delete by hand"
+                .to_owned()
+        }
+        (false, _) => format!(
+            "kept all {total} of its files, because {changed} {} changed from what the skeleton \
+             renders: they are the project's own now, to keep or to delete by hand",
+            count::has_or_have(changed)
+        ),
+        (true, 1) => "kept its other file, because it has changed from what the skeleton renders: \
+                      it is the project's own now, to keep or to delete by hand"
+            .to_owned(),
+        (true, _) => format!(
+            "kept its other {total} files, because {changed} {} changed from what the skeleton \
+             renders: they are the project's own now, to keep or to delete by hand",
+            count::has_or_have(changed)
+        ),
     }
-    format!(
-        "kept all {total} of its files, because {changed} {} changed from what the skeleton \
-         renders: they are the project's own now, to keep or to delete by hand",
-        count::has_or_have(changed)
-    )
 }
 
 /// `` left {path} in place: {why git could not give it back}, so git could not
@@ -179,7 +206,9 @@ fn commit_line(manifest: &ManifestShown, lockfile: Lockfile, deleted: usize) -> 
 mod tests {
     use super::{Lockfile, Removed, removed_lines};
     use crate::command_line_crate::hand_back::Tracking;
-    use crate::remove::files::{Disposition, Fate, Kept, LeftBecause, Presence, Settlement};
+    use crate::remove::files::{
+        Disposition, Fate, LeftBecause, Presence, Present, Remaining, Settlement,
+    };
     use crate::remove::names::{ManifestShown, WearingKey};
     use crate::remove::resolve::{Candidate, Standing};
     use crate::survey::poison::{assert_escaped_once, assert_one_line, claim, poison};
@@ -217,10 +246,17 @@ mod tests {
         }
     }
 
-    fn kept(path: &str, state: Presence) -> Kept {
-        Kept {
+    fn kept(path: &str, state: Presence) -> Remaining {
+        Remaining::Kept(Present {
             path: claim(path),
             state,
+        })
+    }
+
+    fn left_remaining(path: &str, because: LeftBecause) -> Remaining {
+        Remaining::Left {
+            path: claim(path),
+            because,
         }
     }
 
@@ -430,7 +466,7 @@ mod tests {
     #[test]
     fn the_summary_agrees_its_verb_with_how_many_changed_and_its_noun_with_how_many_there_are() {
         let summary = |states: &[Presence]| {
-            let kept: Vec<Kept> = states
+            let kept: Vec<Remaining> = states
                 .iter()
                 .enumerate()
                 .map(|(index, state)| kept(&format!("{index}.yml"), *state))
@@ -456,6 +492,102 @@ mod tests {
         );
     }
 
+    const LEFT_TAIL: &str = ", so git could not give it back; delete it by hand if it should go";
+
+    #[test]
+    fn a_file_left_among_kept_files_is_listed_in_its_place_and_the_summary_says_other() {
+        let files = Settlement::Kept(vec![
+            kept(".github/dependabot.yml", Presence::Matches),
+            left_remaining("a/b/deep.yml", LeftBecause::NotTracked),
+            kept("root.yml", Presence::Changed),
+        ]);
+
+        assert_eq!(
+            lines(&worn("ci", "a-skeleton"), &files, TRACKED)[1..],
+            [
+                "kept .github/dependabot.yml, which matches the skeleton".to_owned(),
+                format!("left a/b/deep.yml in place: git does not track it{LEFT_TAIL}"),
+                "kept root.yml, which has changed".to_owned(),
+                "kept its other 2 files, because 1 has changed from what the skeleton renders: \
+                 they are the project's own now, to keep or to delete by hand"
+                    .to_owned(),
+                "commit ritual/Cargo.toml and Cargo.lock to record it".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_summary_of_other_files_agrees_its_verb_with_how_many_changed_and_its_noun_with_how_many()
+    {
+        // A file left beside the kept ones, whatever its reason, and then the
+        // three shapes of the sentence: one file kept, several with one
+        // changed, several with all changed.
+        let summary = |states: &[Presence]| {
+            let mut remaining = vec![left_remaining(
+                "0-left.yml",
+                LeftBecause::Hidden(HiddenFlag::SkipWorktree),
+            )];
+            remaining.extend(
+                states
+                    .iter()
+                    .enumerate()
+                    .map(|(index, state)| kept(&format!("{}.yml", index + 1), *state)),
+            );
+            let printed = lines(&worn("ci", "a"), &Settlement::Kept(remaining), TRACKED);
+            printed[printed.len() - 2].clone()
+        };
+
+        assert_eq!(
+            summary(&[Presence::Changed]),
+            "kept its other file, because it has changed from what the skeleton renders: it is \
+             the project's own now, to keep or to delete by hand"
+        );
+        assert_eq!(
+            summary(&[Presence::Matches, Presence::Changed]),
+            "kept its other 2 files, because 1 has changed from what the skeleton renders: \
+             they are the project's own now, to keep or to delete by hand"
+        );
+        assert_eq!(
+            summary(&[Presence::Changed, Presence::Changed, Presence::Matches]),
+            "kept its other 3 files, because 2 have changed from what the skeleton renders: \
+             they are the project's own now, to keep or to delete by hand"
+        );
+    }
+
+    #[test]
+    fn a_run_that_keeps_files_deleted_none_so_the_last_line_names_no_deleted_file() {
+        let files = Settlement::Kept(vec![
+            left_remaining("a.yml", LeftBecause::NotTracked),
+            kept("b.yml", Presence::Changed),
+        ]);
+
+        assert_eq!(
+            lines(&worn("ci", "a-skeleton"), &files, Lockfile::Unchanged).pop(),
+            Some("commit ritual/Cargo.toml to record it".to_owned())
+        );
+    }
+
+    #[test]
+    fn files_all_left_are_listed_alone_with_no_summary_and_no_deleted_file_in_the_last_line() {
+        // When git could not give back any file that is there, the rule had
+        // nothing to keep or to delete, so only the `left` lines stand.
+        let files = Settlement::Deleting(vec![
+            left("a.yml", LeftBecause::NotTracked),
+            left("b.yml", LeftBecause::NotWhatGitChecksOut),
+        ]);
+
+        assert_eq!(
+            lines(&worn("ci", "a-skeleton"), &files, TRACKED)[1..],
+            [
+                format!("left a.yml in place: git does not track it{LEFT_TAIL}"),
+                format!(
+                    "left b.yml in place: it is not what git would check out for it{LEFT_TAIL}"
+                ),
+                "commit ritual/Cargo.toml and Cargo.lock to record it".to_owned(),
+            ]
+        );
+    }
+
     #[test]
     #[should_panic(expected = "files are kept only because one has changed")]
     fn files_none_of_which_changed_are_never_a_reason_to_keep_them() {
@@ -477,6 +609,10 @@ mod tests {
             Settlement::Kept(vec![
                 kept("a\nb.yml", Presence::Matches),
                 kept("c\nd.yml", Presence::Changed),
+            ]),
+            Settlement::Kept(vec![
+                kept("a\nb.yml", Presence::Changed),
+                left_remaining("c\nd.yml", LeftBecause::NotTracked),
             ]),
             Settlement::Deleting(vec![
                 deleted("a\nb.yml"),

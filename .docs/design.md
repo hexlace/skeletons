@@ -1644,13 +1644,14 @@ for its own declaration, `options` and `verbatim`, are never candidates.
 guesses.** Which files go depends on what stopping meant to the person, and a
 file the skeleton wrote and nobody touched is the skeleton's, while one the
 project edited is the project's now. The one call that needs no asking is the
-first: when every claimed file that is there still matches what the skeleton
-renders, they are all the skeleton's and all go. When any has changed, the
-decision belongs to the person, so `remove` deletes none of them, not even the
-ones that match, since a skeleton half deleted is neither worn nor cleared out,
-and it lists every file with whether it matches or has changed
+first: when every claimed file that is there, and that git could give back,
+still matches what the skeleton renders, they are all the skeleton's and all go.
+When any has changed, the decision belongs to the person, so `remove` deletes
+none of them, not even the ones that match, since a skeleton half deleted is
+neither worn nor cleared out, and it lists every file with whether it matches or
+has changed
 (`crates/skeletons-engine/src/remove/files.rs` →
-`bare_with_one_changed_file_keeps_every_file_that_is_there`, and
+`bare_keeps_every_file_git_can_give_back_when_one_of_them_has_changed`, and
 `ritual/tests/remove_files.rs` →
 `with_one_file_changed_the_wearing_goes_and_every_file_stays_and_is_listed`).
 `--delete-files` is for the project that wore a large skeleton, edited a few of
@@ -1661,7 +1662,7 @@ to interpret (`crates/skeletons-engine/src/remove.rs` →
 `clap_refuses_both_flags_together_in_either_order`). A claimed file that is
 missing is nothing to delete, and neither a reason to refuse nor a reason to
 keep the others (`crates/skeletons-engine/src/remove/files.rs` →
-`bare_with_a_file_missing_deletes_the_rest_without_naming_it`, and
+`bare_with_a_file_missing_does_not_ask_about_it`, and
 `ritual/tests/remove_files.rs` →
 `delete_files_deletes_a_changed_file_and_does_not_refuse_a_missing_one`).
 
@@ -1693,22 +1694,53 @@ clean work tree does not say that git could give a file back. An untracked file
 that git's ignore rules hide, a file the index flags so that git does not read
 it from the work tree, and a file under a content filter that does not write
 back what it was handed all report clean while holding bytes no commit has, and
-deleting any of them would lose the only copy. So each file about to be deleted
-is put to the proof that its bytes are exactly what git would check out for its
+deleting any of them would lose the only copy. So each file in the work tree is
+put to the proof that its bytes are exactly what git would check out for its
 index entry (`crates/skeletons-engine/src/sync/proof.rs` → `prove_held`), the
 same function `sync` runs, so that there is one proof and one reading of "what
-git would check out". A file that passes is deleted. One that does not is left
-in place and named with the reason, and the wearing is still removed, because
-the person asked to stop wearing and a file git could not give back is no reason
-to keep wearing. It is not counted as changed either, since a file the project
-has not edited should not make a bare `remove` keep the others
+git would check out". A file that passes is one the flag may delete. One that
+does not is left in place and named with the reason, and the wearing is still
+removed, because the person asked to stop wearing and a file git could not give
+back is no reason to keep wearing. It is not counted as changed either, whatever
+it holds: git could not give it back whether or not it was edited, and a file
+that stays whatever the rule says is no change for the rule to protect, so it
+should not make a bare `remove` keep the others
 (`crates/skeletons-engine/src/remove/give_back.rs` →
 `an_ignored_untracked_file_is_left_as_not_tracked`, and
 `crates/skeletons-engine/src/sync/proof.rs` →
 `a_line_a_lossy_clean_filter_strips_is_not_what_git_checks_out`;
 `ritual/tests/remove_files.rs` →
 `a_claimed_file_git_ignores_is_left_and_named_while_the_others_are_deleted`, and
-→ `a_claimed_file_marked_skip_worktree_is_left_and_named`). Every way the proof
+→ `a_claimed_file_marked_skip_worktree_is_left_and_named`).
+
+The order is the point. Whether a bare `remove` keeps the files can only be said
+over the files git could give back, and which those are is git's to say, so the
+proof comes first, for every file that is there, changed or not, and the
+decision is taken after it over what passed alone. The plan `remove` makes
+before it asks git holds the files and the rule to judge them by, and has no way
+to say that they are kept; only settling it with git's answers can
+(`crates/skeletons-engine/src/remove/files.rs` →
+`bare_with_one_changed_file_still_only_asks_git_and_decides_nothing`). A file git
+could not give back, changed on disk or not, leaves the files that match to be
+deleted, and when one git can give back has changed they are kept and the left
+file is still named in its place, with a summary that counts only the files
+kept and says `other`
+(`crates/skeletons-engine/src/remove/files.rs` →
+`a_changed_file_git_could_not_give_back_does_not_make_bare_keep_the_others`, →
+`a_file_git_could_not_give_back_is_left_and_named_when_the_rest_are_kept`, and →
+`settling_asks_about_each_file_in_order_changed_or_not_and_records_the_answers`;
+`crates/skeletons-engine/src/remove/message.rs` →
+`a_file_left_among_kept_files_is_listed_in_its_place_and_the_summary_says_other`;
+`ritual/tests/remove_files.rs` →
+`an_ignored_claimed_file_that_has_changed_is_left_and_does_not_make_the_others_stay`,
+→ `a_skip_worktree_claimed_file_that_has_changed_is_left_and_does_not_make_the_others_stay`,
+and →
+`a_tracked_file_that_changed_keeps_the_others_and_the_file_git_could_not_give_back_is_named`).
+When git could not give back any file that is there, nothing is left for the
+rule to keep or delete, and the `left` lines stand alone
+(`ritual/tests/remove_files.rs` →
+`when_git_could_not_give_back_any_present_file_each_is_named_and_nothing_else_is_said`).
+Every way the proof
 can refuse is given a place in the reason before the crate builds
 (`crates/skeletons-engine/src/remove/give_back.rs` →
 `every_reason_the_proof_gives_is_placed`). A question to git that cannot be
@@ -1822,8 +1854,8 @@ edits would otherwise be mixed into what `remove` wrote or deleted
 `a_work_tree_with_an_uncommitted_change_is_refused_and_nothing_is_written`).
 Then the manifest and `Cargo.lock` are put to the questions `wear` asks of them,
 whether git can hand them back and whether they can be written in place, then
-each file to be deleted is put to the proof, and last the holding path is shown
-to be free.
+each file in the work tree is put to the proof and the files are judged by it,
+and last the holding path is shown to be free.
 
 **What the code settled.** The first is a directory the deletion leaves
 empty. It is removed, deepest first, and so is each directory above it that this

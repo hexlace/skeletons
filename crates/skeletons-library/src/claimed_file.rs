@@ -46,8 +46,11 @@ impl FileState {
     }
 }
 
-impl From<Drift> for FileState {
-    fn from(drift: Drift) -> Self {
+impl FileState {
+    // A function of the crate's own rather than `From`: a trait impl naming an
+    // engine type would be public, and put `skeletons-engine` in this crate's
+    // interface.
+    fn from_engine(drift: Drift) -> Self {
         match drift {
             Drift::Matches => Self::Matches,
             Drift::Drifted(DriftReason::Missing) => Self::Missing,
@@ -72,7 +75,7 @@ impl ClaimedFile {
     pub(crate) fn from_row(row: &Row) -> Self {
         Self {
             path: PathBuf::from(row.path.as_str()),
-            state: FileState::from(row.drift),
+            state: FileState::from_engine(row.drift),
             rendered: row.rendered.clone(),
         }
     }

@@ -5,6 +5,11 @@
 //! [`task()`] is the whole of this crate's public API, as it is for any
 //! ritual task: the bundle a project's command line mounts, holding the
 //! commands `check`, `sync`, `wear` and `remove`.
+//!
+//! The `test-util` feature compiles in seams for a dependent's own tests. It
+//! is for `[dev-dependencies]` only: under feature resolver 2 or later it then
+//! stays out of a plain build, and under resolver 1 it would be on in a plain
+//! build too.
 
 use rituals::Task;
 

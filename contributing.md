@@ -50,23 +50,25 @@ reads a workspace and surveys it; with the feature it also holds the commands
 and everything only they use. The `-p skeletons-engine` commands build it
 without the feature, and the `-p skeletons-engine -p skeletons` commands build
 it with the feature, which the bundle turns on, and without `test-util`. A
-workspace build compiles `skeletons-engine` with the feature on, and with
-`test-util` too, which `ritual`'s dev-dependency turns on for every package in
-that build, so code or a test seam that depends on a feature being on or off
-is only seen by the run that has it the other way. The `-p skeletons-library`
-commands are the same kind of run from the other side: built alone, the library
-compiles the engine without the feature, as a project that depends on it
-does, where the workspace build always has the feature on. A doc link from an
-item that is always built to one that only the commands build is the same kind
-of mismatch, and only the engine's own `cargo doc` sees it break.
+workspace clippy or test run compiles `skeletons-engine` with the feature on,
+and with `test-util` too, which the `ritual` and `wearer` dev-dependencies turn
+on for every package in that build, so code or a test seam that depends on a
+feature being on or off is only seen by the run that has it the other way. The
+`-p skeletons-library` commands are the same kind of run from the other side:
+built alone, the library compiles the engine without the feature, as a project
+that depends on it does, where the workspace build always has the feature on.
+A doc link from an item that is always built to one that only the commands
+build is the same kind of mismatch, and only the engine's own `cargo doc` sees
+it break.
 
 That the engine without the feature holds none of the commands' dependencies
 (the command-line framework, the network client and the TLS stack under it,
 the manifest editor and the query-string decoder) is a test in `xtask`, which
-`cargo test --workspace` runs. It asks `cargo tree` for the engine's graph over
-normal and build dependencies and looks for each of them, and asks
-again with the feature on to prove the question can see them. It also holds
-that graph, and the library's, to one version of each package.
+`cargo test --workspace` runs. It asks `cargo tree` for the engine's graph, and
+the library's, over normal and build dependencies and looks for each of them,
+and asks again with the feature on, directly and through the bundle, to prove
+the question can see them. It also holds both graphs to one version of each
+package.
 
 CI runs the same, with clippy and the tests on both Linux and macOS, and
 three more: every crate is packaged and built from its package alone, as
@@ -101,11 +103,11 @@ builds a git repository, so they need `git` on `PATH`.
 ## Dependencies
 
 `deny.toml` sets what the dependency tree may hold, and CI runs
-`cargo deny check` on every pull request, and the advisories check weekly
-as well. A new dependency that brings a licence not on the allowlist, or
-comes from anywhere but crates.io, fails the check until `deny.toml` lists
-it with the crate that needs it. `cargo deny --locked check` in the gate
-above runs the same check locally.
+`cargo deny --locked check` on every pull request and every push to `main`, and
+the advisories check weekly as well. A new dependency that brings a licence not
+on the allowlist, or comes from anywhere but crates.io, fails the check until
+`deny.toml` lists it with the crate that needs it. `cargo deny --locked check`
+in the gate above runs the same check locally.
 
 ## Releasing
 
@@ -160,8 +162,8 @@ one.
 - **Publish**: `verify` holds no credential: it checks that the tagged commit
   is on `main`, then runs `cargo xtask publish-plan`, which does every build a
   publish verifies. Then `publish` checks out that same commit, gets a token,
-  and runs `cargo publish --no-verify`, which packages and uploads without
-  compiling anything.
+  and runs `cargo publish --workspace --locked --no-verify`, excluding what the
+  plan leaves out, which packages and uploads without compiling anything.
 
 Each writing job checks what it was handed in shell, because the job that
 produced it had run third-party code by then. Keep it that way: a step that
@@ -175,7 +177,7 @@ The workflows run `cargo xtask`, and so can you:
 cargo xtask bump v0.1.0            # what step 1 does to the tree
 cargo xtask verify-tag v0.1.0      # refuses unless the workspace is at v0.1.0
 cargo xtask publish-plan v0.1.0    # dry-runs the publish, prints the plan
-cargo xtask release-contributors hexlace/skeletons v0.1.0 <commit> <dir>   # needs `gh`
+cargo xtask release-contributors hexlace/skeletons v0.1.0 <commit> <dir>   # needs `gh`; <dir> must exist
 ```
 
 `bump` edits `Cargo.toml` and `Cargo.lock` in place; put them back with
@@ -282,10 +284,11 @@ A third seam shortens how long a local git question waits:
 
 - `SKELETONS_TEST_ONLY_LOCAL_GIT_TIMEOUT_SECONDS`, a whole number of seconds
   above zero, replaces the 30 seconds every local git command is otherwise
-  given (`crates/skeletons-engine/src/git/local_timeout.rs`), so a test of what a
-  timeout says need not wait it out. Anything else in the variable, zero
-  included, stops the test with a panic naming it, rather than reading as
-  unset. A production build does not read the variable at all.
+  given (`LOCAL_GIT_TIMEOUT` in `crates/skeletons-engine/src/git/command.rs`; the
+  seam is `git/local_timeout.rs`), so a test of what a timeout says need not
+  wait it out. Anything else in the variable, zero included, stops the test
+  with a panic naming it, rather than reading as unset. A production build
+  does not read the variable at all.
   `ritual/tests/support/slow_filter.rs` builds the repository whose content
   filter stalls, for the tests that use the variable.
 
@@ -304,7 +307,8 @@ dev-dependency with `features = ["test-util"]`, and Cargo unifies that into
 the `ritual` and `wearer` binaries `cargo test` builds (the ones
 `CARGO_BIN_EXE_ritual` and `CARGO_BIN_EXE_wearer` point `tests/` at) — but
 never into `cargo build`/`cargo run` of those binaries, since neither
-activates a dev-dependency.
+activates a dev-dependency, which holds because this workspace uses feature
+resolver 3.
 
 A fourth variable, `SKELETONS_TEST_ONLY_BUILD_SCRIPT_MARKER`, is unrelated to
 `test-util`: it is read by the `build-script-marker` test skeleton's own

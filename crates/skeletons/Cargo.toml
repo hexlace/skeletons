@@ -24,8 +24,14 @@ skeletons-engine = { workspace = true, features = ["commands"] }
 [features]
 # Forwards the engine's `test-util` feature, which compiles in the seams that
 # let a test observe or redirect a real network request or a real wait. For a
-# dependent's `[dev-dependencies]` only, and never enabled outside them: only
-# `cargo test` unifies it in.
+# dependent's `[dev-dependencies]` only, and never enabled outside them: Cargo
+# turns it on only in a build that includes a test, bench or example target
+# (`cargo test`, or a build, check or clippy given `--tests` or
+# `--all-targets`), and not in a plain `cargo build` or `cargo run`, provided the
+# workspace uses feature resolver 2 or later (edition 2021 and later select it
+# for a package; a virtual workspace sets `resolver = "2"` or `"3"`). Under
+# resolver 1 Cargo unifies a dev-dependency's features into a plain `cargo build`
+# or `cargo run` too, so the seams would be on there as well.
 test-util = ["skeletons-engine/test-util"]
 
 [package.metadata.ritual]

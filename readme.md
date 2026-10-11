@@ -50,7 +50,7 @@ plainly what was asked.
 [Quickstart](https://github.com/hexlace/ritual#quickstart) give a project
 one, and its section on
 [importing a task from somewhere else](https://github.com/hexlace/ritual#import-a-task-from-somewhere-else)
-covers mounting a bundle from a git repository or another registry.
+covers mounting a bundle from a git repository or a directory.
 
 With one in hand there is nothing else to install. From anywhere inside the
 project, import the bundle:
@@ -139,12 +139,13 @@ commit ritual/Cargo.toml and Cargo.lock, then run the `sync` task to write its f
 ```
 
 The first argument is the skeleton's crate, with a version requirement after
-an `@` when it should have one (`a-dependabot-skeleton@0.1`, in Cargo's own
-grammar). The second is the key to wear it under, which is the crate's name
-when left out. With no source flag the crate comes from crates.io. `--git`,
-with at most one of `--branch`, `--tag` and `--rev`, takes it from a git
-repository, and `--path` from a directory, relative to where the command
-runs.
+an `@` when it should have one and comes from a registry
+(`a-dependabot-skeleton@0.1`, in Cargo's own grammar; Cargo refuses a version
+given with `--path`). The second is the key to wear it under, which is the
+crate's name when left out. With no source flag the crate comes from
+crates.io. `--git`, with at most one of `--branch`, `--tag` and `--rev`, takes
+it from a git repository, and `--path` from a directory, relative to where the
+command runs.
 
 That is the whole of wearing, and the two pieces `wear` wrote are what a
 person could have written by hand. In `ritual/Cargo.toml`:
@@ -421,7 +422,7 @@ current, because a failure to ask must not read as "not behind". A behind
 skeleton taken from crates.io looks like this in `check`'s header:
 
 ```text
-dependabot in Cargo.toml: a-dependabot-skeleton 0.1.2 from crates.io, behind (0.2.0 is available)
+dependabot in ritual/Cargo.toml: a-dependabot-skeleton 0.1.2 from crates.io, behind (0.2.0 is available)
 ```
 
 ### Writing a skeleton

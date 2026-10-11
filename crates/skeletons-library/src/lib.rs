@@ -76,11 +76,12 @@ const _: () = {
 /// when it is not set, and a value that is not valid Unicode counts as not set.
 ///
 /// Nothing else is needed. The workspace need not have been built, and
-/// `directory` need not be a git repository. For a workspace whose skeletons
-/// are all `path` dependencies, `cargo generate-lockfile --offline` is enough
-/// to make the lockfile. The call writes nothing in the workspace, runs no
-/// build script, needs no git, and makes no network request: a source that was
-/// never fetched is an error, never a download. Cargo may still write to its
+/// `directory` need not be a git repository. For a workspace whose
+/// dependencies are all `path` dependencies, `cargo generate-lockfile
+/// --offline` is enough to make the lockfile. The call writes nothing in the
+/// workspace, runs no build script, needs no git, and makes no network
+/// request: a source that was never fetched is an error, never a download.
+/// Cargo may still write to its
 /// own cache under `CARGO_HOME`, as any cargo command may, to unpack a source
 /// it downloaded earlier; where that cache cannot be written, every locked
 /// source must already be unpacked, as `cargo fetch` leaves it.
@@ -97,8 +98,8 @@ const _: () = {
 /// - [`is_cargo_not_started`](ReadWorkspaceError::is_cargo_not_started) when
 ///   cargo could not be started although `directory` is a directory. A
 ///   `directory` that cannot be entered is reported this way too, and
-///   [`detail`](ReadWorkspaceError::detail) holds the operating system's words,
-///   which do not say which.
+///   [`detail`](ReadWorkspaceError::detail) holds `failed to run: ` followed by
+///   the operating system's words, which do not say which.
 /// - [`is_directory_not_found`](ReadWorkspaceError::is_directory_not_found)
 ///   when cargo could not be started and no directory was found at
 ///   `directory`.

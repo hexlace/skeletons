@@ -83,10 +83,11 @@ the table is empty because the skeleton has no option to record, and `check` and
   read as its own skeleton schema (see [skeleton-format.md](skeleton-format.md)),
   and one with no dependency keyed `verbatim` has its
   `verbatim = [...]`, the files it ships as bytes, read the same way; both are
-  ignored here. A member that *does* declare a dependency under either key can
-  never wear it: the key is refused, naming the rename that fixes it. The two
-  are judged apart, so a dependency keyed `options` says nothing about
-  `verbatim`. This is a known limit, not a bug to be fixed by choosing one
+  ignored here. A member that declares a dependency under either key can
+  never wear it: a `[package.metadata.skeletons]` entry at that key is refused,
+  naming the rename that fixes it. With no entry there, the dependency is simply
+  not worn. The two are judged apart, so a dependency keyed `options` says
+  nothing about `verbatim`. This is a known limit, not a bug to be fixed by choosing one
   meaning over the other.
 
 ## Where bones land
@@ -199,6 +200,9 @@ cargo ritual skeletons check [--drifted] [--behind] [--fail-behind] [--json]
 | `--fail-behind` | also fail when a worn skeleton is behind, or where that is undetermined |
 | `--json` | print the answer as one JSON document (format version 1) |
 
+Given together, `--drifted` and `--behind` show a bone when either holds: it has
+drifted, or its skeleton is behind or undetermined.
+
 `check` reads the workspace fresh — `cargo metadata --locked
 --all-features` — and reports, for every bone, two independent facts,
 neither hiding the other: whether its file's bytes match what the locked
@@ -236,12 +240,14 @@ refused: [package.metadata.skeletons.dependabto] in tools/Cargo.toml names no de
 4 bones: 2 drifted, 2 match. 4 worn skeletons: 1 behind, 1 current, 1 pinned, 1 undetermined. 2 refusals.
 ```
 
-One block per worn skeleton, in manifest-then-dependency order: the header
-names the wearing (`<dependency> in <manifest>`), the skeleton and its
+One block per worn skeleton that has a bone or a refusal of its own to show, in
+manifest-then-dependency order; a skeleton whose every bone is in an overlap has
+no block, is named in the closing `refused:` list, and is still counted. The
+header names the wearing (`<dependency> in <manifest>`), the skeleton and its
 locked version, how it is pinned, and its own behind state, with the same
 detail text `--json`'s `behind.detail` carries in parentheses where there
 is one (`behind (0.2.0 is available)`, `undetermined (could not reach
-index.crates.io: timed out)`); each line under it is one bone — its drift
+index.crates.io: timeout: global)`); each line under it is one bone — its drift
 state, then the path of the file it claims — in path order. A skeleton with
 any refusal about it shows one `refused: …` line per refusal, in path
 order, in its own block in place of its bones — only `unsafe-path` can have
@@ -326,7 +332,7 @@ skeleton names why:
 | `branch-missing` | the locked branch no longer exists on the remote |
 | `unrecognised-source` | cargo reported a source this crate does not recognise at all |
 | `checkout-unreadable` | Cargo's own checkout of a branch or default-branch pin could not be read, or is not at the commit this pin actually locked |
-| `local-failure` | `skeletons` could not create or read the temporary directory it fetches a remote snapshot into — a local failure, not a network one |
+| `local-failure` | `skeletons` could not create the temporary directory it fetches a remote snapshot into, or the empty repository inside it — a local failure, before the snapshot fetch |
 | `directory-missing` | this skeleton's own package directory does not exist at all at the remote head |
 
 A `branch =` or default-branch pin's own remote head is read cheaply first
@@ -346,8 +352,10 @@ cargo ritual skeletons sync
 `sync` takes no arguments. It reads the workspace the same way `check`
 does — fresh, from `cargo metadata` and the wearing tables it finds — except
 offline: it makes no network request of its own, so `behind` is never
-asked, and a clone whose skeleton sources were never fetched aborts naming
-`cargo fetch`, exactly as an unreadable lockfile aborts `check`.
+asked, and a clone whose skeleton sources were never fetched aborts with
+`cargo metadata --locked --offline failed (sync makes no network request): `
+followed by cargo's own words, as an unreadable lockfile aborts `check`. The
+command names no remedy; `cargo fetch` is what the wearer runs.
 
 For every bone that has drifted, `sync` writes the bytes its skeleton
 renders for it, verbatim; a file that already matches is never touched. It
@@ -364,6 +372,9 @@ existing permissions (a bone claims bytes, so an executable file stays
 executable). Nothing drifted at all reports `every bone already matches;
 nothing was written`, and a workspace wearing nothing prints the same line
 `check` does.
+
+Each line `sync` prints to `stderr` follows the command line's own prefix
+(`ritual: `); the examples below show it bare.
 
 Every message `sync` prints is one line, and it names each path, git path,
 mode, rule and word of git's or the operating system's escaped, as
@@ -402,10 +413,10 @@ otherwise-uncomplicated file — when:
 
   more than one variable at once reads `GIT_DIR and GIT_WORK_TREE are set
   … from wherever they point … git sets them for the hooks it runs … or
-  unset them`. Git exports `GIT_INDEX_FILE` and `GIT_DIR` to a hook, and
-  inside `git commit <paths>` or `git commit -a` the index it uses may be
-  a temporary one that a file written now is not part of, so a `sync` that
-  would write refuses there;
+  unset them`. Git exports `GIT_INDEX_FILE` to a commit hook, and `GIT_DIR` to
+  some hooks, and inside `git commit <paths>` or `git commit -a` the index it
+  uses may be a temporary one that a file written now is not part of, so a
+  `sync` that would write refuses there;
 - git itself refuses the repository's ownership as dubious
   (`safe.directory`):
 
@@ -413,13 +424,13 @@ otherwise-uncomplicated file — when:
   git refuses to read this repository because another user owns it (git's safe.directory check), so sync wrote nothing: <git's own detail>
   ```
 - git cannot be asked at all, or answers with something `skeletons` cannot
-  read: `git` could not be run, or `rev-parse` or `status` exited
-  unsuccessfully for a reason none of the bullets above name (git's own
-  first `fatal:` line is quoted, or failing that its first non-blank
-  line), or either printed more than 16 MiB, the most `skeletons` reads
-  from git. An answer cut short is never read as though it were complete,
-  since a `status` cut short may have dropped exactly the record that says
-  dirty:
+  read: `git` could not be run, or `rev-parse`, `status` or the `ls-files` that
+  lists the index exited unsuccessfully for a reason none of the bullets above
+  name (git's own first `fatal:` line is quoted, or failing that its first
+  non-blank line), or any of them printed more than 16 MiB, the most
+  `skeletons` reads from git. An answer cut short is never read as though it
+  were complete, since a `status` cut short may have dropped exactly the record
+  that says dirty:
 
   ```text
   running `git` failed, so sync wrote nothing: <why it could not be run>
@@ -496,20 +507,20 @@ otherwise-uncomplicated file — when:
   | ``<path> is not in git's index under exactly this spelling: commit it, or move it away, then run the `sync` task again`` | git has no entry at that exact spelling; the index is asked by exact spelling, so an entry under a case or normalisation variant proves nothing about the claimed one |
   | `<path> is listed in git's index as <git's path>` | git's one entry for it sits at a different path — a differently normalised spelling, or an entry beneath the claimed path |
   | ``<path> is ignored by git (`<source>:<line>:<pattern>`, as `git check-ignore -v` reports it as source:line:pattern), so sync would create a file git status never shows and git add refuses, and a later sync could not update it: remove the ignore rule, or make <path> by hand and run `git add -f -- <path>`, then run the `sync` task again`` | nothing is at the path, the index holds nothing for it, and a `.gitignore`, `.git/info/exclude` or `core.excludesFile` rule ignores it (git's own last match decides, so a later `!` pattern that un-ignores it is not refused). The rule is quoted as `git check-ignore -v` prints it, for example `cfg/.gitignore:2:*.local.yml`. A file that is present and tracked is never refused for a rule, so a claim added with `git add -f` is updated |
-  | `<path> could not be checked against git's ignore rules: <why>` | `git check-ignore` exited with a status other than 0 or 1, printed a rule `skeletons` cannot read, or printed more than 16 MiB. The claim is not created, since it is not known to be one git would show |
+  | `<path> could not be checked against git's ignore rules: <why>` | `git check-ignore` exited with a status other than 0 or 1, or printed a rule `skeletons` cannot read. The claim is not created, since it is not known to be one git would show |
   | ``<path> is conflicted in git's index: resolve the conflict and commit it, then run the `sync` task again`` | an entry at a stage other than 0 |
   | `<path> is a symbolic link in git's index` | the entry's mode is `120000` |
   | `<path> is a submodule in git's index` | the entry's mode is `160000` |
   | ``<path> is marked skip-worktree in git's index, so git does not read its bytes from the work tree and would ignore what sync wrote there: run `git update-index --no-skip-worktree -- <path>`, then run the `sync` task again`` | the file is present and holds exactly what git holds, but its entry is flagged so git never reads it: a write would be reported `updated` while a commit kept the old bytes. Also `assume-unchanged` (with `--no-assume-unchanged`), and both flags (`skip-worktree and assume-unchanged`, with both options) |
   | ``<path> cannot be written, because git's index tracks <entry> as a file where <path> needs a directory, so git would put it back in place of what sync wrote: if <path> belongs in this repository, run `git rm --cached -- <entry>` and commit, then run the `sync` task again`` | the index tracks a file (or, worded `a symbolic link`, a link) at a directory above the path, hidden from the work tree; creating the directory would leave a tree git reads as that entry deleted and the path untracked. When `<entry>` is another case of the directory, the line adds `(git takes the two for one name where it ignores case, core.ignorecase)` |
-  | `<path> is inside <entry>, which git's index tracks as a submodule, another repository, and sync writes only into this one` | the index tracks a gitlink at a directory above the path, whether or not the submodule is checked out; there is no remedy `skeletons` can name |
+  | `<path> is inside <entry>, which git's index tracks as a submodule, another repository, and sync writes only into this one` | the index tracks a gitlink at a directory above the path and the submodule is not checked out (a checked-out one is refused earlier, as `inside-another-repository`); there is no remedy `skeletons` can name |
   | `<path> cannot be written, because git's index tracks <entry> with mode <mode> where <path> needs a directory` | the index tracks some other kind of entry at a directory above the path |
   | `<path> has mode <mode> in git's index, not a regular file's` | any other mode than `100644` or `100755` |
   | `<path>'s entry in git's index could not be read: <why>` | `ls-files` failed, printed something unreadable, or listed more than one entry |
   | ``<path> is not what git would check out for it, so git could not give these bytes back: keep a copy of it outside the repository, remove it, run `git checkout -- <path>`, then run the `sync` task again`` | the file's bytes are not what git would write for its index entry on checkout, whatever the cause: an edit git's own status cannot see, or bytes a content filter would not write back. Git was asked twice and gave the same bytes, so `git checkout` writes them |
   | `<path> is checked out differently each time git is asked (a content filter whose output is not a function of the file alone), so sync can never show that git would give its bytes back, and does not write it` | git was asked twice and gave different bytes, so no checkout exists to bring the file back to, and `git checkout` would only write another variant. No remedy |
   | `<path> could not be compared with what git would check out for it: <git's own detail>` | `cat-file` failed, a missing object, a `required` content filter failing or a filter's download failing among the causes. No remedy: no one command is right for every cause |
-  | ``<path>: git <command> printed more than 16 MiB, the most `skeletons` reads, so sync cannot show what it would replace`` (for a file it would create: `…cannot show that git would see the file it would create`) | `ls-files` or `cat-file` answered with more than `skeletons` will read. No remedy |
+  | ``<path>: git <command> printed more than 16 MiB, the most `skeletons` reads, so sync cannot show what it would replace`` (for a file it would create: `…cannot show that git would see the file it would create`) | `ls-files`, `cat-file` or `check-ignore` answered with more than `skeletons` will read. No remedy |
   | ``<path> is not a regular file: move it away, then run the `sync` task again`` | a symbolic link, directory or other non-file sits there |
   | `<path> could not be read: <why>` | looking at the path failed for a reason other than its being absent |
   | ``<path> changed while sync was checking it: run the `sync` task again`` | the file was missing when surveyed and is there now, or the reverse |
@@ -574,8 +585,8 @@ otherwise-uncomplicated file — when:
   a appeared while sync was creating it for a/b.yml; it never writes into anything it did not create, so it wrote nothing: run the `sync` task again
   ```
 
-  Never overwritten, never removed — the remedy is always to move it away
-  by hand;
+  Never overwritten, never removed: a staging file already there is moved away
+  by hand, and a directory that appeared needs only another run;
 - a claimed target, or a directory above it, no longer matches what `sync`
   proved about it, found while `sync` was staging its write — nothing has
   been written yet:
@@ -588,13 +599,11 @@ otherwise-uncomplicated file — when:
 
   | Reads | Means |
   |---|---|
-  | `a file appeared there` | a file `sync` was to create is there now |
+  | `a file appeared there` | a file, link or directory is there now where `sync` was to create a file |
   | `it is no longer there` | a file `sync` was to replace is gone |
   | `it is no longer a regular file` | a file `sync` was to replace is a symbolic link or a directory now |
   | `its content is no longer what sync proved git can give back` | a file `sync` was to replace holds other bytes now, so replacing it would lose them |
-  | `it is now a symbolic link` | the file itself became a link |
   | `x above it is now a symbolic link` | a directory above it became a link (`x above it is now a file` when it became a file) |
-  | `it is now inside .git` | the path now has a `.git` component |
   | `x above it is now another git repository` | a directory above it now holds a `.git` of its own |
   | `it can no longer be read: <why>` | looking at the path failed for a reason other than its being gone |
   | `x is now found on disk under another spelling`, or `x is now also present on disk as y` | the path, or a directory above it, is now listed under a differently spelled name; `x` is the path up to and including the differing component |
@@ -642,7 +651,7 @@ otherwise-uncomplicated file — when:
   ```
 - a drifted write's own staging path is a path some bone claims, is one name
   with a claimed path to a filesystem that ignores case or Unicode
-  normalization, or is a directory above or beneath one — a
+  normalization, or is a directory above one — a
   defect in how two of the worn skeletons name their files, not in the
   repository being synced. The comparison is the fold overlap detection uses
   and is made on every platform, before anything is written. The message
@@ -652,7 +661,6 @@ otherwise-uncomplicated file — when:
   sync stages a/b at a/.b.skeletons-sync, which is itself a claimed path, so it wrote nothing: the two cannot both be written; this is a defect in how the worn skeletons name their files, not in this repository
   sync stages a/b at a/.b.skeletons-sync, which is one name with the claimed path a/.B.skeletons-sync to a filesystem that ignores case or Unicode normalization, so it wrote nothing: the two cannot both be written; this is a defect in how the worn skeletons name their files, not in this repository
   sync stages a/b at a/.b.skeletons-sync, which is a directory above the claimed path a/.b.skeletons-sync/c, so it wrote nothing: the two cannot both be written; this is a defect in how the worn skeletons name their files, not in this repository
-  sync stages a/b at a/.b.skeletons-sync, which is beneath the claimed path a, so it wrote nothing: the two cannot both be written; this is a defect in how the worn skeletons name their files, not in this repository
   ```
 
 The refusals above about git — not a work tree, a redirecting variable,
@@ -1040,9 +1048,11 @@ and, like every message in this document, prints text from outside escaped.
   The success line then leaves `Cargo.lock` out of what to commit, since git
   would refuse to add it.
 - the manifest, or a `Cargo.lock` that exists, cannot be written in place. Cargo
-  writes through a temporary file and a rename, so `cargo add` succeeds on a
-  read-only file, but `wear` writes the wearing table in place and its undo
-  restores in place, so either would fail with the dependency already added.
+  writes a manifest through a temporary file and a rename, so `cargo add`
+  succeeds on a read-only manifest, and it fails on a read-only `Cargo.lock`
+  only after it has rewritten the manifest. `wear` writes the wearing table in
+  place and its undo restores in place, so either file being read-only would
+  leave the dependency added and the project neither worn nor as it was.
   `wear` asks the operating system, before anything is written, whether it can
   open each file for writing (without creating it, truncating it or writing a
   byte), so permissions, an access control list, an immutable flag and a
@@ -1102,11 +1112,18 @@ something:
   [package.metadata.skeletons.<key>] to <manifest> without changing anything
   else in it (…); this is a defect in skeletons`).
 - the read back refuses the new wearing (``wear added `<key>` to <manifest>, and
-  reading it back refuses it:`` and the refusal's own message), does not report
+  reading it back refused it:`` and the refusal's own message), does not report
   it at all (``wear added `<key>` to <manifest>, and cargo metadata does not
   report it; this is a defect in skeletons``), or finds that the skeleton Cargo
   resolved is one another entry already wears under its package name, which no
   check before the write could see (the already-worn message above).
+- the workspace cannot be read back at all, which is `check`'s abort for the
+  four causes (see [Refusals](#refusals)), with `wear`'s own wording for the
+  lockfile.
+- the manifest `cargo add` left already has a wearing table at the key, or a
+  parent that is not a table, so the table cannot be added: the same two
+  messages as the refusals above.
+- the manifest cannot be written with the table in it.
 
 When the undo itself fails, the message names every path that was not put back,
 relative to the workspace root as every other path `wear` shows is, and says to
@@ -1305,11 +1322,12 @@ reads the workspace after the first file is gone.
 **What it prints.** On success, lines on stdout: what was taken out, a line for
 each file or one for all of them, and what to commit. The first line names the
 wearing as `check` reads it. A worn skeleton is named with the version Cargo
-locked. A wearing `check` refuses is not a skeleton to name, so the line says
-what was taken out, and says when there was no dependency to take. That is why
-`remove` surveys the files whatever the flag, `--keep-files` included: whether
-`check` refuses the wearing decides how this line reads, while the files
-themselves are still never asked about for `--keep-files`.
+locked. A wearing that any `check` refusal names is not named as a skeleton, so
+the line says what was taken out, and says when there was no dependency to take.
+That is why `remove` surveys the files whatever the flag, `--keep-files`
+included: whether a `check` refusal names the wearing decides how this line
+reads, while the files themselves are still never asked about for
+`--keep-files`.
 
 ```text
 stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
@@ -1318,8 +1336,11 @@ took [package.metadata.skeletons.ghost] out of ritual/Cargo.toml; no dependency 
 ```
 
 Those are the forms of the first line: a worn skeleton, a refused wearing
-that has a dependency, and a refused wearing that has none. The last line says
-what to commit: the manifest always, `Cargo.lock` when this run changed it and
+that has a dependency, and a refused wearing that has none. A skeleton is named
+only when no `check` refusal names its wearing. A wearing named by any refusal,
+an overlap with another wearing included, gets the form that says what was taken
+out, even though `check` lists that skeleton with its crate and version. The
+last line says what to commit: the manifest always, `Cargo.lock` when this run changed it and
 git tracks it (`git add` refuses a lockfile git ignores, and a lockfile Cargo
 left alone has nothing to commit), and the deleted files when there are any. The
 lines between them depend on the flag, on which files git could give back and
@@ -1360,9 +1381,9 @@ line, and the other emptied directories are still removed:
 
 ```text
 stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
-deleted config/tidy.toml
+deleted config/lints/tidy.toml
 deleted rustfmt.toml
-left config, which deleting its files emptied: <the operating system's words>
+left config/lints, which deleting its files emptied: <the operating system's words>
 commit ritual/Cargo.toml, Cargo.lock and the 2 deleted files to record it
 ```
 
@@ -1453,8 +1474,10 @@ everywhere in this document.
 **It refuses before it writes anything** when the request or the project is
 wrong, in this order. Every message below is one line on stderr after the
 command line's own prefix (`ritual: `), the process exits with status 1, and
-each ends by saying what to do. (A usage error, a missing name or both flags,
-is the argument parser's and exits with status 2 before any of these.)
+each ends by saying what to do, except the unknown-name line for a manifest that
+wears nothing, where there is nothing to do. (A usage error, a missing name or
+both flags, is the argument parser's and exits with status 2 before any of
+these.)
 
 - the workspace cannot be read, which is `check`'s abort for the same four
   causes (see [Refusals](#refusals)). `cargo metadata` is run `--locked`, so a
@@ -1507,8 +1530,9 @@ is the argument parser's and exits with status 2 before any of these.)
   (neither flag, or `--delete-files`). `check` refuses the wearing, whether for
   its own defect or because one of its bones overlaps another's, so the survey
   has dropped some of its files, and deleting from what is left would be a
-  guess. Each reason is `check`'s own refusal message, as it stands, joined by
-  `; `. `--keep-files` is the way out, since it asks nothing about the files:
+  guess. Each reason is the refusal's `message` as `check --json` gives it (for a
+  refusal about one worn skeleton it begins with the wearing), joined by `; `.
+  `--keep-files` is the way out, since it asks nothing about the files:
 
   ```text
   remove cannot tell which files `dependabot` claims, so it wrote nothing: <check's refusal>; fix that and run the `remove` task again, or give it --keep-files to stop wearing `dependabot` and leave every file in place
@@ -1558,8 +1582,9 @@ is the argument parser's and exits with status 2 before any of these.)
   clean work tree says nothing about a file git is told not to read, so
   `remove` asks git's index about the two files it changes. The manifest has to
   be tracked and read from the work tree, and so does a `Cargo.lock` that git
-  tracks; an ignored or untracked `Cargo.lock` is allowed, and the last line
-  then leaves it out of what to commit:
+  tracks; a `Cargo.lock` that git ignores is allowed, and the last line then
+  leaves it out of what to commit. (One that is untracked and not ignored is an
+  uncommitted change, refused above.)
 
   ```text
   ritual/Cargo.toml is marked skip-worktree in git's index, so git does not read its bytes from the work tree and would ignore what remove wrote there: run `git update-index --no-skip-worktree -- ritual/Cargo.toml`, then run the `remove` task again
@@ -1663,7 +1688,9 @@ object and `refused`, true when a refusal about it stands — its bones are
 then absent from `bones[]`), `bones[]` (one entry per bone not filtered
 out, each naming the skeleton it belongs to and carrying its own `drift`
 and its skeleton's `behind`), `refusals[]`, and `aborted` (`null`, or an
-object naming what stopped the whole command).
+object naming what stopped the whole command). A path named by an `overlap`
+refusal is no one's bone: it is absent from `bones[]`, counted nowhere in
+`summary`, and its claimants keep `refused: false`.
 
 **One shape rule governs every object in the document:** an object carries
 exactly the fields its own variant lists, and never a field of another
@@ -1965,9 +1992,10 @@ all empty, every count zero.
 `aborted.kind` (open — see [Versioning](#versioning) above) names why the
 workspace itself could not be read at all, before any survey of what it
 wears was possible — the same `kind` values [Refusals](#refusals) gives in
-full below. `message` carries the same text either command prints to
+full below. `message` carries the text `check` prints to
 `stderr` on this same abort, naming the command that failed and, where
-there is one, what to run next.
+there is one, what to run next. `sync` words the lockfile abort and the
+`cargo metadata` abort for itself.
 
 ### Every object, field by field
 
@@ -1976,14 +2004,16 @@ fields may gain values within format version 1 (see
 [Versioning](#versioning)).
 
 - **`filters`**: `[]`, `["drifted"]`, `["behind"]`, or
-  `["drifted", "behind"]` — the flags that narrowed `bones[]`. Nothing else
-  is ever filtered.
+  `["drifted", "behind"]` — the flags that narrowed `bones[]`, always in that
+  order whichever order the flags were typed in. With both, a bone is kept when
+  either flag would keep it. Nothing else is ever filtered.
 - **`summary`**: `bones`, `matches`, `drifted` (bones, by drift state);
   `skeletons`, `current`, `behind`, `pinned`, `undetermined` (worn
   skeletons, by behind state); `refusals`; and `failed`, the exit status as
   a boolean. Every count is over everything, whatever the filters:
   `matches + drifted` is `bones`, and the four behind counts sum to
-  `skeletons`.
+  `skeletons`. A path named by an `overlap` refusal is no one's bone, so it is
+  in none of the bone counts.
 - **`skeletons[]`**: `manifest`, `dependency`, `skeleton` (the skeleton's
   own crate name, the name its refusals are about), `version`, `pin`,
   `behind`, `refused`.

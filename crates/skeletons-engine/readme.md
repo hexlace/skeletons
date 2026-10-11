@@ -9,8 +9,9 @@ the wording each of them answers in.
 Without a feature it offers `read` and `survey`, for reading a workspace and
 reporting on it as data, with the items they take and return. The `commands`
 feature, off by default, adds `task()`, the group of the commands that
-`skeletons` hands on, together with the command-line framework, the network
-client and the manifest editor they are built on.
+`skeletons` hands on, together with every dependency only they use: the
+command-line framework, the network client, the manifest editor and the
+query-string decoder.
 
 This crate exists for `skeletons` and `skeletons-library`, and is published
 only because they depend on it. It makes no stability promise: anything in it

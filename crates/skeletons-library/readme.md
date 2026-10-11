@@ -124,13 +124,13 @@ downloads one.
 `check` writes nothing in the workspace. Cargo may still write to its own cache
 under `CARGO_HOME`, as any cargo command may: it unpacks a source that was
 downloaded but is not unpacked, which cargo's automatic cache cleaning can
-leave behind, and in an empty `CARGO_HOME` it makes the lock file and
-directories it keeps there. Where `CARGO_HOME` cannot be written, every locked
+leave behind, and in an empty `CARGO_HOME` it makes the files it keeps there,
+its lock file among them. Where `CARGO_HOME` cannot be written, every locked
 source must already be unpacked, as `cargo fetch` leaves it; otherwise cargo
 fails, and `check` reports it as `is_cargo_metadata_failed`.
 
 It needs nothing else. The workspace need not have been built, and its
-directory need not be a git repository. When every skeleton a workspace wears is
+directory need not be a git repository. When every dependency a workspace has is
 a `path` dependency, `cargo generate-lockfile --offline` is enough to make the
 lockfile. The library depends on no network client and no command-line
 framework.

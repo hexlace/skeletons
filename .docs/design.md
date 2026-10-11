@@ -21,10 +21,17 @@ configuration from drifting away from what it is meant to look like.
 ## Scope and status
 
 `skeletons` is a bundle of tasks for
-[ritual](https://github.com/hexlace/ritual). It has no binary of its own: a
-project adds it to its own ritual command line the way it would add any
-other bundle, and depends on `rituals` from crates.io the same way any of
-ritual's users does.
+[ritual](https://github.com/hexlace/ritual), holding the four commands. It has
+no binary of its own: a project adds it to its own ritual command line the way
+it would add any other bundle, and depends on `rituals` from crates.io the
+same way any of ritual's users does.
+
+The repository publishes three crates. `skeletons` is the bundle a command
+line mounts. `skeletons-library` is for a program that wants `check`'s verdict
+as data: it reads a workspace offline and writes nothing, with no ritual and no
+command line in it. Both are built on `skeletons-engine`, which holds the
+render and the commands (the commands behind its `commands` feature) and is
+published only because the other two depend on it.
 
 `skeletons` is the middle of three layers. **Ritual** is the runner. It
 gives every project its own command line and knows nothing about drift.
@@ -235,8 +242,9 @@ Every `{{` in a skeleton's text opens a placeholder, without exception. It must
 be followed, on the same line, immediately by a well-formed option name and
 then `}}` — nothing else counts. A space inside the braces
 (`{{ cadence }}`), a name that does not close before the line ends, a name
-that does not match the grammar, or an extra brace, is refused as a
-malformed placeholder rather than treated as literal text. There is no way
+that does not match the grammar, or an extra opening brace
+(`{{{cadence}}}`), is refused as a malformed placeholder rather than treated
+as literal text. A `}` or `}}` that closes nothing is ordinary text. There is no way
 to write a literal `{{` that survives a render unchanged in text that fills. A
 file that needs one is declared verbatim and never filled at all (see
 [Verbatim files](#verbatim-files)).
@@ -361,8 +369,8 @@ expression, `${{ secrets.TOKEN }}`, is refused as a malformed placeholder. That
 would make the design's own first example, a CI workflow copied in, impossible
 to write, and a release workflow is the first skeleton worth having. So a
 skeleton's manifest can list files as **verbatim**. A verbatim file gets no fill
-and no select: its render is its bytes, exactly as written, and `check`,
-`behind` and `sync` compare against it as against any other render.
+and no select: its render is its bytes, exactly as written, and `check`
+and `sync` compare against it as against any other render.
 
 ```toml
 [package.metadata.skeletons]
@@ -519,8 +527,9 @@ be reached for by habit, the workspace's own `clippy.toml` marks
 `std::collections::HashMap` and `HashSet` as disallowed types, with the
 reason recorded alongside: their iteration order changes from one process
 to the next, which is exactly the shape of bug this format cannot tolerate.
-Reaching for one of them is a lint error that has to be argued past
-explicitly, not merely a style preference.
+Reaching for one of them is a clippy warning, which CI's `-D warnings` turns
+into a failure, so it has to be argued past explicitly, not merely a style
+preference.
 
 ## Limits
 
@@ -576,7 +585,8 @@ change. It reports two things, and they are independent of one another:
 each *bone* either **matches** the render or has **drifted** from it, and
 each *skeleton* — once per dependency, never per bone — is current,
 **behind** a newer version than the one locked, whatever its version
-requirement allows, or **pinned** to a revision that nothing can be behind.
+requirement allows, or **pinned** to a fixed revision or a local path, which nothing can be
+behind.
 A bone can be
 drifted while its skeleton is current, or matching while its skeleton is behind;
 neither state implies the other, because they answer different questions —
@@ -718,7 +728,7 @@ an overlap (`ritual/tests/sync_free_paths.rs` →
 `a_success_never_leaves_a_claim_under_a_differently_spelled_directory`).
 
 A path absent from the work tree is looked up the other way round, by git's
-own case fold, asked of git itself: `ls-files --stage -z --
+own case fold, asked of git itself: `ls-files -v --stage -z --
 ':(literal,icase)<claim>'`, run without the global `--literal-pathspecs`
 (which disables every magic, `icase` too) and with `literal` magic keeping
 `*`, `?` and `[` ordinary. The reason is what `sync` must not write, which
@@ -998,8 +1008,8 @@ an entry for is refused for that entry, not for a rule.
 The command is built without the global `--literal-pathspecs`, because
 `check-ignore` refuses it (it exits 128 with
 `pathspec magic not supported by this command: 'literal'`, and the same for
-`GIT_LITERAL_PATHSPECS` and `GIT_GLOB_PATHSPECS`, which every builder here
-removes). It reads its path without expanding a wildcard: `*`, `?` and `[` are
+`GIT_LITERAL_PATHSPECS`, and for `GIT_GLOB_PATHSPECS` with `'glob'` named,
+which every builder here removes). It reads its path without expanding a wildcard: `*`, `?` and `[` are
 ordinary characters of the name, so a claim `*.log` is asked about as a file
 called `*.log` and a rule `x.log` does not ignore it, while `--no-index` is what
 keeps a tracked file that such a name reads like a glob of from answering for
@@ -1090,8 +1100,8 @@ one a truncated stream and the same bytes uncut
 `crates/skeletons-engine/src/sync/proof/ignored.rs` →
 `truncated_output_is_refused_whatever_the_exit_status_says`).
 
-Every git command is also bounded in time (30 seconds), and one that runs
-past it is killed and reported with what it was answering: the command, the
+Every git command `sync` runs is also bounded in time (30 seconds), and one
+that runs past it is killed and reported with what it was answering: the command, the
 path (or the directory, or the listing) it was reading, what most likely held
 it up, and how to find out. A `cat-file` names the content filter the
 repository configures for the path and `git check-attr filter`, which names it;
@@ -1250,7 +1260,7 @@ filter that downloads is the filter's own doing (see
 stashes anything either. It runs exactly five kinds of git command —
 `rev-parse`, `status`, `ls-files`, `cat-file` and `check-ignore`, each
 built with `--no-optional-locks` (`crates/skeletons-engine/src/git/command.rs` →
-`command`) — and none of them writes git's own index, refs, config or
+`command_for_pathspec_magic`, which `command` builds on) — and none of them writes git's own index, refs, config or
 object database (tested by snapshotting every byte under `.git/` before
 and after, outside `lfs/objects/`:
 `crates/skeletons-engine/src/sync/proof.rs` →
@@ -1313,10 +1323,12 @@ taken from a registry other than the default one reads **undetermined** and
 is never queried at all — see [Known limits](#known-limits). And when the
 network answer needed to decide behind cannot be reached at all — a DNS
 failure, a timeout, a git remote that no longer exists — the skeleton reads
-**undetermined** too, never **current**: every arm of `determine` that
-cannot answer returns `Behind::Undetermined` rather than falling through to
-`Current`, so no path reads a failure as "not
-behind" by omission (`crates/skeletons-engine/src/behind.rs`; tested by
+**undetermined** too, never **current**: every arm that cannot
+answer, in `determine` and the functions it settles each pin through, returns
+`Behind::Undetermined` rather than falling through to `Current`, so no path
+reads a failure as "not
+behind" by omission (`crates/skeletons-engine/src/behind.rs`,
+`crates/skeletons-engine/src/behind/branch_directory.rs`; tested by
 `ritual/tests/check_behind_registry.rs` →
 `network_unreachable_reads_undetermined_and_does_not_change_the_default_exit_status`).
 
@@ -1336,7 +1348,7 @@ one local `git rev-parse --show-prefix HEAD HEAD:./`, giving the skeleton's
 own directory prefix and its tree object at the locked commit
 (`crates/skeletons-engine/src/behind/cargo_checkout.rs` → `locked_directory`). The
 remote side is the head commit alone, fetched (`--depth=1
---filter=blob:none`) into a temporary bare repository this crate creates
+--filter=blob:none`) into a temporary bare repository `skeletons` creates
 and removes (`crates/skeletons-engine/src/behind/snapshot.rs` → `directory_trees`;
 `crates/skeletons-engine/src/behind/temporary_directory.rs`), never the wearer's
 repository or Cargo's own checkout, both of which are only ever read. The
@@ -1375,7 +1387,7 @@ and → `a_checkout_at_another_commit_than_the_locked_one_is_refused_naming_its_
 with the wording of both refusals tested in `crates/skeletons-engine/src/behind/branch_directory.rs`
 → `a_checkout_at_another_commit_reads_checkout_unreadable_naming_both_commits`
 and → `an_unreadable_checkout_reads_checkout_unreadable_carrying_the_diagnostic`). A failure creating or
-initialising the temporary repository, before any network request was made,
+initialising the temporary repository, before the fetch was attempted,
 reads `local-failure`, so a local fault is not reported as an unreachable
 remote (`crates/skeletons-engine/src/behind/branch_directory.rs` →
 `finalize_branch_directory_reads_each_snapshot_failure_as_its_own_undetermined_reason`).
@@ -1402,7 +1414,7 @@ about how wearing works changes. A repository that wears a skeleton by hand and
 one that used `wear` are the same repository.
 
 **Cargo does the dependency half.** `wear` runs
-`cargo add --dev --package <package> …`, so a registry, a git repository and a
+`cargo add --dev --package=<package> …`, so a registry, a git repository and a
 directory all work, the version grammar is Cargo's own, and `skeletons` reads no
 source and resolves no version. Every flag that takes a value is handed over as
 `--flag=value`, one argument, so a url or directory that begins with `-` cannot
@@ -1499,9 +1511,10 @@ workspace root (the root itself is shown whole, and what Cargo or git print in
 their own words is theirs). `rollback` is handed the two files as absolute
 paths, together with the workspace root, and spells its own report from that
 root, so `wear` does not change the working directory. Nothing inside the
-rollback run depends on the working directory: `cargo add`, the read back and
-every `git` question are given the directory they run in, which is where the
-command was run, so a relative `--path` still means what the wearer typed
+rollback run depends on the working directory: `cargo add` and the read back
+are given the directory the command was run in, so a relative `--path` still
+means what the wearer typed, and every `git` question is given the workspace
+root, with each path spelled relative to it
 (`crates/skeletons-engine/src/wear.rs` → `run`). The one exception is `rollback`'s own
 `reading <path> failed` and `writing <path> failed`, which name the path as it
 was handed; both checks before the write make them unreachable short of a race
@@ -1825,7 +1838,8 @@ under a bare run and under `--delete-files` alike
 
 **The files are deleted last, and a failed delete is not undone.** Rollback
 records a file it writes and restores it from its bytes, which would lose its
-mode, and it records no deletion at all. So the files are not recorded: they are
+mode, and it records no deletion of a file at all (the one removal it records is
+of an empty directory, which `remove` does not use). So the files are not recorded: they are
 deleted for real, after the manifest and `Cargo.lock` are written and the read
 back has shown the wearing gone, and git is what holds them, which is why each
 passes the proof before anything is written. The deletes run inside the same
@@ -1859,7 +1873,8 @@ found after the manifest was written
 (`crates/skeletons-engine/src/remove.rs` →
 `a_read_back_that_still_finds_the_wearing_is_a_defect_and_both_files_come_back`),
 and a change made around the run is overwritten. Nothing fails after the
-success lines are printed: the deletes are the last thing the run does before it
+success lines are printed: the deletes, and the removal of the directories they
+emptied, which cannot fail the run, are the last things the run does before it
 prints.
 
 **The manifest is edited in place, not by `cargo remove`.** `cargo remove` also
@@ -1957,8 +1972,8 @@ edits would otherwise be mixed into what `remove` wrote or deleted
 (`ritual/tests/remove_refusals.rs` →
 `a_work_tree_with_an_uncommitted_change_is_refused_and_nothing_is_written`).
 Then the manifest and `Cargo.lock` are put to the questions `wear` asks of them,
-whether git can hand them back and whether they can be written in place, then
-and each file in the work tree is put to the proof and the files are judged by
+whether git can hand them back and whether they can be written in place, and
+then each file in the work tree is put to the proof and the files are judged by
 it.
 
 **What the code settled.** The first is a directory the deletion leaves
@@ -2048,13 +2063,12 @@ case-insensitive filesystem would take for it, at any depth.
 
 **Not every invisible-looking character hides a directive.** The set this
 treats as invisible is Unicode whitespace, general category Cf (format) and
-general category Cc (control) — the same general-category table this crate
-already carries for other purposes, so recognising a hidden directive needs
-no dependency of its own. Default-ignorable characters outside that set —
+general category Cc (control) — read from the general-category table of
+`unicode-properties`, the one dependency taken for this. Default-ignorable characters outside that set —
 the combining grapheme joiner, a variation selector, a Hangul filler, a
 Mongolian free variation selector — are not recognised, because nothing
 realistic puts one of them in front of a directive, and recognising them
-would need another Unicode table this crate does not otherwise need.
+would need another Unicode table.
 
 **What a wearer renders is the skeleton as its dependency delivers it, not the
 author's working tree.** A registry dependency delivers the packaged crate,
@@ -2143,27 +2157,30 @@ wearer at all.
 **A render carries bytes only; it has no file mode.** What a render yields
 for a file is its content, never its permissions. The format has no way to
 declare that a file should be executable, and neither `check` nor `sync`
-reads or compares a wearing repository's file modes. This is a limit of the
+compares a wearing repository's file modes with anything a skeleton says.
+`sync` carries the mode a file already has onto its replacement, and creates
+a missing file with the default mode. This is a limit of the
 format, not a design position: a way to carry a mode could be added. While
 there is none, `check` and `sync` never have to guess whether a mode
 difference is drift or a wearer's own deliberate `chmod`, which is exactly
 the kind of guess this format refuses to make everywhere else.
 
-**`options` can never be a worn dependency key.** A workspace member's
-`[package.metadata.skeletons.options]` is read as that member's own declared
-skeleton schema (see [skeleton-format.md](skeleton-format.md)), not as a wearing table,
-whether or not the member actually is a skeleton. A member that depends on some
-other crate renamed to `options` can therefore never wear it: the table is
-refused, naming the rename that would fix it — see
+**`options` and `verbatim` can never be worn dependency keys.** A workspace
+member's `[package.metadata.skeletons.options]` and `verbatim` are read as that
+member's own declared skeleton schema (see [skeleton-format.md](skeleton-format.md)),
+not as a wearing table, whether or not the member actually is a skeleton. A
+member that depends on some other crate renamed to either can therefore never
+wear it: the table is refused, naming the rename that would fix it — see
 [The wearing table](wearing.md#the-wearing-table) in the wearing reference.
 
 **A skeleton cannot itself wear skeletons.** A wearing table is only ever
-read from a workspace member's own manifest; a skeleton dependency itself
-sits outside the workspace, so any
-`[package.metadata.skeletons.<dependency>]` table its own manifest carries
-is never seen. A skeleton that itself depends on another skeleton gets no
-`check`/`sync` behaviour for that dependency — only the wearing
-repository's own workspace members can wear anything.
+read from a workspace member's own manifest. A skeleton's manifest may hold
+only `options` and `verbatim` under `[package.metadata.skeletons]`, so a
+`[package.metadata.skeletons.<dependency>]` table there is refused as an
+unknown key, and that skeleton cannot be worn at all. A skeleton that itself
+depends on another skeleton gets no `check`/`sync` behaviour for that
+dependency — only the wearing repository's own workspace members can wear
+anything.
 
 **A skeleton taken from a registry other than crates.io always reads
 `behind` as undetermined, and is never queried at all.** Nothing about how

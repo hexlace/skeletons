@@ -21,8 +21,8 @@ pub(crate) struct WornId {
 }
 
 /// One `[package.metadata.skeletons.<key>]` table that named a real skeleton:
-/// located, pinned, and either holding a valid set of choices or refused on
-/// its own option values.
+/// located, at its locked version, and either holding a valid set of choices
+/// or refused on its own option values.
 pub struct WornDependency {
     /// The wearing member's own `Cargo.toml`, relative to the workspace
     /// root, `/`-separated — the file a person opens to change anything.

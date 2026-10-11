@@ -74,7 +74,10 @@ pub enum RefusalKind {
     Ambiguous,
     /// The resolved package is not a skeleton.
     NotASkeleton,
-    /// A value recorded for one of the skeleton's options was refused.
+    /// What was recorded for the skeleton's options was refused: a value of
+    /// the wrong shape or outside what the option allows, a value for an
+    /// option the skeleton does not declare, or values whose render is too
+    /// large.
     OptionRefused,
     /// The skeleton itself is defective.
     SkeletonInvalid,

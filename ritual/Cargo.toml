@@ -38,8 +38,9 @@ serde_json.workspace = true
 # `[dev-dependencies]` entries for any build that activates dev-dependencies, so
 # the `ritual` binary `cargo test` builds (the one `CARGO_BIN_EXE_ritual` points
 # `tests/` at) carries `skeletons`' `test-util` feature, while
-# `cargo build`/`cargo run` of that same binary — a real project's own command
-# line — never activates a dev-dependency and so never does.
+# `cargo build`/`cargo run` of that same binary does not, since this workspace
+# uses feature resolver 3. A real project's own command line is likewise free of
+# it in a workspace that uses resolver 2 or later.
 skeletons = { workspace = true, features = ["test-util"] }
 
 [package.metadata.ritual]

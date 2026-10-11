@@ -6,20 +6,22 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 keywords.workspace = true
-description = "The engine behind skeletons and skeletons-library: check, sync, wear and remove."
+description = "The engine behind skeletons and skeletons-library. Published for those two, with no stability promise: depend on one of them instead."
 readme = "readme.md"
 categories = ["development-tools"]
-# Test skeletons are real crates under this one's own directory, each with a
-# `Cargo.toml` Cargo would otherwise see as packageable content. They exist
-# to be read from a checkout by this crate's own test suite, never to ship in
-# the published package: excluding the whole directory here is the one line
-# that keeps them out, since a directory holding its own `Cargo.toml` is
-# still packaged alongside loose files that sit next to it.
+# Test skeletons are real crates under this one's own directory. They exist to
+# be read from a checkout by this crate's own test suite, never to ship in the
+# published package. Cargo already leaves a subdirectory out of a package when
+# it holds its own `Cargo.toml`, but not the files beside those directories:
+# `test-skeletons/.gitattributes` would ship, and bring the directory with it.
+# `build.rs` takes the directory being there as the mark of a checkout, and
+# watches that file to notice it going. Excluding the whole directory keeps all
+# of it out, whatever is added there later.
 #
 # `src/behind/captures` is real, captured crates.io sparse-index responses.
 # `behind/index_entries.rs`'s own unit tests read them at compile time
-# (`include_bytes!`); `ritual/tests/` reads them again at runtime, from this
-# same checkout, for the registry-`behind` tests. Neither reader is
+# (`include_bytes!`); the repository's `ritual/tests/` reads them again at
+# runtime, from the same checkout, for the registry-`behind` tests. Neither reader is
 # production code, so this ships to no wearer's build either.
 #
 # `src/workspace/fixtures` is captured `cargo` output and a `cargo metadata`
@@ -37,39 +39,43 @@ exclude = ["/test-skeletons", "/src/behind/captures", "/src/workspace/fixtures"]
 # builds. Optional, turned on by the `commands` feature.
 rituals = { workspace = true, optional = true }
 # The commands': ritual's `rollback`, which `wear` and `remove` write through:
-# see the workspace manifest. Optional, turned on by the `commands` feature.
+# see the repository's root `Cargo.toml`. Optional, turned on by the `commands` feature.
 rituals-compose = { workspace = true, optional = true }
 # The commands': writing the wearing table into the command line's manifest in
 # place, and taking it out again, keeping every comment and blank line the
-# wearer wrote there (`wear/table.rs`, `remove/manifest.rs`). The same 0.22
-# that `rituals-compose` already compiles, so no new package arrives. Optional,
+# wearer wrote there (`wear/table.rs`, `remove/manifest.rs`). The same version
+# `rituals-compose` already compiles, so no new package arrives. Optional,
 # turned on by the `commands` feature.
 toml_edit = { workspace = true, optional = true }
 # Reading `[package.metadata.skeletons]` out of a skeleton's own `Cargo.toml`. Real
 # library code, compiled into every build: `check` calls `skeleton::render` for
-# every worn skeleton.
+# every worn skeleton. With `commands`, `wear` and `remove` also parse the
+# manifest they rewrote with it, to check the edit.
 toml.workspace = true
 # Refusing two names in one skeleton directory that a filesystem ignoring case
-# or Unicode normalization would take as one: see the workspace manifest.
+# or Unicode normalization would take as one: see the repository's root
+# `Cargo.toml`. `unicode-normalization` also tells a message when two spellings
+# it names differ only in normalization (`survey/spelling.rs`).
 caseless.workspace = true
 unicode-normalization.workspace = true
-# Refusing a directive hidden behind invisible characters: see the
-# workspace manifest.
+# Refusing a directive hidden behind invisible characters: see the repository's
+# root `Cargo.toml`.
 unicode-properties.workspace = true
 # Parsing `cargo metadata`'s JSON (`workspace/schema.rs`) and printing
-# `check --json`'s own document (`check/json.rs`).
+# `check --json`'s own document (`check/json.rs`) and, with `commands`, reading
+# crates.io index entries (`behind/index_entries.rs`).
 serde.workspace = true
 serde_json.workspace = true
-# Parsing a locked package's version and comparing it against a crates.io
-# index entry.
+# Parsing a locked package's version and comparing against it the versions a
+# crates.io index entry or a git remote's release tags name.
 semver.workspace = true
 # The commands': decoding a git source's query string in `workspace/pin.rs`.
 # Optional, turned on by the `commands` feature.
 form_urlencoded = { workspace = true, optional = true }
 # The commands': asking crates.io's sparse index whether a registry-pinned
-# skeleton is behind (`behind/crates_io.rs`). See the workspace dependency
-# comment for why `ureq`, and why `rustls` alone. Optional, turned on by the
-# `commands` feature.
+# skeleton is behind (`behind/crates_io.rs`). See the comment on this dependency
+# in the repository's root `Cargo.toml` for why `ureq`, and why `rustls` alone.
+# Optional, turned on by the `commands` feature.
 ureq = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -82,9 +88,9 @@ tempfile.workspace = true
 # The commands `check`, `sync`, `wear` and `remove`, the work-tree checks and the
 # `behind` query they share, and `task()`, which groups them, together with
 # every dependency only they use: the command-line framework, the network
-# client and the manifest editor. Off by default, so a project that only reads
-# a workspace and surveys it compiles none of those. `skeletons` turns it on
-# for the bundle it hands on, and nothing else needs to.
+# client, the manifest editor and the query-string decoder. Off by default, so
+# a project that only reads a workspace and surveys it compiles none of those.
+# `skeletons` turns it on for the bundle it hands on, and nothing else needs to.
 commands = [
     "dep:rituals",
     "dep:rituals-compose",
@@ -102,12 +108,21 @@ commands = [
 # unit-test build has the same seams without the feature, since they are
 # gated on `any(test, feature = "test-util")`; the feature is for a
 # dependent's tests, and for tests only. A project reaches it through the
-# `test-util` feature of `skeletons`, which forwards to this one. Never
-# enabled by `cargo build`/`cargo run` of a command line that mounts the
-# bundle, and never to be enabled outside `[dev-dependencies]` — only
-# `cargo test` unifies it in, and only because `ritual/Cargo.toml` asks for it
-# as a dev-dependency feature (see that manifest's own comment).
+# `test-util` feature of `skeletons`, which forwards to this one. Never to be
+# enabled outside `[dev-dependencies]`. Under feature resolver 2 or later it
+# then stays out of a plain `cargo build` or `cargo run` of a command line that
+# mounts the bundle; under resolver 1 Cargo unifies a dev-dependency's features
+# into that plain build too. In this
+# repository the two command-line packages ask for it as a dev-dependency
+# feature of `skeletons`, so it is on only in a build that includes their test
+# targets (`cargo test`, or a build or lint given `--tests` or `--all-targets`).
 test-util = []
+
+# docs.rs builds with the default features, which would leave `task()`, the
+# one public item `commands` adds, off the page. `test-util` stays off: it
+# compiles test seams and adds nothing to a page.
+[package.metadata.docs.rs]
+features = ["commands"]
 
 [lints]
 workspace = true

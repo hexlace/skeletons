@@ -7,16 +7,16 @@
 //! network only when it is handed [`Network::Allowed`]. [`survey()`] renders
 //! every worn skeleton and compares what it renders with the files on disk,
 //! and writes nothing. The items they take and return carry the answer: each
-//! worn skeleton, each file it claims with its state, and each refusal with
-//! the wearings and paths it concerns.
+//! worn skeleton, each claimed file that could be compared, with its state,
+//! and each refusal with the wearings and paths it concerns.
 //!
 //! ## Features
 //!
 //! - `commands` adds `task()`, the group of the commands `check`, `sync`,
-//!   `wear` and `remove` that `skeletons` hands on as its own bundle, with the
-//!   command-line framework, the network client and the manifest editor they
-//!   are built on. It is off by default, and `skeletons` is the one that turns
-//!   it on.
+//!   `wear` and `remove` that `skeletons` hands on as its own bundle, with
+//!   every dependency only they use: the command-line framework, the network
+//!   client, the manifest editor and the query-string decoder. It is off by
+//!   default, and `skeletons` is the one that turns it on.
 //! - `test-util` compiles in the seams that let a dependent's tests observe or
 //!   redirect a real network request or a real wait. Every one of them sits in
 //!   the commands, so it changes nothing without `commands`.
@@ -89,6 +89,8 @@ mod doc_citations;
 ///
 /// This is what `skeletons` hands on as its own `task()`, for a command line to
 /// mount under whatever name imports it.
+///
+/// This function exists only with the `commands` feature.
 //
 // No `# Examples` section: a `task()` function has one call-site shape, a
 // mount line in the command line that imports it, and no arguments to

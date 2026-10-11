@@ -95,9 +95,9 @@ impl ReadWorkspaceError {
     /// Whether cargo could not be started although the `directory` given to
     /// `check` was a directory when looked at afterwards: there is no `cargo`
     /// on `PATH` and none named by `$CARGO`, a program that cannot be run, or a
-    /// directory that cannot be entered. [`detail`](Self::detail) holds the
-    /// operating system's words, which do not say which. This is the
-    /// `cargo-unavailable` word.
+    /// directory that cannot be entered. [`detail`](Self::detail) holds
+    /// `failed to run: ` followed by the operating system's words, which do not
+    /// say which. This is the `cargo-unavailable` word.
     #[must_use]
     pub fn is_cargo_not_started(&self) -> bool {
         matches!(self.kind, ErrorKind::CargoNotStarted)
@@ -122,10 +122,11 @@ impl ReadWorkspaceError {
     }
 
     /// The text that came with the failure, whoever wrote it: cargo's standard
-    /// error when cargo ran and failed, the operating system's words when cargo
-    /// could not be started or the directory was not found, what was wrong when
-    /// the output could not be used. `None` when nothing came, which is always
-    /// so for a lockfile that is not current.
+    /// error when cargo ran and failed, `failed to run: ` followed by the
+    /// operating system's words when cargo could not be started or the
+    /// directory was not found, what was wrong when the output could not be
+    /// used. `None` when nothing came, which is always so for a lockfile that
+    /// is not current.
     #[must_use]
     pub fn detail(&self) -> Option<&str> {
         self.detail.as_deref()

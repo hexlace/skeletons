@@ -16,6 +16,11 @@ instead. The
 [`skeletons` readme](https://github.com/hexlace/skeletons#readme) covers what
 it is for, and how a repository wears its first skeleton.
 
+A program that wants the verdict as data, with no command line, depends on
+[`skeletons-library`](https://crates.io/crates/skeletons-library) instead.
+Both are built on `skeletons-engine`, which is published only for them and
+makes no stability promise.
+
 ## Mounting the bundle
 
 A project mounts the bundle with ritual's `import`, from anywhere inside the
@@ -71,9 +76,11 @@ failure names the files deleted and the files not.
 
 None of these commands runs a git command that writes the repository's own
 index, refs, config or object database. A content filter the repository
-configures can, and `sync` and `remove` run one while they read a file to prove
-git holds it: git-lfs's clean filter can add an object under
-`.git/lfs/objects/`, and never changes one already there. The one repository
+configures can: `sync`, `wear` and `remove` ask `git status` whether the work
+tree is clean, which may run a filter's clean side, and `sync` and `remove` run
+a filter's smudge side while they read a file to prove git holds it. git-lfs's
+filters can add an object under `.git/lfs/objects/`, and never change one
+already there. The one repository
 `check` writes to is a temporary one of its own, created and removed within the
 run, when the head of a `branch` pin has moved, or of a `git` dependency that
 names none of `tag`, `branch` or `rev`.

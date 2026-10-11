@@ -194,17 +194,18 @@ mod tests {
         std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied for the test")
     }
 
-    /// A deleter that really deletes the first `succeeding` files it is asked
-    /// to and returns [`denied`] for every one after them, counting calls
-    /// rather than reading a clock.
-    fn deleting_the_first(succeeding: usize) -> impl FnMut(&Path) -> std::io::Result<()> {
+    /// A deleter that really deletes every file it is asked to except the
+    /// `failing`th, counted from one, for which it returns [`denied`]. It
+    /// counts calls rather than reading a clock, and it goes on deleting after
+    /// the failure, so a deletion that did not stop would show.
+    fn deleting_except_call(failing: usize) -> impl FnMut(&Path) -> std::io::Result<()> {
         let mut asked = 0_usize;
         move |path| {
             asked += 1;
-            if asked <= succeeding {
-                delete_from_disk(path)
-            } else {
+            if asked == failing {
                 Err(denied())
+            } else {
+                delete_from_disk(path)
             }
         }
     }
@@ -331,11 +332,11 @@ mod tests {
 
     #[test]
     fn a_delete_failing_after_an_earlier_one_reports_which_were_deleted_and_which_were_not() {
-        // Three files, the first in a directory of its own. The first delete
-        // really happens and the second is refused, so the third is never
-        // tried. The directory the first emptied is still there, because no
-        // directory is removed once a file delete has failed, and the second
-        // and third files are untouched.
+        // Three files, each in a directory of its own. The second delete is
+        // refused and every other one really happens, so the third file is
+        // still there only if the deleting stopped at the second. The
+        // directory the first file emptied is still there, because no
+        // directory is removed once a file delete has failed.
         let directory = tempfile::tempdir().expect("a temporary directory");
         let root = directory.path();
         fill(root, "a/one.yml", b"one\n");
@@ -345,7 +346,7 @@ mod tests {
         let failed = deleting(
             root,
             &["a/one.yml", "b/two.yml", "c/three.yml"],
-            deleting_the_first(1),
+            deleting_except_call(2),
         )
         .expect_err("the second delete is refused");
 
@@ -378,7 +379,7 @@ mod tests {
         fill(root, "a.yml", b"a\n");
         fill(root, "b.yml", b"b\n");
 
-        let failed = deleting(root, &["a.yml", "b.yml"], deleting_the_first(0))
+        let failed = deleting(root, &["a.yml", "b.yml"], deleting_except_call(1))
             .expect_err("the first delete is refused");
 
         assert_eq!(

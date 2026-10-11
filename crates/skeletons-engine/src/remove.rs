@@ -1010,13 +1010,13 @@ mod tests {
                 nothing_left(),
                 |path| {
                     asked += 1;
-                    if asked == 1 {
-                        deletion::delete_from_disk(path)
-                    } else {
+                    if asked == 2 {
                         Err(std::io::Error::new(
                             std::io::ErrorKind::PermissionDenied,
                             "denied for the test",
                         ))
+                    } else {
+                        deletion::delete_from_disk(path)
                     }
                 },
             )

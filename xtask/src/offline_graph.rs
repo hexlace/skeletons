@@ -7,12 +7,16 @@
 //! half must not pay for the second, and nothing in the engine's own tests
 //! can say so, because they build the engine with whatever features the test
 //! run unifies. So the question goes to Cargo itself: `cargo tree` for one
-//! package at a time, normal edges only, offline.
+//! package at a time, normal edges only, against the lockfile as it stands.
 //!
 //! `--package` resolves that package alone, so another workspace member that
 //! turns `commands` on cannot turn it on for the package asked about, and the
-//! answer does not depend on how this test binary was built. The workspace's
-//! sources must already be fetched, which any build of it has done.
+//! answer does not depend on how this test binary was built. `--locked` pins
+//! the graph to `Cargo.lock`, so the answer does not depend on the network
+//! either. The query is not run offline: reading a package's dependencies
+//! takes its source, and a cargo home that has built only `xtask` does not
+//! hold the engine's. Cargo fetches what the lockfile names, as any build of
+//! the workspace does, so a cold cargo home is never what fails this check.
 //!
 //! Each answer is asked of the same instrument twice over. The packages that
 //! must be absent are looked for in the build without the commands; the same
@@ -52,7 +56,6 @@ enum Features {
 fn normal_graph(root: &str, features: Features) -> Vec<String> {
     let mut arguments = vec![
         "tree",
-        "--offline",
         "--locked",
         "--package",
         root,

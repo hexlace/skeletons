@@ -31,7 +31,8 @@ serde_json.workspace = true
 # unifies a package's features across its `[dependencies]` and
 # `[dev-dependencies]` only for a build that activates dev-dependencies, so the
 # `wearer` binary `cargo test` builds carries `test-util`, and a plain build of
-# the workspace resolves `skeletons` without it.
+# the workspace resolves `skeletons` without it, because this workspace uses
+# feature resolver 3.
 skeletons = { workspace = true, features = ["test-util"] }
 
 [lints]

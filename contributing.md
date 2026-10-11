@@ -307,7 +307,8 @@ dev-dependency with `features = ["test-util"]`, and Cargo unifies that into
 the `ritual` and `wearer` binaries `cargo test` builds (the ones
 `CARGO_BIN_EXE_ritual` and `CARGO_BIN_EXE_wearer` point `tests/` at) — but
 never into `cargo build`/`cargo run` of those binaries, since neither
-activates a dev-dependency.
+activates a dev-dependency, which holds because this workspace uses feature
+resolver 3.
 
 A fourth variable, `SKELETONS_TEST_ONLY_BUILD_SCRIPT_MARKER`, is unrelated to
 `test-util`: it is read by the `build-script-marker` test skeleton's own

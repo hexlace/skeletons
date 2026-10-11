@@ -1723,9 +1723,20 @@ half-written wearing is exactly what a person wants gone
 line names what the lockfile resolved: a dependency that resolved to a skeleton
 is named with its crate and locked version, whether or not its files can be
 known, since the files are a separate question that `--keep-files` never asks.
-They are left where they are whatever the survey made of them
+`--keep-files` asks nothing of the skeleton or the files: no skeleton is
+rendered and no file is compared with the work tree, so the files are left
+where they are whatever a survey would have made of them
 (`crates/skeletons-engine/src/remove/files.rs` →
-`keep_files_leaves_everything_whether_the_files_are_known_or_not`).
+`keep_files_leaves_everything_whether_the_files_are_known_or_not`, and →
+`keep_files_never_asks_for_the_files`). That is what makes it the way out for a
+wearing whose skeleton cannot be rendered or read at all, not only for one the
+survey refuses for a defect it names: a wearing whose skeleton's files can no
+longer be read is stopped all the same
+(`ritual/tests/remove_files.rs` →
+`a_wearing_whose_skeleton_cannot_be_read_is_stopped_with_keep_files`). A flag
+that deletes asks for the files exactly once
+(`crates/skeletons-engine/src/remove/files.rs` →
+`a_flag_that_deletes_asks_for_the_files_exactly_once`).
 
 **A file is deleted only on the proof `sync` asks before it overwrites one.** A
 clean work tree does not say that git could give a file back. An untracked file
@@ -1964,9 +1975,9 @@ anything is written.** The workspace is read `--locked` and only `--locked`
 first, so a lockfile that is stale or missing is refused before bringing it
 current could rewrite more of it than the skeleton, and no read made before the
 write rewrites it. What that read holds answers the refusals that are about the
-name and the manifest as they stand. The files are surveyed and planned next,
-whatever flag was typed. The work tree is asked after those, so a request that is wrong is
-refused as wrong whether or not the tree is clean, and it is the whole-tree
+name and the manifest as they stand. The files are planned next, and surveyed
+only for a flag that deletes them. The work tree is asked after those, so a
+request that is wrong is refused as wrong whether or not the tree is clean, and it is the whole-tree
 question `sync` asks, counting every uncommitted path, because the person's own
 edits would otherwise be mixed into what `remove` wrote or deleted
 (`ritual/tests/remove_refusals.rs` →

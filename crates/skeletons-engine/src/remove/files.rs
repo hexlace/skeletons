@@ -4,9 +4,10 @@
 //! that can be said at all.
 //!
 //! The decision is in two steps, so that each is a pure function of values.
-//! [`plan`] reads the flag the wearer typed and the files the skeleton claims,
-//! and says what to try: nothing, or to put every file that is in the work tree
-//! to git and judge the answers by a [`Rule`]. [`Plan::settle`] then takes
+//! [`plan`] reads the flag the wearer typed and, for a flag that deletes, asks
+//! for the files the skeleton claims, and says what to try: nothing, or to put
+//! every file that is in the work tree to git and judge the answers by a
+//! [`Rule`]. [`Plan::settle`] then takes
 //! git's answer for each of those files, in path order, and says what became of
 //! them, which is what the success lines report.
 //!
@@ -238,7 +239,7 @@ pub(crate) enum Rule {
 /// can give back any of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Plan {
-    /// `--keep-files`: nothing is touched, whatever the survey found.
+    /// `--keep-files`: nothing is touched, and no survey is made to say so.
     LeaveAll,
     /// Ask git about every file that is in the work tree and that is not the
     /// lockfile `remove` brings current, in path order, and judge the answers
@@ -458,10 +459,12 @@ impl Settlement {
 
 /// Decides what to try with the files of one wearing.
 ///
-/// `--keep-files` touches no file, so it leaves every one whatever `claimed`
-/// is, and files that cannot be known stop nothing. Every other flag deletes
-/// from the files that are there, and so needs to know them all. Neither is
-/// judged here: which files git can give back is asked of git first, and the
+/// `--keep-files` touches no file, so it needs to know none: it leaves every
+/// one and never calls `claimed`, which is how a skeleton that cannot be
+/// rendered or read stops nothing there, and why no file is compared with the
+/// work tree for it. Every other flag deletes from the files that are there,
+/// and so calls `claimed` exactly once to learn them all. Neither is judged
+/// here: which files git can give back is asked of git first, and the
 /// rule is applied to what it says in [`Plan::settle`]. A claimed file whose
 /// path is `lockfile`, spelled as a claim spells a path, is set aside here, and
 /// git is never asked about it. The comparison is exact text. A claim spelled
@@ -475,14 +478,19 @@ impl Settlement {
 ///
 /// Returns [`Unknowable`] when the flag would delete files and a refusal names
 /// the wearing, so the files it claims are not all known.
-pub(crate) fn plan(flag: FilesFlag, claimed: Claimed, lockfile: &str) -> Result<Plan, Unknowable> {
-    let (rule, files) = match (flag, claimed) {
-        (FilesFlag::KeepFiles, _) => return Ok(Plan::LeaveAll),
-        (FilesFlag::Bare | FilesFlag::DeleteFiles, Claimed::Unknown(unknowable)) => {
-            return Err(unknowable);
-        }
-        (FilesFlag::Bare, Claimed::Known(files)) => (Rule::KeepAllIfOneChanged, files),
-        (FilesFlag::DeleteFiles, Claimed::Known(files)) => (Rule::DeleteAll, files),
+pub(crate) fn plan(
+    flag: FilesFlag,
+    claimed: impl FnOnce() -> Claimed,
+    lockfile: &str,
+) -> Result<Plan, Unknowable> {
+    let (rule, files) = match flag {
+        FilesFlag::KeepFiles => return Ok(Plan::LeaveAll),
+        FilesFlag::Bare => (Rule::KeepAllIfOneChanged, claimed()),
+        FilesFlag::DeleteFiles => (Rule::DeleteAll, claimed()),
+    };
+    let files = match files {
+        Claimed::Known(files) => files,
+        Claimed::Unknown(unknowable) => return Err(unknowable),
     };
     let mut present = Vec::new();
     let mut withheld = Vec::new();
@@ -510,6 +518,7 @@ pub(crate) fn plan(flag: FilesFlag, claimed: Claimed, lockfile: &str) -> Result<
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::path::PathBuf;
 
     use super::{
@@ -872,7 +881,7 @@ mod tests {
     #[test]
     fn bare_with_every_file_matching_asks_git_about_them_all_in_path_order() {
         assert_eq!(
-            plan(FilesFlag::Bare, all_matching(), LOCKFILE_PATH),
+            plan(FilesFlag::Bare, all_matching, LOCKFILE_PATH),
             Ok(prove(
                 Rule::KeepAllIfOneChanged,
                 &[
@@ -896,7 +905,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            plan(FilesFlag::Bare, claimed, LOCKFILE_PATH),
+            plan(FilesFlag::Bare, || claimed, LOCKFILE_PATH),
             Ok(prove(
                 Rule::KeepAllIfOneChanged,
                 &[("a.yml", Presence::Matches), ("b/c.yml", Presence::Changed)]
@@ -912,7 +921,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            plan(FilesFlag::Bare, claimed, LOCKFILE_PATH),
+            plan(FilesFlag::Bare, || claimed, LOCKFILE_PATH),
             Ok(prove(
                 Rule::KeepAllIfOneChanged,
                 &[("a.yml", Presence::Matches)]
@@ -925,7 +934,7 @@ mod tests {
         let claimed = Claimed::known(vec![file("a.yml", FileState::Missing)]);
 
         assert_eq!(
-            plan(FilesFlag::Bare, claimed, LOCKFILE_PATH),
+            plan(FilesFlag::Bare, || claimed, LOCKFILE_PATH),
             Ok(prove(Rule::KeepAllIfOneChanged, &[]))
         );
     }
@@ -933,7 +942,11 @@ mod tests {
     #[test]
     fn bare_over_a_skeleton_that_claims_no_file_asks_about_nothing() {
         assert_eq!(
-            plan(FilesFlag::Bare, Claimed::known(Vec::new()), LOCKFILE_PATH),
+            plan(
+                FilesFlag::Bare,
+                || Claimed::known(Vec::new()),
+                LOCKFILE_PATH
+            ),
             Ok(prove(Rule::KeepAllIfOneChanged, &[]))
         );
     }
@@ -947,7 +960,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            plan(FilesFlag::DeleteFiles, claimed, LOCKFILE_PATH),
+            plan(FilesFlag::DeleteFiles, || claimed, LOCKFILE_PATH),
             Ok(prove(
                 Rule::DeleteAll,
                 &[("a.yml", Presence::Changed), ("c.yml", Presence::Matches)]
@@ -960,7 +973,7 @@ mod tests {
         let claimed = Claimed::known(vec![file("a.yml", FileState::Missing)]);
 
         assert_eq!(
-            plan(FilesFlag::DeleteFiles, claimed, LOCKFILE_PATH),
+            plan(FilesFlag::DeleteFiles, || claimed, LOCKFILE_PATH),
             Ok(prove(Rule::DeleteAll, &[]))
         );
     }
@@ -968,24 +981,77 @@ mod tests {
     #[test]
     fn keep_files_leaves_everything_whether_the_files_are_known_or_not() {
         // `--keep-files` has no use for the files: it leaves them all, however
-        // the survey found them. Each case is one way it can have found them,
-        // and the last is the one every other flag refuses.
-        let cases = [
-            all_matching(),
-            Claimed::known(vec![
-                file("a.yml", FileState::Changed),
-                file("b.yml", FileState::Missing),
-            ]),
-            Claimed::known(Vec::new()),
-            unknown(),
+        // the survey would have found them. Each case is one way it could have
+        // found them, and the last is the one every other flag refuses. Each is
+        // handed over as the closure `plan` is given, and none is called.
+        let cases: [fn() -> Claimed; 4] = [
+            all_matching,
+            || {
+                Claimed::known(vec![
+                    file("a.yml", FileState::Changed),
+                    file("b.yml", FileState::Missing),
+                ])
+            },
+            || Claimed::known(Vec::new()),
+            unknown,
         ];
 
         for claimed in cases {
             assert_eq!(
-                plan(FilesFlag::KeepFiles, claimed.clone(), LOCKFILE_PATH),
-                Ok(Plan::LeaveAll),
-                "{claimed:?}"
+                plan(FilesFlag::KeepFiles, claimed, LOCKFILE_PATH),
+                Ok(Plan::LeaveAll)
             );
+        }
+    }
+
+    #[test]
+    fn keep_files_never_asks_for_the_files() {
+        // The files come from a survey that renders every worn skeleton, so
+        // asking for them is the work `--keep-files` must not do. Counts the
+        // calls made to the closure `plan` is given, over each way the files
+        // could be found, and expects none.
+        let cases: [fn() -> Claimed; 2] = [all_matching, unknown];
+
+        for claimed in cases {
+            let asked = Cell::new(0_usize);
+
+            let outcome = plan(
+                FilesFlag::KeepFiles,
+                || {
+                    asked.set(asked.get() + 1);
+                    claimed()
+                },
+                LOCKFILE_PATH,
+            );
+
+            assert_eq!(outcome, Ok(Plan::LeaveAll));
+            assert_eq!(asked.get(), 0, "the files were asked for");
+        }
+    }
+
+    #[test]
+    fn a_flag_that_deletes_asks_for_the_files_exactly_once() {
+        // Both flags that can delete need the files, and one answer is all they
+        // get: a second ask would be a second survey. Counts the calls over
+        // files that are known and files that are not, since a refusal still
+        // took the one answer.
+        let cases: [fn() -> Claimed; 2] = [all_matching, unknown];
+
+        for flag in [FilesFlag::Bare, FilesFlag::DeleteFiles] {
+            for claimed in cases {
+                let asked = Cell::new(0_usize);
+
+                let _outcome = plan(
+                    flag,
+                    || {
+                        asked.set(asked.get() + 1);
+                        claimed()
+                    },
+                    LOCKFILE_PATH,
+                );
+
+                assert_eq!(asked.get(), 1, "{flag:?}");
+            }
         }
     }
 
@@ -993,7 +1059,7 @@ mod tests {
     fn unknown_files_refuse_a_bare_run_and_a_delete_run_with_the_reasons() {
         for flag in [FilesFlag::Bare, FilesFlag::DeleteFiles] {
             assert_eq!(
-                plan(flag, unknown(), LOCKFILE_PATH),
+                plan(flag, unknown, LOCKFILE_PATH),
                 Err(Unknowable {
                     reasons: NonEmpty::new(Reason::Refused("one reason".to_owned()), Vec::new())
                 }),
@@ -1282,7 +1348,7 @@ mod tests {
                 ]);
 
                 assert_eq!(
-                    plan(flag, claimed, LOCKFILE_PATH),
+                    plan(flag, || claimed, LOCKFILE_PATH),
                     Ok(prove_beside(rule, &[("a.yml", MATCHES)], &["Cargo.lock"])),
                     "{flag:?} {state:?}"
                 );
@@ -1304,7 +1370,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            plan(FilesFlag::DeleteFiles, claimed, "workspace/Cargo.lock"),
+            plan(FilesFlag::DeleteFiles, || claimed, "workspace/Cargo.lock"),
             Ok(prove_beside(
                 Rule::DeleteAll,
                 &[
@@ -1325,7 +1391,7 @@ mod tests {
         let claimed = Claimed::known(vec![file("Cargo.lock", FileState::Changed)]);
 
         assert_eq!(
-            plan(FilesFlag::KeepFiles, claimed, LOCKFILE_PATH),
+            plan(FilesFlag::KeepFiles, || claimed, LOCKFILE_PATH),
             Ok(Plan::LeaveAll)
         );
     }
@@ -1366,7 +1432,7 @@ mod tests {
             file("ci.yml", FileState::Matches),
         ]);
 
-        let outcome = plan(FilesFlag::Bare, claimed, LOCKFILE_PATH)
+        let outcome = plan(FilesFlag::Bare, || claimed, LOCKFILE_PATH)
             .expect("the files are known")
             .settle(all_but(&[]));
 
@@ -1387,7 +1453,7 @@ mod tests {
             file("lint.yml", FileState::Matches),
         ]);
 
-        let outcome = plan(FilesFlag::Bare, claimed, LOCKFILE_PATH)
+        let outcome = plan(FilesFlag::Bare, || claimed, LOCKFILE_PATH)
             .expect("the files are known")
             .settle(all_but(&[]));
 
@@ -1411,7 +1477,7 @@ mod tests {
                 file("ci.yml", FileState::Matches),
             ]);
 
-            let outcome = plan(flag, claimed, LOCKFILE_PATH)
+            let outcome = plan(flag, || claimed, LOCKFILE_PATH)
                 .expect("the files are known")
                 .settle(all_but(&[]))
                 .expect("git is askable");
@@ -1424,7 +1490,7 @@ mod tests {
     fn a_claimed_lockfile_alone_leaves_nothing_to_delete_and_nothing_kept() {
         let claimed = Claimed::known(vec![file("Cargo.lock", FileState::Changed)]);
 
-        let outcome = plan(FilesFlag::Bare, claimed, LOCKFILE_PATH)
+        let outcome = plan(FilesFlag::Bare, || claimed, LOCKFILE_PATH)
             .expect("the files are known")
             .settle(|_| -> Result<Fate, ()> { panic!("git is asked about no file") })
             .expect("nothing is asked");

@@ -1210,7 +1210,9 @@ which exits with status 2 before `remove` looks at the project.
   changed or not. It is for a project that wore a large skeleton, edited a few
   of its files and now wants all of it gone.
 - **`--keep-files`** stops wearing the skeleton and leaves every claimed file
-  where it is, changed or not, and asks nothing about them.
+  where it is, changed or not. It asks nothing about the files and does not
+  render the skeleton, so it works even when the skeleton cannot be rendered or
+  read.
 
 A claimed file that is missing is nothing to delete. It is no reason to refuse
 and no reason to keep the others, and no line names it. When none of the files
@@ -1327,7 +1329,7 @@ the files it claims can be known. A dependency that is no skeleton, or that
 resolved to no one locked package, and a table with no dependency have no
 skeleton to name, so the line says what was taken out, and says when there was
 no dependency to take. Which files can be known is a separate question, and
-`--keep-files` never asks it.
+`--keep-files` never asks it: it renders no skeleton.
 
 ```text
 stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
@@ -1531,7 +1533,8 @@ these.)
   has dropped some of its files, and deleting from what is left would be a
   guess. Each reason is the refusal's `message` as `check --json` gives it (for a
   refusal about one worn skeleton it begins with the wearing), joined by `; `.
-  `--keep-files` is the way out, since it asks nothing about the files:
+  `--keep-files` is the way out, since it renders no skeleton and asks nothing
+  about the files:
 
   ```text
   remove cannot tell which files `dependabot` claims, so it wrote nothing: <check's refusal>; fix that and run the `remove` task again, or give it --keep-files to stop wearing `dependabot` and leave every file in place

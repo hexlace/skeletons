@@ -12,9 +12,9 @@ categories = ["development-tools"]
 
 [dependencies]
 # Reading a workspace and surveying it, which is all the answer is made from.
-# Asked for without its `commands` feature, so the command-line framework, the
-# network client and the manifest editor are never compiled for a project that
-# depends on this crate.
+# Asked for without its `commands` feature, so this crate brings in none of the
+# command-line framework, the network client, the manifest editor or the
+# query-string decoder.
 skeletons-engine.workspace = true
 # The type behind `Version`, which wraps it so that no dependency's type is
 # part of this crate's own interface.

@@ -1451,7 +1451,7 @@ be tracked and read from the work tree, tagged `H` and not `h`, `S` or `s`, and
 a tracked `Cargo.lock` has to be too; otherwise `wear` refuses before writing,
 because a dependency and a table written into a file git does not watch would
 leave a lockfile that no committed manifest explains
-(`crates/skeletons-engine/src/wear/hand_back.rs` →
+(`crates/skeletons-engine/src/command_line_crate/hand_back.rs` →
 `a_file_flagged_so_git_does_not_read_it_is_refused_for_each_flag_and_each_file`
 and →
 `a_manifest_git_holds_nothing_for_is_refused_and_a_lockfile_is_allowed`;
@@ -1475,7 +1475,7 @@ permission bits, so an access control list, an immutable flag and a read-only
 mount answer as they would for the real write, and a process that can write any
 file passes, which is right because it can also restore. A missing `Cargo.lock`
 is the `--locked` read's to refuse
-(`crates/skeletons-engine/src/wear/writable.rs` →
+(`crates/skeletons-engine/src/command_line_crate/writable.rs` →
 `a_path_that_cannot_be_opened_for_writing_is_refused_for_either_file_whoever_runs_it`,
 and `ritual/tests/wear_refusals.rs` →
 `a_read_only_manifest_is_refused_before_anything_is_written` and →

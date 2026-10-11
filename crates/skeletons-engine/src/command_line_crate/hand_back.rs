@@ -1,11 +1,12 @@
-//! Whether git can hand back the two files `wear` changes.
+//! Whether git can hand back the two files a command changes in the command
+//! line crate.
 //!
-//! `wear` changes the command line crate's manifest and `Cargo.lock` in place
-//! and tells the wearer to commit both, so each has to be a file git reads
-//! from the work tree: a clean tree says nothing about a file git is told not
-//! to look at, so a hidden manifest with a local edit reads as clean, and
-//! what `wear` wrote there would never be committed. `sync` closes the same
-//! gap for every path it writes, with a per-path proof; this asks the same
+//! A command that changes the command line crate's manifest and `Cargo.lock`
+//! in place tells the wearer to commit both, so each has to be a file git
+//! reads from the work tree: a clean tree says nothing about a file git is told
+//! not to look at, so a hidden manifest with a local edit reads as clean, and
+//! what the command wrote there would never be committed. `sync` closes the
+//! same gap for every path it writes, with a per-path proof; this asks the same
 //! question of git's index, through the same code, for these two files.
 //!
 //! The manifest has to be tracked. A `Cargo.lock` git does not track is
@@ -14,7 +15,7 @@
 
 use rituals::Failure;
 
-use super::{CommandLineCrate, WRITING};
+use super::CommandLineCrate;
 use crate::skeleton::Escaped;
 use crate::work_tree::WorkTree;
 use crate::work_tree::abort::WorkTreeAbort;
@@ -22,6 +23,7 @@ use crate::work_tree::clean::CleanWorkTree;
 use crate::work_tree::index_entry::{HiddenFlag, IndexRecord, TagReading};
 use crate::work_tree::index_records::{self, UnusableIndexAnswer};
 use crate::work_tree::message::{abort_message, hidden_from_work_tree_line};
+use crate::work_tree::writing_command::WritingCommand;
 
 /// Why git could not hand a file back.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,10 +38,10 @@ enum GitCannotHandBack {
     Unreadable { detail: String },
 }
 
-/// Whether git's index holds a file `wear` changes.
+/// Whether git's index holds a file a command changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Tracking {
-    /// The index holds the file, so a commit can take what `wear` wrote.
+pub(crate) enum Tracking {
+    /// The index holds the file, so a commit can take what the command wrote.
     Tracked,
     /// The index holds nothing for the file: git ignores it, so `git add`
     /// refuses it and a commit never takes it.
@@ -57,25 +59,30 @@ pub(super) enum Tracking {
 /// a value so that the success message names `Cargo.lock` as something to
 /// commit only when git will take it.
 ///
-/// Each path is asked of git as `wear` shows it, relative to the workspace
-/// root the work tree was opened at.
-pub(super) fn check(
+/// Each path is asked of git as `command` shows it, relative to the workspace
+/// root the work tree was opened at, and a refusal is worded for `command`.
+pub(crate) fn check(
     work_tree: &WorkTree,
     _clean: &CleanWorkTree,
     command_line_crate: &CommandLineCrate,
+    command: WritingCommand,
 ) -> Result<Tracking, Failure> {
     let manifest = &command_line_crate.manifest_shown;
-    classify_manifest(manifest, &listed_for(work_tree, manifest)?)
-        .map_err(|cannot| Failure::new(line(manifest, &cannot)))?;
+    classify_manifest(manifest, &listed_for(work_tree, manifest, command)?)
+        .map_err(|cannot| Failure::new(line(manifest, &cannot, command)))?;
     let lockfile = &command_line_crate.lockfile_shown;
-    classify_lockfile(lockfile, &listed_for(work_tree, lockfile)?)
-        .map_err(|cannot| Failure::new(line(lockfile, &cannot)))
+    classify_lockfile(lockfile, &listed_for(work_tree, lockfile, command)?)
+        .map_err(|cannot| Failure::new(line(lockfile, &cannot, command)))
 }
 
-/// Asks git's index about one file, shown as `wear` shows it, and returns
+/// Asks git's index about one file, shown as `command` shows it, and returns
 /// every record it listed at or under it.
-fn listed_for(work_tree: &WorkTree, shown: &str) -> Result<Vec<IndexRecord>, Failure> {
-    let aborted = |abort| Failure::new(abort_message(&abort, work_tree.root(), WRITING));
+fn listed_for(
+    work_tree: &WorkTree,
+    shown: &str,
+    command: WritingCommand,
+) -> Result<Vec<IndexRecord>, Failure> {
+    let aborted = |abort| Failure::new(abort_message(&abort, work_tree.root(), command));
     index_records::records_for(work_tree, shown)
         .map_err(aborted)?
         .map_err(|unusable| aborted(abort_for(unusable)))
@@ -122,7 +129,7 @@ fn classify_lockfile(path: &str, records: &[IndexRecord]) -> Result<Tracking, Gi
 /// guessed at: the clean check has found no conflict, but this reads what
 /// git says rather than what that implies.
 fn classify(path: &str, records: &[IndexRecord]) -> Result<Tracking, GitCannotHandBack> {
-    assert!(!path.is_empty(), "a file `wear` changes has a path");
+    assert!(!path.is_empty(), "a file a command changes has a path");
     let record = match records {
         [] => return Ok(Tracking::NotTracked),
         [record] => record,
@@ -148,34 +155,34 @@ fn classify(path: &str, records: &[IndexRecord]) -> Result<Tracking, GitCannotHa
 
 /// The message for a file git cannot hand back, as one line that ends in what
 /// to do. An unreadable answer is worded as the abort it is.
-fn line(shown: &str, cannot: &GitCannotHandBack) -> String {
+fn line(shown: &str, cannot: &GitCannotHandBack, command: WritingCommand) -> String {
     match cannot {
-        GitCannotHandBack::Hidden(flag) => hidden_from_work_tree_line(shown, *flag, WRITING),
-        GitCannotHandBack::Untracked => untracked_line(shown),
+        GitCannotHandBack::Hidden(flag) => hidden_from_work_tree_line(shown, *flag, command),
+        GitCannotHandBack::Untracked => untracked_line(shown, command),
         GitCannotHandBack::Unreadable { detail } => {
             let detail = Escaped(detail);
             let shown = Escaped(shown);
             format!(
                 "{shown}'s entry in git's index could not be read, so {} wrote nothing: {detail}",
-                WRITING.name()
+                command.name()
             )
         }
     }
 }
 
-/// `` {path} is not tracked by git, so wear wrote nothing: git could not give
-/// back what wear changes in it; run `git add -- {path}` (`git add -f --
-/// {path}` if a .gitignore rule matches it) and commit, then run the `wear`
-/// task again ``.
-fn untracked_line(shown: &str) -> String {
+/// `` {path} is not tracked by git, so {command} wrote nothing: git could not
+/// give back what {command} changes in it; run `git add -- {path}` (`git add
+/// -f -- {path}` if a .gitignore rule matches it) and commit, then run the
+/// `{command}` task again ``.
+fn untracked_line(shown: &str, command: WritingCommand) -> String {
     let shown = Escaped(shown);
     format!(
         "{shown} is not tracked by git, so {} wrote nothing: git could not give back what {} \
          changes in it; run `git add -- {shown}` (`git add -f -- {shown}` if a .gitignore rule \
          matches it) and commit, then {}",
-        WRITING.name(),
-        WRITING.name(),
-        WRITING.run_again(),
+        command.name(),
+        command.name(),
+        command.run_again(),
     )
 }
 
@@ -183,6 +190,7 @@ fn untracked_line(shown: &str) -> String {
 mod tests {
     use super::{GitCannotHandBack, Tracking, classify_lockfile, classify_manifest, line};
     use crate::work_tree::index_entry::{HiddenFlag, IndexRecord, parse_ls_files_tagged};
+    use crate::work_tree::writing_command::WritingCommand;
 
     const OBJECT: &str = "7898192e4d1a1e6c0e7c8e6a1a1e6c0e7c8e6a1a";
 
@@ -277,7 +285,11 @@ mod tests {
     #[test]
     fn the_untracked_manifest_line_names_the_file_says_nothing_was_written_and_ends_in_a_remedy() {
         assert_eq!(
-            line("crates/cli/Cargo.toml", &GitCannotHandBack::Untracked),
+            line(
+                "crates/cli/Cargo.toml",
+                &GitCannotHandBack::Untracked,
+                WritingCommand::Wear
+            ),
             "crates/cli/Cargo.toml is not tracked by git, so wear wrote nothing: git could not \
              give back what wear changes in it; run `git add -- crates/cli/Cargo.toml` (`git add \
              -f -- crates/cli/Cargo.toml` if a .gitignore rule matches it) and commit, then run \
@@ -290,7 +302,8 @@ mod tests {
         assert_eq!(
             line(
                 "Cargo.toml",
-                &GitCannotHandBack::Hidden(HiddenFlag::SkipWorktree)
+                &GitCannotHandBack::Hidden(HiddenFlag::SkipWorktree),
+                WritingCommand::Wear
             ),
             "Cargo.toml is marked skip-worktree in git's index, so git does not read its bytes \
              from the work tree and would ignore what wear wrote there: run `git update-index \
@@ -305,10 +318,29 @@ mod tests {
                 "Cargo.lock",
                 &GitCannotHandBack::Unreadable {
                     detail: "git listed 2 index entries for it".to_owned()
-                }
+                },
+                WritingCommand::Wear
             ),
             "Cargo.lock's entry in git's index could not be read, so wear wrote nothing: git \
              listed 2 index entries for it"
         );
+    }
+
+    #[test]
+    fn every_line_is_worded_for_the_command_that_asked() {
+        // The same refusals, asked for by `sync`, name `sync` where they named
+        // `wear`, and name no other command.
+        for cannot in [
+            GitCannotHandBack::Hidden(HiddenFlag::AssumeUnchanged),
+            GitCannotHandBack::Untracked,
+            GitCannotHandBack::Unreadable {
+                detail: "git lists it as conflicted".to_owned(),
+            },
+        ] {
+            let message = line("Cargo.toml", &cannot, WritingCommand::Sync);
+
+            assert!(message.contains("sync"), "{message}");
+            assert!(!message.contains("wear"), "{message}");
+        }
     }
 }

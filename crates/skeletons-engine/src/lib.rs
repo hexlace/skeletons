@@ -47,6 +47,8 @@ mod cargo;
 mod check;
 mod claim;
 #[cfg(feature = "commands")]
+mod command_line_crate;
+#[cfg(feature = "commands")]
 mod current_directory;
 #[cfg(feature = "commands")]
 mod git;

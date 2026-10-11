@@ -1,7 +1,7 @@
 //! What `wear` tells the wearer when it has added a skeleton.
 
 use super::confirm::Added;
-use super::hand_back::Tracking;
+use crate::command_line_crate::hand_back::Tracking;
 use crate::skeleton::Escaped;
 
 /// The two lines `wear` prints when it succeeds: what it added and where,
@@ -39,9 +39,9 @@ pub(crate) fn added_lines(added: &Added, lockfile: Tracking) -> [String; 2] {
 #[cfg(test)]
 mod tests {
     use super::added_lines;
+    use crate::command_line_crate::hand_back::Tracking;
     use crate::survey::poison::{assert_escaped_once, poison};
     use crate::wear::confirm::Added;
-    use crate::wear::hand_back::Tracking;
 
     fn added(package: &str, manifest: &str, key: &str) -> Added {
         Added {

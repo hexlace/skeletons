@@ -1355,7 +1355,7 @@ mod tests {
     /// with a regular file — even one whose bytes happen to hash equal —
     /// is a type change (`git status --porcelain=v2` reports it `.T`), which
     /// `work_tree::clean`'s own parser reads as `Dirt::Unstaged` (tested by
-    /// `crates/skeletons/src/work_tree/clean.rs` →
+    /// `crates/skeletons-engine/src/work_tree/clean.rs` →
     /// `a_type_change_with_a_blank_index_column_is_read_as_unstaged`), so
     /// rule (a) always refuses first in a real run. These two are
     /// exercised by a hand-crafted index entry (`update-index --cacheinfo`)

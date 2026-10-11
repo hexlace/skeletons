@@ -2,7 +2,7 @@
 //! gives it — on a case-insensitive filesystem, `check` must never treat a
 //! differently spelled file on disk as though it were the claimed one.
 //!
-//! `nested-dotfiles` (checked in under `crates/skeletons/test-skeletons/renders/`)
+//! `nested-dotfiles` (checked in under `crates/skeletons-engine/test-skeletons/renders/`)
 //! claims `.github/dependabot.yml` (rendering `dependabot: true\n`),
 //! `a/b/deep.yml`, and `root.yml`. Every scenario here writes the other two
 //! claimed files matching their renders exactly, so the only thing under

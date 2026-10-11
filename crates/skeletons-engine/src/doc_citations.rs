@@ -149,20 +149,21 @@ fn crowded_fences(text: &str) -> Vec<CrowdedFence<'_>> {
 
 #[cfg(skeletons_checkout)]
 /// The workspace root: two directories above this crate's own manifest
-/// (`crates/skeletons/../..`), which is where every citation's `file` is
-/// relative to — `crates/skeletons/src/…` and `ritual/tests/…` alike.
+/// (`crates/skeletons-engine/../..`), which is where every citation's `file` is
+/// relative to — `crates/skeletons-engine/src/…` and `ritual/tests/…` alike.
 fn workspace_root() -> PathBuf {
     [env!("CARGO_MANIFEST_DIR"), "..", ".."].iter().collect()
 }
 
 #[cfg(skeletons_checkout)]
 /// Every markdown file whose fenced blocks are kept in shape: those under
-/// `.docs/`, the two readmes and the contributing guide, as paths relative to
-/// the workspace root, in a fixed order.
+/// `.docs/`, the readmes and the contributing guide, as paths relative to the
+/// workspace root, in a fixed order.
 fn documented_markdown_files() -> Result<Vec<PathBuf>, std::io::Error> {
     let mut files = vec![
         PathBuf::from("readme.md"),
         PathBuf::from("crates/skeletons/readme.md"),
+        PathBuf::from("crates/skeletons-engine/readme.md"),
         PathBuf::from("contributing.md"),
     ];
     let docs = Path::new(".docs");

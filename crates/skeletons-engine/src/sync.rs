@@ -16,7 +16,7 @@
 //! after an earlier write landed, or a rename or link that fails, leaves the
 //! earlier writes in place and says which files were written and which were
 //! not. `sync::write`'s own module doc names exactly what a partial failure
-//! leaves behind and removes (tested by `crates/skeletons/src/sync/write.rs` →
+//! leaves behind and removes (tested by `crates/skeletons-engine/src/sync/write.rs` →
 //! `a_failed_commit_removes_every_pending_staging_file_and_now_empty_directory`
 //! and → `a_change_found_after_the_first_write_landed_leaves_it_and_names_both_lists`).
 //! A file read back after the commit that no longer holds what `sync` wrote

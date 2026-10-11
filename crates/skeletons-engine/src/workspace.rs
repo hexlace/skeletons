@@ -54,7 +54,7 @@ pub(crate) enum WearingRefusal {
     /// `verbatim`. The JSON `dependency` field this refusal reports is that
     /// `key`; `crate_name` is the actual crate declared there, which the
     /// message needs to name the fix (`crate_name = { package =
-    /// "crate_name", … }`) — tested by `crates/skeletons/src/check/json.rs` →
+    /// "crate_name", … }`) — tested by `crates/skeletons-engine/src/check/json.rs` →
     /// `reserved_key_reports_the_key_it_was_as_the_dependency`.
     ReservedKey {
         manifest: String,

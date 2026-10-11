@@ -5,7 +5,7 @@
 //! `wearer/tests/` the real `wearer` binary (this module is compiled into
 //! both), against a real, disposable Cargo workspace, wearing real skeletons —
 //! either the ones already checked in under
-//! `crates/skeletons/test-skeletons/renders/`, taken by a `path =` dependency,
+//! `crates/skeletons-engine/test-skeletons/renders/`, taken by a `path =` dependency,
 //! or a skeleton crate synthesized fresh into a real git repository for the
 //! `tag =` / `branch =` / `rev =` / unqualified `git =` cases. The
 //! exceptions are the `fixture_*` files, which check the fixtures themselves
@@ -78,9 +78,9 @@ pub(crate) mod wear;
 /// Every environment variable that redirects which repository, work tree,
 /// index, object store or attribute source git answers about — the same
 /// set `skeletons` refuses `sync` on (`REDIRECTING_VARIABLES` in
-/// `crates/skeletons/src/git/command.rs`). Every process this suite spawns removes these, plus
-/// `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` (with `GIT_CONFIG_NOSYSTEM=1`
-/// set instead), so the suite gives the same answer run from an ordinary
+/// `crates/skeletons-engine/src/git/command.rs`). Every process this suite
+/// spawns removes these, plus `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` (with
+/// `GIT_CONFIG_NOSYSTEM=1` set instead), so the suite gives the same answer run from an ordinary
 /// shell as it does run from inside a git hook — which exports `GIT_DIR`,
 /// and would otherwise make every `sync` scenario here fail by the very
 /// rule this suite is testing, for a reason that has nothing to do with
@@ -506,7 +506,7 @@ pub(crate) fn read(root: &Path, relative: &str) -> Result<Vec<u8>, Box<dyn Error
 pub(crate) const BUILD_SCRIPT_MARKER_VARIABLE: &str = "SKELETONS_TEST_ONLY_BUILD_SCRIPT_MARKER";
 
 /// The absolute path of the checked-in test skeleton named `name`, under
-/// `crates/skeletons/test-skeletons/renders/`.
+/// `crates/skeletons-engine/test-skeletons/renders/`.
 ///
 /// Resolved from this crate's own manifest directory rather than the
 /// process's current directory, since every test changes `ritual`'s
@@ -515,28 +515,28 @@ pub(crate) const BUILD_SCRIPT_MARKER_VARIABLE: &str = "SKELETONS_TEST_ONLY_BUILD
 pub(crate) fn checked_in_test_skeleton(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
-        .join("crates/skeletons/test-skeletons/renders")
+        .join("crates/skeletons-engine/test-skeletons/renders")
         .join(name)
 }
 
 /// The absolute path of the checked-in test skeleton named `name`, under
-/// `crates/skeletons/test-skeletons/refused/` — a skeleton deliberately carrying
+/// `crates/skeletons-engine/test-skeletons/refused/` — a skeleton deliberately carrying
 /// exactly one defect, for exercising a skeleton's own render being refused.
 pub(crate) fn checked_in_refused_skeleton(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
-        .join("crates/skeletons/test-skeletons/refused")
+        .join("crates/skeletons-engine/test-skeletons/refused")
         .join(name)
 }
 
 /// The absolute path of the checked-in, captured crates.io sparse-index
-/// files under `crates/skeletons/src/behind/captures/` — the same captures
+/// files under `crates/skeletons-engine/src/behind/captures/` — the same captures
 /// `skeletons`'s own `behind/index_entries.rs` unit tests read directly, and the
 /// root `SKELETONS_TEST_ONLY_CRATES_IO_INDEX` is pointed at here for the
 /// registry-`behind` tests. See the `readme.md` beside those files for how
 /// and when they were captured.
 pub(crate) fn captured_crates_io_index() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/skeletons/src/behind/captures")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/skeletons-engine/src/behind/captures")
 }
 
 /// A `<dependency_key> = "<version>"` dependency line — the shape a
@@ -705,7 +705,7 @@ pub(crate) fn read_remote_log(path: &Path) -> Result<String, Box<dyn Error>> {
 /// and one file under `files/` at `file_relative` holding `file_contents`.
 ///
 /// Used for skeletons this suite builds itself rather than reading from
-/// `crates/skeletons/test-skeletons/`, where a test needs something no
+/// `crates/skeletons-engine/test-skeletons/`, where a test needs something no
 /// checked-in skeleton covers: history to move a git pin along, or a file
 /// name of its own choosing.
 pub(crate) fn write_minimal_skeleton(

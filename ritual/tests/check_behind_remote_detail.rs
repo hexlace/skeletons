@@ -9,7 +9,7 @@
 //! Reading the *last* non-blank line would show a wearer the boilerplate
 //! tail instead of the line that actually tells them what went wrong, so
 //! `behind`'s git remote queries quote `git::diagnostic`'s answer
-//! (`crates/skeletons/src/git/diagnostic.rs`) instead.
+//! (`crates/skeletons-engine/src/git/diagnostic.rs`) instead.
 
 mod support;
 

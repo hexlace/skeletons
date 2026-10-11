@@ -2,15 +2,15 @@
 #
 #   format   — cargo fmt --all -- --check
 #   clippy   — cargo clippy --workspace --all-targets -- -D warnings, then
-#              the same for skeletons alone, on Linux and macOS
-#   test     — cargo test -p skeletons, then cargo test --workspace, on Linux
-#              and macOS, with the tests each platform skipped listed in the
-#              job summary
+#              the same for the engine and the bundle alone, on Linux and macOS
+#   test     — cargo test -p skeletons-engine -p skeletons, then cargo test
+#              --workspace, on Linux and macOS, with the tests each platform
+#              skipped listed in the job summary
 #   doc      — cargo doc --workspace --no-deps --document-private-items, with
 #              rustdoc warnings fatal
 #   package  — cargo package --workspace: every crate packages and builds from
 #              its package alone, as crates.io would receive it, and the
-#              bundle's tests pass from its unpacked package
+#              engine's tests pass from its unpacked package
 #   msrv     — cargo test on the oldest toolchain `rust-version` declares
 #   deny     — cargo deny check: advisories, licences, bans and sources, as
 #              `deny.toml` sets them; weekly, advisories alone
@@ -109,12 +109,13 @@ jobs:
       - name: clippy -D warnings
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: clippy skeletons alone
-        # The workspace run above lints `skeletons` with its `test-util`
+      - name: clippy the engine and the bundle alone
+        # The workspace run above lints `skeletons-engine` with its `test-util`
         # feature, which `ritual`'s dev-dependency turns on, so code that only
         # compiles without the feature is never linted there. This run has no
-        # such unification, as `test skeletons alone` does for the tests.
-        run: cargo clippy -p skeletons --all-targets -- -D warnings
+        # such unification, as `test the engine and the bundle alone` does for
+        # the tests.
+        run: cargo clippy -p skeletons-engine -p skeletons --all-targets -- -D warnings
 
   test:
     name: test (${{ matrix.os }})
@@ -135,13 +136,14 @@ jobs:
           rustup toolchain install --no-self-update
           rustup show active-toolchain
 
-      - name: test skeletons alone
-        # The bundle's own unit tests, built without `ritual`. The workspace
-        # run below builds `skeletons` with its `test-util` feature, which
-        # `ritual`'s dev-dependency turns on for every package in the build, so
-        # it can never see a test seam that only `test-util` provides and the
-        # crate's own test build lacks. This run has no such unification.
-        run: cargo test -p skeletons
+      - name: test the engine and the bundle alone
+        # The engine's own unit tests, built without `ritual`. The workspace
+        # run below builds `skeletons-engine` with its `test-util` feature,
+        # which `ritual`'s dev-dependency turns on for every package in the
+        # build, so it can never see a test seam that only `test-util` provides
+        # and the crate's own test build lacks. This run has no such
+        # unification.
+        run: cargo test -p skeletons-engine -p skeletons
 
       - name: test
         # A test whose premise does not hold on this platform prints
@@ -219,7 +221,7 @@ jobs:
         run: cargo package --workspace --locked
 
       - name: test the published package
-        # Runs the bundle's tests from its unpacked package, the way anyone
+        # Runs the engine's tests from its unpacked package, the way anyone
         # testing the crate crates.io serves would. The package leaves out the
         # test skeletons, captures and documents some tests read, and
         # `build.rs` compiles those tests only in a checkout; a new test that
@@ -233,10 +235,10 @@ jobs:
           RUSTFLAGS: "-D warnings"
         run: |
           version=$(cargo metadata --no-deps --format-version 1 | jq -er '
-            .packages[] | select(.name == "skeletons") | .version')
-          tar -xzf "target/package/skeletons-$version.crate" -C "$RUNNER_TEMP"
+            .packages[] | select(.name == "skeletons-engine") | .version')
+          tar -xzf "target/package/skeletons-engine-$version.crate" -C "$RUNNER_TEMP"
           cargo test --locked \
-            --manifest-path "$RUNNER_TEMP/skeletons-$version/Cargo.toml"
+            --manifest-path "$RUNNER_TEMP/skeletons-engine-$version/Cargo.toml"
 
   msrv:
     name: msrv

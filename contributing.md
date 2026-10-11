@@ -33,22 +33,22 @@ All of these must pass:
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p skeletons --all-targets -- -D warnings
-cargo test -p skeletons
+cargo clippy -p skeletons-engine -p skeletons --all-targets -- -D warnings
+cargo test -p skeletons-engine -p skeletons
 cargo test --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 cargo deny --locked check
 ```
 
-The two `-p skeletons` commands build the bundle alone. A workspace build
-compiles `skeletons` with its `test-util` feature, which `ritual`'s
-dev-dependency turns on for every package in that build, so code or a test
-seam that depends on the feature being on or off is only seen by the run
-that has it the other way.
+The two `-p skeletons-engine -p skeletons` commands build the engine and the
+bundle alone. A workspace build compiles `skeletons-engine` with its
+`test-util` feature, which `ritual`'s dev-dependency turns on for every package
+in that build, so code or a test seam that depends on the feature being on or
+off is only seen by the run that has it the other way.
 
 CI runs the same, with clippy and the tests on both Linux and macOS, and
 three more: every crate is packaged and built from its package alone, as
-crates.io would receive it; the bundle's tests then run from that unpacked
+crates.io would receive it; the engine's tests then run from that unpacked
 package (see [Test skeletons](#test-skeletons)); and the test suite runs on
 the oldest toolchain its `rust-version` declares.
 
@@ -162,7 +162,7 @@ is `publish = false` too.
 ## Test skeletons
 
 The render's own tests read from real skeletons under
-`crates/skeletons/test-skeletons/` — each one a complete crate, written the way a
+`crates/skeletons-engine/test-skeletons/` — each one a complete crate, written the way a
 skeleton author actually writes one, rather than data built directly in test code
 standing in for a skeleton.
 
@@ -176,7 +176,7 @@ standing in for a skeleton.
   unreadable manifest, a missing `package.name`, a bound reached by a
   filesystem entity git cannot store) is exercised by a unit test instead,
   directly against the function that decides it. The order the refusals come
-  in is pinned the same way: a test in `crates/skeletons/src/skeleton/`
+  in is pinned the same way: a test in `crates/skeletons-engine/src/skeleton/`
   builds one skeleton in a scratch directory with a defect at each stage and
   removes them one at a time, so it needs no fixture here and also runs from
   the published package.
@@ -187,20 +187,20 @@ standing in for a skeleton.
   (control bytes a render must keep, a missing final newline), and a rewrite
   would silently break what they test.
 
-`crates/skeletons/Cargo.toml` excludes the whole `test-skeletons/` directory
+`crates/skeletons-engine/Cargo.toml` excludes the whole `test-skeletons/` directory
 from the published package (the `"/test-skeletons"` entry of its `exclude`
 list), along with the captured crates.io responses and `cargo` output that
 other tests read. So the tests that read those files, or the documents under
-`.docs/`, are compiled only in a checkout: `crates/skeletons/build.rs` sets
+`.docs/`, are compiled only in a checkout: `crates/skeletons-engine/build.rs` sets
 the `skeletons_checkout` cfg when `test-skeletons/` sits beside the manifest,
 and an unpacked `.crate` never has it. A test that reads a file the package
 leaves out goes behind `#[cfg(skeletons_checkout)]`; without that it fails to
-compile, or fails at run time on a path that is not there, when the bundle's
+compile, or fails at run time on a path that is not there, when the engine's
 tests run from the package. CI does run them there, in its `package` job's
 `test the published package` step, and reruns from the package are how a
 missing gate is found. `build.rs` notices `test-skeletons/` being removed but
 not coming back, so a checkout that lost the directory and has it again needs
-`cargo clean -p skeletons` before its tests see the cfg.
+`cargo clean -p skeletons-engine` before its tests see the cfg.
 
 The repository's root `.gitignore` still applies inside a test skeleton's own
 `files/` or `partials/` — a file created there that matches one of its
@@ -215,7 +215,7 @@ index is read through two seams that do not exist in a production build —
 
 - `SKELETONS_TEST_ONLY_CRATES_IO_INDEX`, pointed at a directory of
   captured sparse-index files (see
-  `crates/skeletons/src/behind/captures/readme.md`). Unset in a test
+  `crates/skeletons-engine/src/behind/captures/readme.md`). Unset in a test
   build, every crates.io query answers unreachable rather than falling
   back to a real request.
 - `SKELETONS_TEST_ONLY_REMOTE_LOG`, appended one line before each remote
@@ -229,19 +229,20 @@ A third seam shortens how long a local git question waits:
 
 - `SKELETONS_TEST_ONLY_LOCAL_GIT_TIMEOUT_SECONDS`, a whole number of seconds
   above zero, replaces the 30 seconds every local git command is otherwise
-  given (`crates/skeletons/src/git/local_timeout.rs`), so a test of what a
+  given (`crates/skeletons-engine/src/git/local_timeout.rs`), so a test of what a
   timeout says need not wait it out. Anything else in the variable, zero
   included, stops the test with a panic naming it, rather than reading as
   unset. A production build does not read the variable at all.
   `ritual/tests/support/slow_filter.rs` builds the repository whose content
   filter stalls, for the tests that use the variable.
 
-`test-util` is `skeletons`' public cargo feature that compiles those seams in,
-for tests only: a command line must never enable it outside
-`[dev-dependencies]`. The seams are gated on `#[cfg(any(test, feature =
-"test-util"))]`, so `skeletons`' own unit-test build has them without the
-feature. It is never a default feature and a production command line never
-enables it. `ritual/Cargo.toml` and `wearer/Cargo.toml` are what turn it
+`test-util` is the cargo feature that compiles those seams in, for tests only:
+a command line must never enable it outside `[dev-dependencies]`. The feature
+is `skeletons-engine`'s, where the seams are, and `skeletons` forwards it under
+the same name, which is how a project reaches it. The seams are gated on
+`#[cfg(any(test, feature = "test-util"))]`, so the engine's own unit-test build
+has them without the feature. It is never a default feature and a production
+command line never enables it. `ritual/Cargo.toml` and `wearer/Cargo.toml` are what turn it
 on for the acceptance suites: each re-declares `skeletons` as a
 dev-dependency with `features = ["test-util"]`, and Cargo unifies that into
 the `ritual` and `wearer` binaries `cargo test` builds (the ones
@@ -251,7 +252,7 @@ activates a dev-dependency.
 
 A fourth variable, `SKELETONS_TEST_ONLY_BUILD_SCRIPT_MARKER`, is unrelated to
 `test-util`: it is read by the `build-script-marker` test skeleton's own
-`build.rs` (`crates/skeletons/test-skeletons/renders/build-script-marker/`),
+`build.rs` (`crates/skeletons-engine/test-skeletons/renders/build-script-marker/`),
 never by `skeletons` itself. Pointed at a path, that build script writes a marker
 file there if it ever runs at all — proof, observable from the test process, that
 `check`/`sync` never ran a worn skeleton's own build script. A test that
@@ -275,7 +276,7 @@ suite also removes `GIT_CONFIG_GLOBAL` and
 `GIT_CONFIG_SYSTEM` and sets `GIT_CONFIG_NOSYSTEM=1` for every git it
 spawns, and removes every one of `skeletons`'s own repository-redirecting
 variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, and the rest
-`REDIRECTING_VARIABLES` in `crates/skeletons/src/git/command.rs` names)
+`REDIRECTING_VARIABLES` in `crates/skeletons-engine/src/git/command.rs` names)
 from the processes it runs `skeletons` under — without that, running the
 suite from inside a git hook, which exports `GIT_DIR` into every child
 process, would trip the very refusal this crate's own `sync` adds against
@@ -309,7 +310,7 @@ passing vacuously or being compiled out:
 )]
 ```
 
-See `crates/skeletons/src/claim/location.rs` →
+See `crates/skeletons-engine/src/claim/location.rs` →
 `a_directory_that_cannot_be_read_is_unreadable` for the pattern this
 follows. `#[cfg(target_os = "…")]` is never used to choose between two
 *expected outcomes* — that would make macOS and Linux compile and check

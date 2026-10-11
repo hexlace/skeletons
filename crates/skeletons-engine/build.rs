@@ -15,7 +15,7 @@
 //! `test-skeletons/` is removed. It watches no directory, so nothing a build
 //! writes can make the next one rerun it, and it does not notice the
 //! directory coming back: a checkout that lost `test-skeletons/` and has it
-//! again needs `cargo clean -p skeletons`.
+//! again needs `cargo clean -p skeletons-engine`.
 
 use std::error::Error;
 use std::path::Path;

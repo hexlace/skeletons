@@ -272,8 +272,9 @@ mod tests {
         names
     }
 
-    /// The one crate this workspace releases.
-    const RELEASED: [&str; 1] = ["skeletons"];
+    /// The crates this workspace releases: the bundle and the engine it is
+    /// built on.
+    const RELEASED: [&str; 2] = ["skeletons", "skeletons-engine"];
 
     /// The members that are `publish = false`: this repository's own command
     /// line, the command line its acceptance tests mount the bundle under
@@ -281,7 +282,7 @@ mod tests {
     const NEVER_PUBLISHED: [&str; 3] = ["skeletons-ritual", "skeletons-wearer", "xtask"];
 
     #[test]
-    fn this_workspace_releases_skeletons_alone() {
+    fn this_workspace_releases_the_bundle_and_its_engine() {
         let members = members(&this_workspace()).expect("the metadata has the expected shape");
         let plan = plan(members, |_| Ok::<_, Infallible>(false)).expect("infallible");
         assert_eq!(names(&plan.to_publish), RELEASED);
@@ -298,6 +299,7 @@ mod tests {
             Ok::<_, Infallible>(false)
         })
         .expect("infallible");
+        asked.sort_unstable();
         assert_eq!(
             asked, RELEASED,
             "an unpublishable member is never looked up"
@@ -328,9 +330,9 @@ mod tests {
     }
 
     /// A publish that failed partway: of two crates that may be published,
-    /// crates.io has one. This workspace publishes one crate, so it cannot
-    /// show that case itself, and the re-run it makes safe is the reason
-    /// `plan` asks crates.io at all.
+    /// crates.io has one. The case is built from made-up members, so what this
+    /// workspace publishes does not decide it, and the re-run it makes safe is
+    /// the reason `plan` asks crates.io at all.
     #[test]
     fn a_rerun_uploads_only_what_crates_io_does_not_have() {
         let members = vec![

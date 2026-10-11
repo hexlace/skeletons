@@ -2,7 +2,7 @@
 //! locked skeleton's own render.
 //!
 //! Every scenario but the last wears a checked-in test skeleton from
-//! `crates/skeletons/test-skeletons/renders/`, taken by a `path =` dependency
+//! `crates/skeletons-engine/test-skeletons/renders/`, taken by a `path =` dependency
 //! from a fresh, single-crate Cargo workspace. All but the two build-script
 //! scenarios at the end use one of these two:
 //!

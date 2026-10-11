@@ -17,7 +17,7 @@ use super::escaped::{Echoed, Escaped};
 /// one `Named` value and threads that single binding through every later
 /// phase, so nothing downstream can reconstruct a `Directory` again.
 /// The "after" half is exercised by
-/// `crates/skeletons/src/acceptance/validation.rs` →
+/// `crates/skeletons-engine/src/acceptance/validation.rs` →
 /// `a_partial_that_is_not_valid_utf8_is_refused_naming_it_even_when_unselected`,
 /// whose refusal happens well past the manifest and still names the
 /// skeleton.

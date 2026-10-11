@@ -132,7 +132,7 @@ fn assemble_template(
     // change about a file's bytes, so a template that used neither must
     // produce exactly the source it was parsed from: a file with no
     // placeholders and no directive renders byte-for-byte identical to its
-    // source (tested by `crates/skeletons/src/acceptance/text.rs` →
+    // source (tested by `crates/skeletons-engine/src/acceptance/text.rs` →
     // `a_file_with_no_placeholders_or_directives_renders_byte_for_byte_identical`).
     if !touched_by_fill_or_select {
         assert_eq!(

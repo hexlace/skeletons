@@ -3,11 +3,11 @@
 //! It is written in two kinds of place: `[workspace.package] version`, which
 //! every member inherits, and the `version` requirement on every
 //! `[workspace.dependencies]` entry that has a `path` — this workspace's own
-//! crates, which a published manifest can only find by version. Here that is
-//! `skeletons` alone; `rituals` and `rituals-core` come from crates.io at a
-//! version of their own and are never touched. The tests below check that the
-//! two kinds of site agree; this module is what keeps them agreeing when the
-//! version moves.
+//! crates, which a published manifest can only find by version. Here those are
+//! `skeletons` and `skeletons-engine`; `rituals` and `rituals-core` come from
+//! crates.io at a version of their own and are never touched. The tests below
+//! check that the two kinds of site agree; this module is what keeps them
+//! agreeing when the version moves.
 //!
 //! An internal requirement keeps the shape it has: a bare version (`1.2.3`)
 //! stays bare and an exact pin (`=1.2.3`) stays exact, so a bump never loosens
@@ -271,6 +271,9 @@ mod tests {
         let edited = document.to_string();
         let old = format!("\"{before}\"");
         let new = format!("\"{after}\"");
+        // An exact pin keeps its `=`: the same version, in the same shape.
+        let old_pin = format!("\"={before}\"");
+        let new_pin = format!("\"={after}\"");
         let original_lines: Vec<&str> = ROOT_MANIFEST.lines().collect();
         let edited_lines: Vec<&str> = edited.lines().collect();
         assert_eq!(original_lines.len(), edited_lines.len());
@@ -278,9 +281,13 @@ mod tests {
         for (original, edited) in original_lines.iter().zip(&edited_lines) {
             if original != edited {
                 changed += 1;
+                let expected = if original.contains(&old) {
+                    original.replacen(&old, &new, 1)
+                } else {
+                    original.replacen(&old_pin, &new_pin, 1)
+                };
                 assert_eq!(
-                    original.replacen(&old, &new, 1),
-                    *edited,
+                    expected, *edited,
                     "a changed line changed anything but its version"
                 );
             }
@@ -299,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn a_bump_moves_skeletons_with_the_workspace_and_leaves_rituals_and_rituals_core_alone() {
+    fn a_bump_moves_the_bundle_and_its_engine_and_leaves_rituals_and_rituals_core_alone() {
         // The workspace first moves to the version `rituals` is pinned at, so
         // a bump that matched on the old version string, rather than on
         // which dependency carries a `path`, would move `rituals` too.
@@ -321,12 +328,20 @@ mod tests {
         assert_ne!(pinned, after);
 
         let rewritten = set_release_version(&mut reparsed, after).expect("the second bump applies");
-        assert_eq!(rewritten, ["skeletons"]);
+        assert_eq!(rewritten, ["skeletons", "skeletons-engine"]);
         let bumped = reparsed.to_string();
         assert_eq!(workspace_version(&reparsed), Ok(after));
         assert_eq!(
             declaration(&bumped, "skeletons"),
             format!("skeletons = {{ path = \"crates/skeletons\", version = \"{after}\" }}")
+        );
+        assert_eq!(
+            declaration(&bumped, "skeletons-engine"),
+            format!(
+                "skeletons-engine = {{ path = \"crates/skeletons-engine\", \
+                 version = \"={after}\" }}"
+            ),
+            "the engine stays pinned to exactly the bundle's version"
         );
         assert_eq!(
             ["rituals", "ritual"].map(|key| declaration(&bumped, key)),
@@ -576,18 +591,25 @@ mod tests {
         let internal = internal_dependency_names(&document).expect("the shape is valid");
         assert_eq!(
             internal,
-            ["skeletons"],
-            "the one crate this workspace releases"
+            ["skeletons", "skeletons-engine"],
+            "the crates this workspace releases"
         );
-        let mut drift: Vec<String> = internal
+        // A command line may take any compatible version of the bundle. The
+        // engine is built against the bundle and released with it, so it is
+        // asked for at exactly the workspace version.
+        let expected = [
+            ("skeletons", version.clone()),
+            ("skeletons-engine", format!("={version}")),
+        ];
+        let mut drift: Vec<String> = expected
             .iter()
-            .filter_map(|name| {
-                let requirement = document["workspace"]["dependencies"][name.as_str()]["version"]
+            .filter_map(|(name, expected)| {
+                let requirement = document["workspace"]["dependencies"][*name]["version"]
                     .as_str()
                     .unwrap_or_default();
-                (requirement != version).then(|| {
+                (requirement != expected).then(|| {
                     format!(
-                        "[workspace.dependencies] {name} requires {requirement:?}, not {version:?}"
+                        "[workspace.dependencies] {name} requires {requirement:?}, not {expected:?}"
                     )
                 })
             })
@@ -596,8 +618,8 @@ mod tests {
         let members = member_manifests();
         assert_eq!(
             members.len(),
-            4,
-            "skeletons, skeletons-ritual, skeletons-wearer and xtask: {members:?}"
+            5,
+            "skeletons, skeletons-engine, skeletons-ritual, skeletons-wearer and xtask: {members:?}"
         );
         for manifest_path in &members {
             drift.extend(member_drift(Path::new(manifest_path)));

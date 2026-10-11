@@ -43,7 +43,7 @@
 //! walked: `sync::write::staging::Staging` uses `create_dir` and
 //! `OpenOptions::create_new`, which fail on anything already there, a
 //! dangling symbolic link included, so creating one can never follow one
-//! either (tested by `crates/skeletons/src/sync/write.rs` →
+//! either (tested by `crates/skeletons-engine/src/sync/write.rs` →
 //! `a_symlink_at_the_staging_path_is_refused_and_nothing_is_written_through_it`
 //! and → `a_dangling_symlink_at_the_staging_path_is_refused`). Removing one
 //! is walked: the ledger looks the path up with [`look_up`], and removes an
@@ -265,7 +265,7 @@ fn scan(
 /// spelling the claim does not itself name. `resolve` is the check's producer,
 /// run once per claim before anything is staged; this is its consumer, run once
 /// per write after it has actually landed on disk (tested by
-/// `crates/skeletons/src/sync/write.rs` →
+/// `crates/skeletons-engine/src/sync/write.rs` →
 /// `a_file_listed_under_another_spelling_is_reported`).
 ///
 /// It never folds a name: the exact spelling is the only question, so it

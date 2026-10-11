@@ -53,7 +53,7 @@ mod validation;
 #[cfg(skeletons_checkout)]
 mod verbatim;
 
-/// The directory of the test skeleton at `relative` under `crates/skeletons/test-skeletons`.
+/// The directory of the test skeleton at `relative` under `crates/skeletons-engine/test-skeletons`.
 ///
 /// Test skeletons are read from disk at run time, from `CARGO_MANIFEST_DIR`,
 /// never baked into the test binary with `include_str!`/`include_bytes!`:

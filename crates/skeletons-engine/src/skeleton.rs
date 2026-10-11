@@ -15,7 +15,7 @@
 //! partial nobody selected is refused exactly like one in a partial everybody
 //! sees — the render is the contract, and a contract
 //! cannot be sound for some option values and broken for others (tested by
-//! `crates/skeletons/src/acceptance/validation.rs` →
+//! `crates/skeletons-engine/src/acceptance/validation.rs` →
 //! `a_defect_in_a_partial_the_choice_does_not_select_is_still_refused`).
 //!
 //! Validation keeps what it proves. A placeholder holds the key of the
@@ -249,7 +249,7 @@ mod tests {
     const MEBIBYTE: usize = 1024 * 1024;
 
     /// The directory of the test skeleton at `relative` under
-    /// `crates/skeletons/test-skeletons`. A copy of `test_skeleton` in
+    /// `crates/skeletons-engine/test-skeletons`. A copy of `test_skeleton` in
     /// `crate::acceptance`, which is private to that module; duplicating
     /// three lines here is cheaper than widening its visibility for one
     /// test.

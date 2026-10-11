@@ -10,7 +10,7 @@
 //! at all when it plainly did.
 //!
 //! Every fixture here is a from-scratch skeleton crate (not one of the
-//! checked-in `crates/skeletons/test-skeletons/`, none of which declare a
+//! checked-in `crates/skeletons-engine/test-skeletons/`, none of which declare a
 //! non-`lib` crate type), built with `support::write` directly rather than
 //! `write_minimal_skeleton`, since that helper's manifest carries no `[lib]`
 //! table at all.

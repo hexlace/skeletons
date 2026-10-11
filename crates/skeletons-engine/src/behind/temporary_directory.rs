@@ -24,7 +24,7 @@ const CREATE_ATTEMPTS_MAX: u32 = 16;
 /// `EEXIST` on anything already at that path — directory, file, or symbolic
 /// link alike — rather than following or replacing it), the same
 /// exclusive-creation guarantee `sync`'s own `Staging` relies on
-/// (`crates/skeletons/src/claim/location.rs`'s module doc).
+/// (`crates/skeletons-engine/src/claim/location.rs`'s module doc).
 /// Tested here for the plain-collision case by
 /// `a_name_already_taken_by_something_else_is_retried_under_the_next_attempt`,
 /// which plants a file at the exact name `create`'s first attempt would

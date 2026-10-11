@@ -30,8 +30,8 @@ skeletons-engine = { workspace = true, features = ["commands"] }
 # `--all-targets`), and not in a plain `cargo build` or `cargo run`, provided the
 # workspace uses feature resolver 2 or later (edition 2021 and later select it
 # for a package; a virtual workspace sets `resolver = "2"` or `"3"`). Under
-# resolver 1 Cargo unifies a dev-dependency's features into every build, so the
-# seams would be on in a plain build too.
+# resolver 1 Cargo unifies a dev-dependency's features into a plain `cargo build`
+# or `cargo run` too, so the seams would be on there as well.
 test-util = ["skeletons-engine/test-util"]
 
 [package.metadata.ritual]

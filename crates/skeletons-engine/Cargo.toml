@@ -112,7 +112,7 @@ commands = [
 # enabled outside `[dev-dependencies]`. Under feature resolver 2 or later it
 # then stays out of a plain `cargo build` or `cargo run` of a command line that
 # mounts the bundle; under resolver 1 Cargo unifies a dev-dependency's features
-# into every build. In this
+# into that plain build too. In this
 # repository the two command-line packages ask for it as a dev-dependency
 # feature of `skeletons`, so it is on only in a build that includes their test
 # targets (`cargo test`, or a build or lint given `--tests` or `--all-targets`).

@@ -8,8 +8,8 @@
 //!
 //! The `test-util` feature compiles in seams for a dependent's own tests. It
 //! is for `[dev-dependencies]` only: under feature resolver 2 or later it then
-//! stays out of a plain build, and under resolver 1 it would be on in every
-//! build.
+//! stays out of a plain build, and under resolver 1 it would be on in a plain
+//! build too.
 
 use rituals::Task;
 

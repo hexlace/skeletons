@@ -67,8 +67,9 @@ is packaged:
   `include = ["src/**", "files/**", "partials/**"]`, Cargo packages dotfiles
   outside a git repository too. Inside one, an ignored file that `include`
   names is no longer dropped silently: `cargo package` stops, naming it as not
-  committed, until it is added with `git add -f` and committed. `exclude` only
-  removes files. It brings none back.
+  committed, until it is added with `git add -f` and committed. `exclude` is for
+  removing files and does not bring back a file git ignores; `include` is the
+  way to bring dotfiles in.
 
 Before every publish, compare what `files/` and `partials/` hold with what the
 package would contain. From the skeleton's directory, on a committed tree if it
@@ -211,7 +212,8 @@ wearer whose value holds a quote breaks the file the way any hand-edit would.
 - **An `enum` option's** `values` is an array of strings; `default` is one
   of them.
 - **A `text` option** fills a placeholder with the wearer's own words, taken
-  verbatim, with no pattern and no length bound beyond the value rule above.
+  verbatim, with no pattern and no length bound beyond the value rule above,
+  though the render it produces must still fit the size limit.
   Its `default`, when it has one, is a string; the option is then required like
   an `enum`. With no `default` it is optional: unset, every line holding its
   placeholder is dropped whole, terminator included.
@@ -266,7 +268,7 @@ A skeleton that ships one workflow, and nothing else:
 
 ```toml
 [package]
-name = "a-ci-skeleton"
+name = "ci-skeleton"
 version = "0.1.0"
 edition = "2024"
 description = "A CI workflow"
@@ -431,9 +433,9 @@ directive on a file's own final line, which by definition has no
 terminator, is refused for the same reason a partial's own unterminated
 last line is.
 
-A file, or a directory, under `files/` or `partials/` that is a symbolic
-link is refused, naming it — a skeleton is the bytes it ships, not a pointer to
-bytes somewhere else. The same is true of `Cargo.toml` itself: a symbolic
+`files/` or `partials/` itself, or a file or a directory under either, that is
+a symbolic link is refused, naming it — a skeleton is the bytes it ships, not a
+pointer to bytes somewhere else. The same is true of `Cargo.toml` itself: a symbolic
 link there could point outside the skeleton, so one skeleton version would read a
 different manifest on each machine, and anything that is not a regular
 file — a directory, a FIFO, a socket, a device — is refused rather than
@@ -479,7 +481,7 @@ and of cargo.
 
 | What is wrong | Names |
 |---|---|
-| `Cargo.toml` cannot be read | the unreadable path |
+| `Cargo.toml`, or a file or directory under `files/` or `partials/`, cannot be read | the unreadable path |
 | `Cargo.toml` is not valid TOML | `Cargo.toml`, and the line the parser names, when it names one |
 | `Cargo.toml` has no string `package.name` | `Cargo.toml` |
 | `Cargo.toml` has an empty `package.name` | `Cargo.toml` |
@@ -504,8 +506,8 @@ and of cargo.
 | a `verbatim` path names no file under `files/`, and no partial | `Cargo.toml`, the path |
 | a declared option is used by nothing in the skeleton | `Cargo.toml`, the option |
 | `files/` is absent, or holds no file at all | `files` |
-| `files/` or `partials/` exists but is not a directory | `files` or `partials` |
-| a file or directory under either tree is a symbolic link | the link itself |
+| `files/` or `partials/` exists but is neither a directory nor a symbolic link | `files` or `partials` |
+| `files/` or `partials/` itself, or a file or directory under either, is a symbolic link | the link itself (`files` or `partials` when it is the tree's own directory) |
 | an entry is neither a file, a directory, nor a symbolic link | the entry |
 | an entry's own name is not valid UTF-8 | the entry, named lossily |
 | two entries in one directory are one name once case and Unicode normalization are ignored | the first of the two in path order, and the other |
@@ -519,11 +521,11 @@ and of cargo.
 | a `# skeletons:` line is not exactly `# skeletons:partial <name>` | the file and line |
 | a well-formed directive does not name a declared `set` option | the file and line |
 | a directive line appears inside a partial | the partial and line |
-| a line reads as a directive only once invisible characters before it are set aside | the file or partial, and line |
+| a line reads as a directive only once invisible characters before or inside its marker are set aside | the file or partial, and line |
 | a directive sits on a file's last, unterminated line | the file and that line |
 | a non-empty partial's last line has no terminator | the partial and its last line |
 | the largest render any choice could produce exceeds the size limit | the first file, in path order, at which it does |
-| the wearer set a value for an undeclared option | neither — about the choice, not a file |
+| the wearer set a value for an undeclared option | neither a file nor a line of the skeleton — about the choice; `check` reports it at the wearing repository's own `[package.metadata.skeletons.<dependency>]` table |
 | the wearer's choice is the wrong shape for the option's kind | neither |
 | the wearer's text for a `text` option is empty or holds a control character | neither |
 | the wearer chose a value outside the option's declared set | neither |
@@ -538,5 +540,5 @@ placeholder or directive that does not name a declared option of the right
 kind cover two distinct cases: a name that matches nothing declared at
 all, and a name that matches a real option of the *other* kind (a
 placeholder naming a `set`, a directive naming an `enum` or a `text`) —
-both are refused the same way, since neither is what the skeleton's author
-asked for.
+both are refused at the same file and line, each in its own words: `names no
+declared option`, or `names an option declared as <kind>, not <wanted>`.

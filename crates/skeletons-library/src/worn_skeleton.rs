@@ -72,8 +72,9 @@ impl WornSkeleton {
 
     /// The files this skeleton claims, read by matching [`Files`].
     ///
-    /// This is the only way to a skeleton's files, and to the refusals that
-    /// name it. `Checked` is the only variant that holds every file the
+    /// This is the only way to a skeleton's files. The refusals that name it
+    /// are here and in [`Report::refusals`](crate::Report::refusals).
+    /// `Checked` is the only variant that holds every file the
     /// skeleton claims, so "no drifted file" can be concluded from `Checked`
     /// and from nothing else.
     ///

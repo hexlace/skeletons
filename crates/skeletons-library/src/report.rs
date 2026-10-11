@@ -155,8 +155,8 @@ impl Report {
         }
     }
 
-    /// The workspace root as cargo reports it: absolute, with symbolic links
-    /// resolved. Every other path in a report is relative to it.
+    /// The workspace root as cargo reports it: an absolute path. Every other
+    /// path in a report is relative to it.
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root

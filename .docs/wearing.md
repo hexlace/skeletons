@@ -1520,7 +1520,16 @@ remove stopped wearing `dependabot` and moved its files into .skeletons-remove, 
   its last look and its write, and `remove` looks less often than `sync` does.
 - **The undo does not give back what rollback cannot.** A panic, and a change
   made around the run, are the two things named under [Wear](#wear), and they
-  hold here.
+  hold here. A run that is killed partway is in the same class: rollback runs
+  when the run returns a failure, and a killed run returns nothing. The manifest
+  and `Cargo.lock` stay as far as it had changed them, and the files it had
+  already moved stay in `.skeletons-remove`, under numbers and not their names.
+  The next run refuses, because the work tree is no longer clean and
+  `.skeletons-remove` is in the way. Nothing is lost: the manifest is tracked,
+  and every file that was moved had passed the proof that git holds exactly
+  what it held, so `git checkout -- <path>` gives each one back as it was, and
+  `.skeletons-remove` is then deleted by hand. `remove` does nothing more about
+  a killed run than say this.
 
 ## `--json`
 

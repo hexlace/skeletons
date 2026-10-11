@@ -1677,6 +1677,26 @@ partial set is a guess, so a bare `remove` and `--delete-files` refuse and carry
 `an_overlap_makes_the_files_of_every_claimant_unknown`;
 `ritual/tests/remove_files.rs` →
 `a_wearing_whose_files_cannot_be_known_is_refused_bare_and_with_delete_files`).
+An overlap with the wearing being removed is the exception to carrying `check`'s
+words: its advice is to wear only one of the skeletons, and running `remove` is
+how that is done, so it would send the wearer round. The reason therefore
+reaches the message as data, the other wearings and the paths, not as a string,
+and `remove` words it itself: the other wearing and the shared file, with
+`--keep-files` as the one way through, which stops this wearing and leaves the
+file to the other (`crates/skeletons-engine/src/remove/refusal.rs` →
+`an_overlap_on_one_path_names_the_other_wearing_and_the_path_and_leaves_it_to_them`,
+and `ritual/tests/remove_refusals.rs` →
+`an_overlap_with_the_wearing_is_refused_without_telling_the_wearer_to_run_remove_again`).
+Several other wearings are listed, and only one can keep the file
+(`crates/skeletons-engine/src/remove/refusal.rs` →
+`an_overlap_on_one_path_with_several_others_names_each_and_says_only_one_can_keep_it`).
+Paths that collide without being one file are worded as `check` words them,
+because that wording is one function both commands call
+(`crates/skeletons-engine/src/remove/refusal.rs` →
+`an_overlap_on_a_directory_spelled_two_ways_says_so_and_never_calls_it_a_shared_file`).
+Beside a refusal of another kind the line keeps that one to fix and offers
+`--keep-files` once (`crates/skeletons-engine/src/remove/refusal.rs` →
+`an_overlap_beside_another_refusal_keeps_that_one_to_fix_and_offers_the_way_through_once`).
 `--keep-files` touches no file, so it needs to know none, and the dependency and
 the table come out even then, which is the case that matters most: a
 half-written wearing is exactly what a person wants gone

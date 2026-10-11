@@ -32,6 +32,15 @@ impl<T> NonEmpty<T> {
         &self.first
     }
 
+    /// The only element, or `None` when there are more.
+    pub(crate) fn only(&self) -> Option<&T> {
+        if self.rest.is_empty() {
+            Some(&self.first)
+        } else {
+            None
+        }
+    }
+
     /// Every element, the first first.
     pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
         std::iter::once(&self.first).chain(&self.rest)

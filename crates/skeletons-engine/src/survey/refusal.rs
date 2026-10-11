@@ -10,7 +10,10 @@ use crate::skeleton::RenderError;
 use crate::workspace::{OptionShapeRefusal, WearingRefusal, WornId};
 
 #[cfg(feature = "commands")]
-pub(crate) use message::{join_and, option_shape_detail, unsafe_path_change_clause};
+pub(crate) use message::{
+    CollisionWords, ONE_SKELETON_PER_FILE, join_and, many_paths_words, option_shape_detail,
+    two_paths_words, unsafe_path_change_clause,
+};
 
 /// One refusal: something `check`/`sync` could not determine, either about
 /// one worn skeleton or about no single one.

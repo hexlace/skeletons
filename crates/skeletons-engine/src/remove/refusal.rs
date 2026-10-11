@@ -15,13 +15,16 @@ use std::path::PathBuf;
 
 use rituals::Failure;
 
-use super::files::{FilesFlag, Unknowable};
+use super::files::{FilesFlag, Overlapping, Reason, Unknowable};
 use super::names::{ManifestShown, WearingKey};
 use super::non_empty::NonEmpty;
 use super::resolve::{Elsewhere, PickRefusal};
+use crate::claim::ClaimPath;
 use crate::command_line_crate::outside_its_project_message;
 use crate::skeleton::Escaped;
-use crate::survey::join_and;
+use crate::survey::{
+    CollisionWords, ONE_SKELETON_PER_FILE, join_and, many_paths_words, two_paths_words,
+};
 use crate::work_tree::writing_command::WritingCommand;
 
 /// What the wearer asked for, as the refusals that depend on the request word
@@ -280,20 +283,115 @@ fn several_keys_message(asked: &Asked, keys: &NonEmpty<WearingKey>) -> String {
 }
 
 /// `` remove cannot tell which files `{key}` claims, so it wrote nothing:
-/// {reasons}; fix that and run the `remove` task again, or give it --keep-files
-/// to stop wearing `{key}` and leave every file in place ``.
+/// {reasons}; {what to do} ``.
 ///
-/// Each reason is a refusal's own message, which is already one escaped line,
-/// so it is quoted as it stands.
+/// A reason that is a refusal's own message is already one escaped line, so it
+/// is quoted as it stands, and what to do is to fix it and run the `remove`
+/// task again, or to give it --keep-files. An overlap with other wearings is
+/// worded by [`overlap_clause`] instead, because running the `remove` task
+/// again does not clear it and --keep-files is the one way through. With both
+/// kinds of reason the first still has to be fixed, and the way through the
+/// second is offered once, after both.
 fn files_unknowable_message(key: &WearingKey, unknowable: &Unknowable) -> String {
+    let mut refused: Vec<&str> = Vec::new();
+    let mut overlaps: Vec<&Overlapping> = Vec::new();
+    for reason in unknowable.reasons.iter() {
+        match reason {
+            Reason::Refused(message) => refused.push(message),
+            Reason::Overlap(overlapping) => overlaps.push(overlapping.as_ref()),
+        }
+    }
+    let clauses: Vec<String> = overlaps
+        .iter()
+        .map(|overlapping| overlap_clause(key, overlapping))
+        .collect();
     let key = Escaped(key.as_str());
-    let reasons: Vec<&str> = unknowable.reasons.iter().map(String::as_str).collect();
-    format!(
-        "remove cannot tell which files `{key}` claims, so it wrote nothing: {}; fix that and \
-         run the `remove` task again, or give it --keep-files to stop wearing `{key}` and leave \
-         every file in place",
-        reasons.join("; ")
+    let keep_files = format!(
+        "give it --keep-files to stop wearing `{key}` and leave {}",
+        what_keep_files_leaves(&overlaps)
+    );
+    let words = match (refused.as_slice(), clauses.as_slice()) {
+        ([], []) => unreachable!("files are unknowable only because a refusal names the wearing"),
+        (refused, []) => format!(
+            "{}; fix that and run the `remove` task again, or {keep_files}",
+            refused.join("; ")
+        ),
+        ([], clauses) => format!("{}; {keep_files}", clauses.join("; ")),
+        (refused, clauses) => format!(
+            "{}; fix that; {}; {keep_files}",
+            refused.join("; "),
+            clauses.join("; ")
+        ),
+    };
+    format!("remove cannot tell which files `{key}` claims, so it wrote nothing: {words}")
+}
+
+/// What the wearing `key` shares with the other wearings of one overlap, as a
+/// clause that ends where the way through begins.
+///
+/// One path is a file claimed by several wearings, and it is worded as that.
+/// More than one path is worded as the survey words how they collide, for
+/// every relation they can stand in, and says only that the wearings claim
+/// them: which wearing claims which of the paths is not known.
+fn overlap_clause(key: &WearingKey, overlapping: &Overlapping) -> String {
+    let others: Vec<String> = overlapping
+        .others
+        .iter()
+        .map(|other| {
+            format!(
+                "`{}` in {} ({} {})",
+                Escaped(&other.dependency),
+                Escaped(&other.manifest),
+                Escaped(&other.skeleton),
+                other.version
+            )
+        })
+        .collect();
+    if let Some(path) = overlapping.paths.only() {
+        return format!(
+            "{} is also claimed by {}, and {ONE_SKELETON_PER_FILE}",
+            Escaped(path.as_str()),
+            join_and(&others)
+        );
+    }
+    let paths: Vec<ClaimPath> = overlapping.paths.iter().cloned().collect();
+    let CollisionWords { clause, reason } = match paths.as_slice() {
+        [first, second] => two_paths_words(first, second),
+        many => many_paths_words(many),
+    };
+    let mut claimants = vec![format!("`{}`", Escaped(key.as_str()))];
+    claimants.extend(others);
+    let claimants = join_and(&claimants);
+    reason.map_or_else(
+        || format!("{clause}, and are claimed by {claimants}"),
+        |reason| format!("{clause}, and are claimed by {claimants}, and {reason}"),
     )
+}
+
+/// What --keep-files leaves, as the end of "and leave ...".
+///
+/// When the one overlap is about one path, that is the shared file, left to
+/// the other wearings, and when several wearings are left with it only one of
+/// them can keep it. Otherwise every file stays, which is all --keep-files
+/// promises.
+fn what_keep_files_leaves(overlaps: &[&Overlapping]) -> String {
+    let [overlapping] = overlaps else {
+        return "every file in place".to_owned();
+    };
+    let Some(path) = overlapping.paths.only() else {
+        return "every file in place".to_owned();
+    };
+    let keys: Vec<String> = overlapping
+        .others
+        .iter()
+        .map(|other| format!("`{}`", Escaped(&other.dependency)))
+        .collect();
+    let rest = if overlapping.others.only().is_some() {
+        ""
+    } else {
+        ", of which only one can keep it"
+    };
+    format!("{} to {}{rest}", Escaped(path.as_str()), join_and(&keys))
 }
 
 /// `` remove could not read {manifest} to take `{key}` out of it: {detail} ``.
@@ -453,12 +551,14 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{Asked, RemoveRefusal, deleted_clause, undeleted_clause, with_the_files_deleted};
-    use crate::remove::files::{FilesFlag, Unknowable};
+    use crate::claim::{ClaimPath, Claimant};
+    use crate::remove::files::{FilesFlag, Overlapping, Reason, Unknowable};
     use crate::remove::names::{ManifestShown, WearingKey};
     use crate::remove::non_empty::NonEmpty;
     use crate::remove::resolve::{Elsewhere, PickRefusal};
     use crate::survey::poison::{
-        POISON_ESCAPED, assert_escaped_once, assert_every_kind, assert_one_line, poison,
+        POISON_ESCAPED, POISON_FOLDED, assert_escaped_once, assert_every_kind, assert_one_line,
+        claim, poison,
     };
 
     fn key(text: &str) -> WearingKey {
@@ -477,10 +577,12 @@ mod tests {
         ManifestShown::new(text)
     }
 
-    fn reasons(first: &str, rest: &[&str]) -> NonEmpty<String> {
+    fn reasons(first: &str, rest: &[&str]) -> NonEmpty<Reason> {
         NonEmpty::new(
-            first.to_owned(),
-            rest.iter().map(|reason| (*reason).to_owned()).collect(),
+            Reason::Refused(first.to_owned()),
+            rest.iter()
+                .map(|reason| Reason::Refused((*reason).to_owned()))
+                .collect(),
         )
     }
 
@@ -750,6 +852,268 @@ mod tests {
         );
     }
 
+    fn claimant(manifest: &str, key: &str, skeleton: &str) -> Claimant {
+        Claimant {
+            manifest: manifest.to_owned(),
+            dependency: key.to_owned(),
+            skeleton: skeleton.to_owned(),
+            version: semver::Version::new(0, 1, 0),
+        }
+    }
+
+    /// An overlap of the wearing with `others`, each a manifest, a key and a
+    /// skeleton, on `paths`.
+    fn overlapping(others: &[(&str, &str, &str)], paths: &[&str]) -> Reason {
+        let mut paths: Vec<ClaimPath> = paths.iter().map(|path| claim(path)).collect();
+        paths.sort();
+        let others: Vec<Claimant> = others
+            .iter()
+            .map(|(manifest, key, skeleton)| claimant(manifest, key, skeleton))
+            .collect();
+        Reason::Overlap(Box::new(Overlapping {
+            others: NonEmpty::from_vec(others).expect("an overlap names another wearing"),
+            paths: NonEmpty::from_vec(paths).expect("an overlap has a path"),
+        }))
+    }
+
+    /// The message for the wearing `a` when `reasons` are why its files are
+    /// unknown.
+    fn unknowable_message(reasons: Vec<Reason>) -> String {
+        RemoveRefusal::FilesUnknowable {
+            key: key("a"),
+            unknowable: Unknowable {
+                reasons: NonEmpty::from_vec(reasons).expect("a reason"),
+            },
+        }
+        .message()
+    }
+
+    const BEGINNING: &str = "remove cannot tell which files `a` claims, so it wrote nothing: ";
+    const OTHER: (&str, &str, &str) = ("ritual/Cargo.toml", "b", "b-skeleton");
+    const OTHER_WORDS: &str = "`b` in ritual/Cargo.toml (b-skeleton 0.1.0)";
+    const KEEP_FILES: &str = "give it --keep-files to stop wearing `a` and leave";
+
+    #[test]
+    fn an_overlap_on_one_path_names_the_other_wearing_and_the_path_and_leaves_it_to_them() {
+        // The model line: the path, who else claims it, why that cannot be,
+        // and --keep-files as the one way through, with the file left to the
+        // other wearing. Running the `remove` task again is not offered.
+        let message = unknowable_message(vec![overlapping(&[OTHER], &["shared.txt"])]);
+
+        assert_eq!(
+            message,
+            format!(
+                "{BEGINNING}shared.txt is also claimed by {OTHER_WORDS}, and a file belongs to \
+                 one skeleton; {KEEP_FILES} shared.txt to `b`"
+            )
+        );
+        assert!(!message.contains("again"), "{message}");
+    }
+
+    #[test]
+    fn an_overlap_on_one_path_with_several_others_names_each_and_says_only_one_can_keep_it() {
+        // Another wearing may be in another member's manifest. After this
+        // wearing stops, the others still claim the path between them.
+        let message = unknowable_message(vec![overlapping(
+            &[OTHER, ("tools/Cargo.toml", "c", "c-skeleton")],
+            &["shared.txt"],
+        )]);
+
+        assert_eq!(
+            message,
+            format!(
+                "{BEGINNING}shared.txt is also claimed by {OTHER_WORDS} and `c` in \
+                 tools/Cargo.toml (c-skeleton 0.1.0), and a file belongs to one skeleton; \
+                 {KEEP_FILES} shared.txt to `b` and `c`, of which only one can keep it"
+            )
+        );
+    }
+
+    /// The beginning of the claim by `a` and `b` that every overlap on more
+    /// than one path ends with.
+    const CLAIMED_BY_BOTH: &str = "and are claimed by `a` and `b` in ritual/Cargo.toml \
+                                   (b-skeleton 0.1.0)";
+
+    #[test]
+    fn an_overlap_on_two_names_one_to_the_filesystem_is_worded_as_that() {
+        let message =
+            unknowable_message(vec![overlapping(&[OTHER], &["Shared.txt", "shared.txt"])]);
+
+        assert_eq!(
+            message,
+            format!(
+                "{BEGINNING}Shared.txt and shared.txt are one name to a filesystem that ignores \
+                 case or Unicode normalization, {CLAIMED_BY_BOTH}, and a file belongs to one \
+                 skeleton; {KEEP_FILES} every file in place"
+            )
+        );
+    }
+
+    #[test]
+    fn an_overlap_on_a_directory_and_a_file_in_it_is_worded_as_nesting() {
+        let message = unknowable_message(vec![overlapping(&[OTHER], &["ci", "ci/x.yml"])]);
+
+        assert_eq!(
+            message,
+            format!(
+                "{BEGINNING}ci and ci/x.yml cannot both exist, since one is inside the other, \
+                 {CLAIMED_BY_BOTH}, and a file belongs to one skeleton; {KEEP_FILES} every file \
+                 in place"
+            )
+        );
+    }
+
+    #[test]
+    fn an_overlap_on_a_directory_spelled_two_ways_says_so_and_never_calls_it_a_shared_file() {
+        // `A/y` and `a/x` are different files that collide only because their
+        // directory has two spellings, so the line says that, and does not
+        // say a file is claimed twice.
+        let message = unknowable_message(vec![overlapping(&[OTHER], &["A/y", "a/x"])]);
+
+        assert_eq!(
+            message,
+            format!(
+                "{BEGINNING}A/y and a/x are in one directory spelled two ways, A and a, which a \
+                 filesystem that ignores case or Unicode normalization takes as one, \
+                 {CLAIMED_BY_BOTH}, and a directory has one spelling on disk; {KEEP_FILES} \
+                 every file in place"
+            )
+        );
+        assert!(!message.contains("also claimed"), "{message}");
+    }
+
+    #[test]
+    fn an_overlap_on_many_paths_is_worded_to_fit_every_way_they_can_collide() {
+        let message = unknowable_message(vec![overlapping(&[OTHER], &["A/y", "a/x", "a/z"])]);
+
+        assert_eq!(
+            message,
+            format!(
+                "{BEGINNING}A/y, a/x and a/z cannot all be written, since a filesystem that \
+                 ignores case or Unicode normalization takes some of them, or directories above \
+                 them, as one, {CLAIMED_BY_BOTH}; {KEEP_FILES} every file in place"
+            )
+        );
+    }
+
+    #[test]
+    fn an_overlap_on_several_paths_with_several_others_lists_every_claimant_once() {
+        let message = unknowable_message(vec![overlapping(
+            &[OTHER, ("tools/Cargo.toml", "c", "c-skeleton")],
+            &["Shared.txt", "shared.txt"],
+        )]);
+
+        assert!(
+            message.contains(
+                "and are claimed by `a`, `b` in ritual/Cargo.toml (b-skeleton 0.1.0) and `c` in \
+                 tools/Cargo.toml (c-skeleton 0.1.0), and a file belongs to one skeleton; "
+            ),
+            "{message}"
+        );
+        assert!(
+            message.ends_with(&format!("{KEEP_FILES} every file in place")),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn two_spellings_that_differ_only_in_normalization_are_told_apart_in_an_overlap() {
+        // Precomposed and decomposed `café.txt` look alike, so the line shows
+        // each with its code points and says why, as the survey does. The
+        // paths are in byte order, so the decomposed one is first.
+        let message = unknowable_message(vec![overlapping(
+            &[OTHER],
+            &["caf\u{e9}.txt", "cafe\u{301}.txt"],
+        )]);
+
+        assert!(
+            message
+                .contains("cafe\u{301}.txt (cafe\\u0301.txt) and caf\u{e9}.txt (caf\\u00E9.txt)"),
+            "{message}"
+        );
+        assert!(
+            message.contains("the two spellings differ only in Unicode normalization"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn an_overlap_beside_another_refusal_keeps_that_one_to_fix_and_offers_the_way_through_once() {
+        // The other refusal is quoted and still has to be fixed. The overlap
+        // is worded for the overlap, whichever came first, and --keep-files is
+        // offered once, after both. The other refusal's advice to run the
+        // `remove` task again is dropped, since the overlap would refuse it.
+        let expected = format!(
+            "{BEGINNING}first reason; fix that; shared.txt is also claimed by {OTHER_WORDS}, and \
+             a file belongs to one skeleton; {KEEP_FILES} shared.txt to `b`"
+        );
+
+        for reasons in [
+            vec![
+                Reason::Refused("first reason".to_owned()),
+                overlapping(&[OTHER], &["shared.txt"]),
+            ],
+            vec![
+                overlapping(&[OTHER], &["shared.txt"]),
+                Reason::Refused("first reason".to_owned()),
+            ],
+        ] {
+            let message = unknowable_message(reasons);
+
+            assert_eq!(message, expected);
+            assert_eq!(message.matches("--keep-files").count(), 1, "{message}");
+        }
+    }
+
+    #[test]
+    fn two_overlaps_are_each_worded_and_leave_every_file_in_place() {
+        // Each overlap names its own path, but --keep-files leaves every file,
+        // so the one way through is not said to leave only one of them.
+        let message = unknowable_message(vec![
+            overlapping(&[OTHER], &["shared.txt"]),
+            overlapping(&[("ritual/Cargo.toml", "c", "c-skeleton")], &["other.txt"]),
+        ]);
+
+        assert_eq!(
+            message,
+            format!(
+                "{BEGINNING}shared.txt is also claimed by {OTHER_WORDS}, and a file belongs to \
+                 one skeleton; other.txt is also claimed by `c` in ritual/Cargo.toml \
+                 (c-skeleton 0.1.0), and a file belongs to one skeleton; {KEEP_FILES} every file \
+                 in place"
+            )
+        );
+    }
+
+    #[test]
+    fn an_empty_key_is_in_backticks_in_the_way_through_of_an_overlap_too() {
+        let message = RemoveRefusal::FilesUnknowable {
+            key: key(""),
+            unknowable: Unknowable {
+                reasons: NonEmpty::new(overlapping(&[OTHER], &["shared.txt"]), Vec::new()),
+            },
+        }
+        .message();
+
+        assert!(
+            message.contains("give it --keep-files to stop wearing `` and leave shared.txt"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_refusal_that_is_not_an_overlap_is_still_worded_as_it_was() {
+        let message = unknowable_message(vec![Reason::Refused("a reason".to_owned())]);
+
+        assert_eq!(
+            message,
+            format!(
+                "{BEGINNING}a reason; fix that and run the `remove` task again, or {KEEP_FILES} \
+                 every file in place"
+            )
+        );
+    }
+
     #[test]
     fn a_refusal_becomes_the_failure_a_task_returns_with_its_message_as_it_is() {
         let refusal = RemoveRefusal::DeleteFailed {
@@ -896,6 +1260,31 @@ mod tests {
         manifest(&poison())
     }
 
+    /// An overlap in each shape of paths its words fit, with the poison in the
+    /// other wearing and in every path: one path, then two in each of the three
+    /// ways they can relate (the same name under the fold, one inside the
+    /// other, a shared directory spelled two ways), then three.
+    fn poisoned_overlaps() -> Vec<Reason> {
+        let one = poison();
+        let folded = POISON_FOLDED.to_owned();
+        let inside = format!("{}/x", poison());
+        let path_sets: [&[&str]; 5] = [
+            &[&one],
+            &[&one, &folded],
+            &[&one, &inside],
+            &[&format!("{}/y", poison()), &format!("{POISON_FOLDED}/x")],
+            &[
+                &format!("{}/y", poison()),
+                &format!("{POISON_FOLDED}/x"),
+                &format!("{}/z", poison()),
+            ],
+        ];
+        path_sets
+            .iter()
+            .map(|paths| overlapping(&[(&poison(), &poison(), &poison())], paths))
+            .collect()
+    }
+
     /// One of each refusal about the request that holds text from outside, with
     /// that text in every field that holds any. The reasons of a refusal about
     /// files are other refusals' messages, already escaped, so they are given
@@ -928,7 +1317,16 @@ mod tests {
             RemoveRefusal::FilesUnknowable {
                 key: poisoned_key(),
                 unknowable: Unknowable {
-                    reasons: NonEmpty::new(POISON_ESCAPED.to_owned(), Vec::new()),
+                    reasons: NonEmpty::new(Reason::Refused(POISON_ESCAPED.to_owned()), Vec::new()),
+                },
+            },
+            // An overlap carries outside text in its own fields, so it is
+            // escaped here, once, for every shape of paths its words fit.
+            RemoveRefusal::FilesUnknowable {
+                key: poisoned_key(),
+                unknowable: Unknowable {
+                    reasons: NonEmpty::from_vec(poisoned_overlaps())
+                        .expect("there is a shape of paths"),
                 },
             },
         ]
@@ -1018,6 +1416,15 @@ mod tests {
                 key: key(""),
                 unknowable: Unknowable {
                     reasons: reasons("a reason", &[]),
+                },
+            },
+            RemoveRefusal::FilesUnknowable {
+                key: key(""),
+                unknowable: Unknowable {
+                    reasons: NonEmpty::new(
+                        overlapping(&[OTHER], &["Shared.txt", "shared.txt"]),
+                        Vec::new(),
+                    ),
                 },
             },
             RemoveRefusal::ManifestUnreadable {

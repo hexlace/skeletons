@@ -1510,6 +1510,30 @@ is the argument parser's and exits with status 2 before any of these.)
   ```text
   remove cannot tell which files `dependabot` claims, so it wrote nothing: <check's refusal>; fix that and run the `remove` task again, or give it --keep-files to stop wearing `dependabot` and leave every file in place
   ```
+
+  An overlap with the wearing being removed is the one reason `remove` words
+  itself, because running the `remove` task is how one of the wearings stops,
+  so "fix that and run it again" would send the wearer in a circle. It names
+  the other wearings, in the form `check` names them, and the path they share,
+  and `--keep-files` is the only way through. This is the line for one shared
+  file:
+
+  ```text
+  remove cannot tell which files `overlap-a` claims, so it wrote nothing: shared.txt is also claimed by `overlap-b` in ritual/Cargo.toml (overlap-b-skeleton 0.1.0), and a file belongs to one skeleton; give it --keep-files to stop wearing `overlap-a` and leave shared.txt to `overlap-b`
+  ```
+
+  With several other wearings it lists each, and adds that only one of them can
+  keep the file. Where the paths only collide and are not one file, it words
+  them as `check` does, for two names that are one name to a filesystem that
+  ignores case, a directory and a file inside it, a directory spelled two ways,
+  or more paths than two, and says the wearings claim them without saying which
+  claims which; `--keep-files` then leaves every file in place. Beside a
+  refusal of another kind the line quotes that one, says to fix it, words the
+  overlap this way, and offers `--keep-files` once, after both:
+
+  ```text
+  remove cannot tell which files `overlap-a` claims, so it wrote nothing: <check's refusal>; fix that; shared.txt is also claimed by `overlap-b` in ritual/Cargo.toml (overlap-b-skeleton 0.1.0), and a file belongs to one skeleton; give it --keep-files to stop wearing `overlap-a` and leave shared.txt to `overlap-b`
+  ```
 - the work tree is not clean, or git cannot be asked. This is the question
   `sync` asks (see [Sync](#sync)), with the whole tree counted, asked after the
   name and the files so a request that is wrong is refused as wrong whether or

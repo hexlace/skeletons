@@ -16,8 +16,9 @@ use std::error::Error;
 use support::one_line::toml_string;
 use support::remove::{
     MANIFEST, ONE_UNCOMMITTED_CHANGE_LINE, ReadOnlyDirectory, Worn, assert_printed, assert_refused,
-    commit_line, dependency_under_key, fixture_wearing_in_another_member, keys_check_lists,
-    porcelain, run_remove, stopped_wearing_line, sync_and_commit, tree_state, wear,
+    commit_line, dependency_under_key, fixture_wearing_in_another_member,
+    fixture_wearing_two_skeletons_that_claim_one_path, keys_check_lists, porcelain, run_remove,
+    stopped_wearing_line, sync_and_commit, took_out_line, tree_state, wear,
 };
 use support::wear::{COMMAND_LINE_PACKAGE, fixture_for_wearing};
 use support::{
@@ -238,6 +239,57 @@ fn a_wearing_in_another_members_manifest_is_refused_and_pointed_at() -> TestOutc
         tree_state(fixture.root())?,
         before,
         "a refused remove must leave every manifest as it was"
+    );
+    Ok(())
+}
+
+#[test]
+fn an_overlap_with_the_wearing_is_refused_without_telling_the_wearer_to_run_remove_again()
+-> TestOutcome {
+    // `overlap-a` and `overlap-b` both claim `shared.txt`, so `check` refuses
+    // both and `remove` cannot tell which files `overlap-a` claims. Running
+    // `remove` is how one stops wearing one of them, so the line must not send
+    // the wearer back to it: bare and with `--delete-files` it names the other
+    // wearing and the shared path and offers `--keep-files`, and writes
+    // nothing. `--keep-files` then stops wearing `overlap-a`, leaves
+    // `shared.txt` where it is, and `check` no longer refuses `overlap-b`.
+    let fixture = fixture_wearing_two_skeletons_that_claim_one_path()?;
+    let before = tree_state(fixture.root())?;
+    let line = "remove cannot tell which files `overlap-a` claims, so it wrote nothing: \
+                shared.txt is also claimed by `overlap-b` in Cargo.toml (overlap-b 0.0.0), and a \
+                file belongs to one skeleton; give it --keep-files to stop wearing `overlap-a` \
+                and leave shared.txt to `overlap-b`";
+
+    for arguments in [&["overlap-a"][..], &["overlap-a", "--delete-files"]] {
+        let report = run_remove(&fixture, arguments)?;
+
+        assert_refused(&report, line);
+        assert_eq!(
+            tree_state(fixture.root())?,
+            before,
+            "a refused remove must leave the work tree as it was: {arguments:?}"
+        );
+    }
+
+    let report = run_remove(&fixture, &["overlap-a", "--keep-files"])?;
+
+    assert_printed(
+        &report,
+        &[
+            took_out_line("overlap-a", MANIFEST),
+            "left every file it claims in place".to_owned(),
+            commit_line(MANIFEST, true, 0),
+        ],
+    );
+    assert_eq!(
+        fixture.read("shared.txt")?,
+        b"claimed by overlap-b\n",
+        "the shared file must stay where it was"
+    );
+    assert_eq!(
+        keys_check_lists(&fixture)?,
+        vec!["overlap-b".to_owned()],
+        "check must no longer refuse the other wearing for the overlap"
     );
     Ok(())
 }

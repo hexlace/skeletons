@@ -284,7 +284,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{Candidate, Elsewhere, PickRefusal, Standing, candidates_in, pick, worn_elsewhere};
-    use crate::remove::files::{Claimed, Unknowable};
+    use crate::remove::files::{Claimed, Reason, Unknowable};
     use crate::remove::names::{ManifestShown, WearingKey};
     use crate::remove::non_empty::NonEmpty;
     use crate::skeleton::Choices;
@@ -330,7 +330,10 @@ mod tests {
         // the survey is what refuses it for an option it does not declare. The
         // crate stays, since the dependency is still there to be taken out.
         let refused = Claimed::Unknown(Unknowable {
-            reasons: NonEmpty::new("an option it does not declare".to_owned(), Vec::new()),
+            reasons: NonEmpty::new(
+                Reason::Refused("an option it does not declare".to_owned()),
+                Vec::new(),
+            ),
         });
 
         assert_eq!(
@@ -355,7 +358,10 @@ mod tests {
     #[test]
     fn a_wearing_with_no_dependency_stays_so_whatever_the_survey_says() {
         let refused = Claimed::Unknown(Unknowable {
-            reasons: NonEmpty::new("the table names no dependency".to_owned(), Vec::new()),
+            reasons: NonEmpty::new(
+                Reason::Refused("the table names no dependency".to_owned()),
+                Vec::new(),
+            ),
         });
 
         assert_eq!(dangling("ghost").according_to(&refused), dangling("ghost"));

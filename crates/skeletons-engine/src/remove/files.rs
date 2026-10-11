@@ -29,7 +29,7 @@
 
 use super::names::{ManifestShown, WearingKey};
 use super::non_empty::NonEmpty;
-use crate::claim::{ClaimPath, Drift, DriftReason};
+use crate::claim::{ClaimPath, Claimant, Drift, DriftReason};
 use crate::survey::{Refusal, RefusedWearing, Survey};
 
 /// Which flag the wearer typed about the skeleton's files, if one.
@@ -88,12 +88,70 @@ pub(crate) struct ClaimedFile {
 ///
 /// The survey drops a skeleton's rows whenever it refuses the skeleton, and
 /// drops the claims that overlap, so a set of rows is the whole set of files
-/// only when no refusal names the wearing. Each reason is a refusal's own
-/// message, which is already one escaped line. There is always at least one,
-/// since files are unknowable only because a refusal names the wearing.
+/// only when no refusal names the wearing. Each reason is one such refusal.
+/// There is always at least one, since files are unknowable only because a
+/// refusal names the wearing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Unknowable {
-    pub(crate) reasons: NonEmpty<String>,
+    pub(crate) reasons: NonEmpty<Reason>,
+}
+
+/// One refusal that names a wearing, as far as `remove` words it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Reason {
+    /// A refusal of any kind but an overlap with other wearings, in its own
+    /// words, which are already one escaped line.
+    Refused(String),
+    /// The wearing claims paths that other wearings claim. Running `remove`
+    /// again does not clear it, so it is data for `remove` to word, not a
+    /// message to quote.
+    Overlap(Box<Overlapping>),
+}
+
+/// An overlap between the wearing being removed and others: who else claims,
+/// and the paths that collide. Boxed in [`Reason`] so that the refusal that
+/// carries a reason, which every function returning one pays for on each move,
+/// stays small.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Overlapping {
+    /// The other wearings in the overlap, each once, in the order the survey
+    /// lists its claims. Never the wearing being removed.
+    pub(crate) others: NonEmpty<Claimant>,
+    /// Every path in the overlap, sorted: the paths the wearings share, or,
+    /// where they only collide, the paths that do.
+    pub(crate) paths: NonEmpty<ClaimPath>,
+}
+
+impl Reason {
+    /// The reason `refusal`, which names the wearing `key` of the manifest
+    /// shown as `manifest`, gives for its files being unknown.
+    fn of(refusal: &Refusal, manifest: &ManifestShown, key: &WearingKey) -> Self {
+        let Refusal::Overlap(overlap) = refusal else {
+            return Self::Refused(refusal.message());
+        };
+        let mut others: Vec<Claimant> = Vec::new();
+        for claimant in &overlap.claimants {
+            let this_wearing =
+                claimant.manifest == manifest.as_str() && claimant.dependency == key.as_str();
+            let already_listed = others.iter().any(|listed| {
+                listed.manifest == claimant.manifest && listed.dependency == claimant.dependency
+            });
+            if !this_wearing && !already_listed {
+                others.push(claimant.clone());
+            }
+        }
+        // The paths are ours: an overlap is two or more claims, each with a
+        // path.
+        let Some(paths) = NonEmpty::from_vec(overlap.paths.clone()) else {
+            unreachable!("an overlap is two or more claims, each with a path")
+        };
+        // With no other wearing to name, the claims are this wearing's alone,
+        // and the survey's own words are all there is to quote.
+        NonEmpty::from_vec(others).map_or_else(
+            || Self::Refused(refusal.message()),
+            |others| Self::Overlap(Box::new(Overlapping { others, paths })),
+        )
+    }
 }
 
 /// The files one wearing claims: all of them, or not known.
@@ -118,7 +176,7 @@ impl Claimed {
             .refusals
             .iter()
             .filter(|refusal| refusal.record().wearings.iter().any(names_the_wearing))
-            .map(Refusal::message);
+            .map(|refusal| Reason::of(refusal, manifest, key));
         if let Some(first) = reasons.next() {
             return Self::Unknown(Unknowable {
                 reasons: NonEmpty::new(first, reasons.collect()),
@@ -455,8 +513,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        Claimed, ClaimedFile, Disposition, Fate, FileState, FilesFlag, LeftBecause, Plan, Presence,
-        Present, Remaining, Rule, Settlement, Unknowable, plan,
+        Claimed, ClaimedFile, Disposition, Fate, FileState, FilesFlag, LeftBecause, Overlapping,
+        Plan, Presence, Present, Reason, Remaining, Rule, Settlement, Unknowable, plan,
     };
     use crate::claim::{Claimant, Drift, DriftReason, Overlap};
     use crate::remove::names::{ManifestShown, WearingKey};
@@ -524,7 +582,7 @@ mod tests {
 
     fn unknown() -> Claimed {
         Claimed::Unknown(Unknowable {
-            reasons: NonEmpty::new("one reason".to_owned(), Vec::new()),
+            reasons: NonEmpty::new(Reason::Refused("one reason".to_owned()), Vec::new()),
         })
     }
 
@@ -619,7 +677,10 @@ mod tests {
 
         assert_eq!(
             unknowable.reasons,
-            NonEmpty::new(dangling("a/Cargo.toml", "ci").message(), Vec::new())
+            NonEmpty::new(
+                Reason::Refused(dangling("a/Cargo.toml", "ci").message()),
+                Vec::new()
+            )
         );
     }
 
@@ -669,6 +730,124 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    fn claimant(manifest: &str, key: &str) -> Claimant {
+        Claimant {
+            manifest: manifest.to_owned(),
+            dependency: key.to_owned(),
+            skeleton: "a-skeleton".to_owned(),
+            version: semver::Version::new(0, 1, 0),
+        }
+    }
+
+    fn overlap(paths: &[&str], claimants: Vec<Claimant>) -> Refusal {
+        Refusal::Overlap(Overlap {
+            paths: paths.iter().map(|path| claim(path)).collect(),
+            claimants,
+        })
+    }
+
+    #[test]
+    fn an_overlap_is_data_naming_the_other_wearings_and_the_paths_not_the_wearing_itself() {
+        // `ci` claims two of the three paths and `lint` and the same key in
+        // another manifest claim the rest, so the survey lists `ci` twice. The
+        // reason for `ci` names the other two wearings, once each, in the order
+        // the survey lists them, and every path; the same wearing's key in
+        // another manifest is another wearing.
+        let survey = survey_of(
+            Vec::new(),
+            vec![overlap(
+                &["A/y", "a/x", "a/z"],
+                vec![
+                    claimant("a/Cargo.toml", "ci"),
+                    claimant("a/Cargo.toml", "lint"),
+                    claimant("a/Cargo.toml", "ci"),
+                    claimant("b/Cargo.toml", "ci"),
+                    claimant("a/Cargo.toml", "lint"),
+                ],
+            )],
+        );
+
+        let Claimed::Unknown(unknowable) =
+            Claimed::of(&survey, &manifest("a/Cargo.toml"), &key("ci"))
+        else {
+            panic!("an overlap names the wearing, so its files are unknown");
+        };
+
+        assert_eq!(
+            unknowable.reasons,
+            NonEmpty::new(
+                Reason::Overlap(Box::new(Overlapping {
+                    others: NonEmpty::new(
+                        claimant("a/Cargo.toml", "lint"),
+                        vec![claimant("b/Cargo.toml", "ci")]
+                    ),
+                    paths: NonEmpty::new(claim("A/y"), vec![claim("a/x"), claim("a/z")]),
+                })),
+                Vec::new()
+            )
+        );
+    }
+
+    #[test]
+    fn an_overlap_beside_another_refusal_is_one_more_reason_in_the_surveys_order() {
+        let survey = survey_of(
+            Vec::new(),
+            vec![
+                overlap(
+                    &["a.yml"],
+                    vec![
+                        claimant("a/Cargo.toml", "ci"),
+                        claimant("a/Cargo.toml", "lint"),
+                    ],
+                ),
+                dangling("a/Cargo.toml", "ci"),
+            ],
+        );
+
+        let Claimed::Unknown(unknowable) =
+            Claimed::of(&survey, &manifest("a/Cargo.toml"), &key("ci"))
+        else {
+            panic!("refusals name the wearing, so its files are unknown");
+        };
+
+        assert_eq!(
+            unknowable.reasons,
+            NonEmpty::new(
+                Reason::Overlap(Box::new(Overlapping {
+                    others: NonEmpty::new(claimant("a/Cargo.toml", "lint"), Vec::new()),
+                    paths: NonEmpty::new(claim("a.yml"), Vec::new()),
+                })),
+                vec![Reason::Refused(dangling("a/Cargo.toml", "ci").message())]
+            )
+        );
+    }
+
+    #[test]
+    fn an_overlap_among_the_claims_of_the_wearing_alone_keeps_the_surveys_words() {
+        // There is no other wearing to name, so the survey's own message is
+        // the reason.
+        let refusal = overlap(
+            &["A/y", "a/x"],
+            vec![
+                claimant("a/Cargo.toml", "ci"),
+                claimant("a/Cargo.toml", "ci"),
+            ],
+        );
+        let message = refusal.message();
+        let survey = survey_of(Vec::new(), vec![refusal]);
+
+        let Claimed::Unknown(unknowable) =
+            Claimed::of(&survey, &manifest("a/Cargo.toml"), &key("ci"))
+        else {
+            panic!("an overlap names the wearing, so its files are unknown");
+        };
+
+        assert_eq!(
+            unknowable.reasons,
+            NonEmpty::new(Reason::Refused(message), Vec::new())
+        );
     }
 
     #[test]
@@ -816,7 +995,7 @@ mod tests {
             assert_eq!(
                 plan(flag, unknown(), LOCKFILE_PATH),
                 Err(Unknowable {
-                    reasons: NonEmpty::new("one reason".to_owned(), Vec::new())
+                    reasons: NonEmpty::new(Reason::Refused("one reason".to_owned()), Vec::new())
                 }),
                 "{flag:?}"
             );

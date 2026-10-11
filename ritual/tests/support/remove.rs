@@ -407,6 +407,26 @@ pub(crate) fn make_the_skeleton_render_what_is_there(
     commit_everything(fixture, "fixture: the skeleton renders what is there")
 }
 
+/// A workspace whose root package is the command line's own and wears
+/// `overlap-a` and `overlap-b`, two checked-in skeletons that both claim
+/// `shared.txt`, with that file in the work tree holding what `overlap-b`
+/// renders. Committed clean, lockfile included, and not synced, so `check`
+/// refuses both wearings for the overlap.
+pub(crate) fn fixture_wearing_two_skeletons_that_claim_one_path() -> Result<Fixture, Box<dyn Error>>
+{
+    let extra = format!(
+        "[dev-dependencies]\n{}{}\n{}\n{}",
+        dependency_under_key("overlap-a", "overlap-a")?,
+        dependency_under_key("overlap-b", "overlap-b")?,
+        wearing_table("overlap-a", ""),
+        wearing_table("overlap-b", ""),
+    );
+    let fixture = fixture_for_wearing(&extra)?;
+    fixture.write("shared.txt", b"claimed by overlap-b\n")?;
+    commit_everything(&fixture, "fixture: the shared file")?;
+    Ok(fixture)
+}
+
 /// The reasons `check` gives for refusing the wearing under `key`, joined by
 /// `; `, which is how `remove` words them when it cannot tell which files the
 /// wearing claims.

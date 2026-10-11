@@ -3,11 +3,19 @@
 //! It is written in two kinds of place: `[workspace.package] version`, which
 //! every member inherits, and the `version` requirement on every
 //! `[workspace.dependencies]` entry that has a `path` — this workspace's own
-//! crates, which a published manifest can only find by version. Here that is
-//! `skeletons` alone; `rituals` and `rituals-core` come from crates.io at a
-//! version of their own and are never touched. The tests below check that the
-//! two kinds of site agree; this module is what keeps them agreeing when the
-//! version moves.
+//! crates that another member depends on, which a published manifest can only
+//! find by version. Here those are `skeletons` and `skeletons-engine`. The
+//! third published crate, `skeletons-library`, is released at the same version
+//! but nothing depends on it, so it has no entry; it and the bundle both take
+//! the engine through its entry, which is exact. `rituals` and `rituals-core`
+//! come from crates.io at a version of their own and are never touched. The
+//! tests below check that the sites agree; this module is what keeps them
+//! agreeing when the version moves.
+//!
+//! An internal requirement keeps the shape it has: a bare version (`1.2.3`)
+//! stays bare and an exact pin (`=1.2.3`) stays exact, so a bump never loosens
+//! a pin. Any other shape is refused, because rewriting it would mean guessing
+//! what range it was meant to allow.
 
 use std::error::Error;
 use std::fmt;
@@ -33,15 +41,17 @@ pub(crate) fn workspace_version(document: &DocumentMut) -> Result<Version, Manif
 /// dependencies it rewrote.
 ///
 /// Only the version strings change: comments, key order and spacing around
-/// each value stay as they were. Nothing is written unless every site can be:
-/// an internal dependency without a `version` is refused rather than given
-/// one, since its absence means the manifest has stopped looking the way this
-/// code assumes.
+/// each value stay as they were. A requirement keeps its shape: a bare version
+/// is rewritten bare and an exact `=` pin is rewritten as an exact pin. Nothing
+/// is written unless every site can be: an internal dependency without a
+/// `version` is refused rather than given one, since its absence means the
+/// manifest has stopped looking the way this code assumes, and so is one whose
+/// requirement is neither of those two shapes.
 pub(crate) fn set_release_version(
     document: &mut DocumentMut,
     version: Version,
 ) -> Result<Vec<String>, ManifestError> {
-    let internal = internal_dependency_names(document)?;
+    let internal = internal_dependencies(document)?;
     if internal.is_empty() {
         return Err(ManifestError::NoInternalDependencies);
     }
@@ -55,27 +65,82 @@ pub(crate) fn set_release_version(
     replace_string(package_version, &text).ok_or(ManifestError::WorkspaceVersionNotAString)?;
 
     let dependencies = workspace_dependencies_mut(document)?;
-    for name in &internal {
+    for dependency in &internal {
+        let name = &dependency.name;
         let requirement = dependencies
             .get_mut(name)
             .and_then(|entry| entry.as_table_like_mut())
             .and_then(|entry| entry.get_mut("version"))
             .ok_or_else(|| ManifestError::InternalWithoutVersion(name.clone()))?;
-        replace_string(requirement, &text)
+        replace_string(requirement, &dependency.shape.requirement(version))
             .ok_or_else(|| ManifestError::InternalWithoutVersion(name.clone()))?;
     }
-    Ok(internal)
+    Ok(internal
+        .into_iter()
+        .map(|dependency| dependency.name)
+        .collect())
 }
 
-/// The keys of every `[workspace.dependencies]` entry with a `path`, each
-/// checked to carry a string `version` before anything is edited.
+/// How an internal requirement is written, which a bump keeps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shape {
+    /// `1.2.3`, which Cargo reads as `^1.2.3`.
+    Bare,
+    /// `=1.2.3`, which admits that version alone.
+    Exact,
+}
+
+impl Shape {
+    /// The shape `requirement` is written in, or `None` for any other
+    /// requirement. Only a release version after the optional `=` counts, with
+    /// nothing around it: a requirement with a space, a comma or an operator
+    /// other than `=` is a range this code does not know how to move.
+    fn of(requirement: &str) -> Option<Self> {
+        if Version::parse(requirement).is_ok() {
+            return Some(Self::Bare);
+        }
+        let pinned = requirement.strip_prefix('=')?;
+        Version::parse(pinned).is_ok().then_some(Self::Exact)
+    }
+
+    /// The requirement that asks for `version` in this shape.
+    fn requirement(self, version: Version) -> String {
+        match self {
+            Self::Bare => version.to_string(),
+            Self::Exact => format!("={version}"),
+        }
+    }
+}
+
+/// An internal dependency and the shape of the requirement a bump rewrites.
+struct InternalDependency {
+    name: String,
+    shape: Shape,
+}
+
+/// The keys of every `[workspace.dependencies]` entry with a `path`.
+///
+/// Only the tests ask for the names alone: a bump needs each dependency's
+/// shape too, from [`internal_dependencies`].
+#[cfg(test)]
 fn internal_dependency_names(document: &DocumentMut) -> Result<Vec<String>, ManifestError> {
+    Ok(internal_dependencies(document)?
+        .into_iter()
+        .map(|dependency| dependency.name)
+        .collect())
+}
+
+/// Every `[workspace.dependencies]` entry with a `path`, each checked to carry
+/// a string `version` of a shape a bump can keep, before anything is edited.
+/// The shape found here is the one the write uses, so the write cannot meet a
+/// requirement this pass did not see.
+fn internal_dependencies(document: &DocumentMut) -> Result<Vec<InternalDependency>, ManifestError> {
     let dependencies = document
         .get("workspace")
         .and_then(|workspace| workspace.get("dependencies"))
         .and_then(Item::as_table_like)
         .ok_or(ManifestError::MissingWorkspaceDependencies)?;
-    let mut names = Vec::new();
+    let mut internal = Vec::new();
     for (name, entry) in dependencies.iter() {
         let Some(entry) = entry.as_table_like() else {
             continue;
@@ -83,12 +148,21 @@ fn internal_dependency_names(document: &DocumentMut) -> Result<Vec<String>, Mani
         if entry.get("path").is_none() {
             continue;
         }
-        if entry.get("version").and_then(Item::as_str).is_none() {
+        let Some(requirement) = entry.get("version").and_then(Item::as_str) else {
             return Err(ManifestError::InternalWithoutVersion(name.to_string()));
-        }
-        names.push(name.to_string());
+        };
+        let Some(shape) = Shape::of(requirement) else {
+            return Err(ManifestError::InternalRequirementNotBareOrExact {
+                name: name.to_string(),
+                requirement: requirement.to_string(),
+            });
+        };
+        internal.push(InternalDependency {
+            name: name.to_string(),
+            shape,
+        });
     }
-    Ok(names)
+    Ok(internal)
 }
 
 fn workspace_dependencies_mut(
@@ -121,6 +195,7 @@ pub(crate) enum ManifestError {
     MissingWorkspaceDependencies,
     NoInternalDependencies,
     InternalWithoutVersion(String),
+    InternalRequirementNotBareOrExact { name: String, requirement: String },
 }
 
 impl fmt::Display for ManifestError {
@@ -144,6 +219,11 @@ impl fmt::Display for ManifestError {
             Self::InternalWithoutVersion(name) => write!(
                 formatter,
                 "[workspace.dependencies] {name} has a path but no version string"
+            ),
+            Self::InternalRequirementNotBareOrExact { name, requirement } => write!(
+                formatter,
+                "[workspace.dependencies] {name} requires {requirement:?}, which is neither a \
+                 bare version nor an exact = pin"
             ),
         }
     }
@@ -194,6 +274,9 @@ mod tests {
         let edited = document.to_string();
         let old = format!("\"{before}\"");
         let new = format!("\"{after}\"");
+        // An exact pin keeps its `=`: the same version, in the same shape.
+        let old_pin = format!("\"={before}\"");
+        let new_pin = format!("\"={after}\"");
         let original_lines: Vec<&str> = ROOT_MANIFEST.lines().collect();
         let edited_lines: Vec<&str> = edited.lines().collect();
         assert_eq!(original_lines.len(), edited_lines.len());
@@ -201,9 +284,13 @@ mod tests {
         for (original, edited) in original_lines.iter().zip(&edited_lines) {
             if original != edited {
                 changed += 1;
+                let expected = if original.contains(&old) {
+                    original.replacen(&old, &new, 1)
+                } else {
+                    original.replacen(&old_pin, &new_pin, 1)
+                };
                 assert_eq!(
-                    original.replacen(&old, &new, 1),
-                    *edited,
+                    expected, *edited,
                     "a changed line changed anything but its version"
                 );
             }
@@ -222,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn a_bump_moves_skeletons_with_the_workspace_and_leaves_rituals_and_rituals_core_alone() {
+    fn a_bump_moves_the_bundle_and_its_engine_and_leaves_rituals_and_rituals_core_alone() {
         // The workspace first moves to the version `rituals` is pinned at, so
         // a bump that matched on the old version string, rather than on
         // which dependency carries a `path`, would move `rituals` too.
@@ -244,12 +331,20 @@ mod tests {
         assert_ne!(pinned, after);
 
         let rewritten = set_release_version(&mut reparsed, after).expect("the second bump applies");
-        assert_eq!(rewritten, ["skeletons"]);
+        assert_eq!(rewritten, ["skeletons", "skeletons-engine"]);
         let bumped = reparsed.to_string();
         assert_eq!(workspace_version(&reparsed), Ok(after));
         assert_eq!(
             declaration(&bumped, "skeletons"),
             format!("skeletons = {{ path = \"crates/skeletons\", version = \"{after}\" }}")
+        );
+        assert_eq!(
+            declaration(&bumped, "skeletons-engine"),
+            format!(
+                "skeletons-engine = {{ path = \"crates/skeletons-engine\", \
+                 version = \"={after}\" }}"
+            ),
+            "the engine stays pinned to exactly the bundle's version"
         );
         assert_eq!(
             ["rituals", "ritual"].map(|key| declaration(&bumped, key)),
@@ -297,6 +392,90 @@ mod tests {
             ))
         );
         assert_eq!(document.to_string(), text);
+    }
+
+    #[test]
+    fn a_bump_over_a_bare_requirement_writes_the_bare_version() {
+        let mut document = parse(
+            "[workspace.package]\nversion = \"0.1.0\"\n\n[workspace.dependencies]\n\
+             skeletons = { path = \"crates/skeletons\", version = \"0.1.0\" }\n",
+        );
+        set_release_version(&mut document, release("0.1.1")).expect("the bump applies");
+        assert_eq!(
+            document.to_string(),
+            "[workspace.package]\nversion = \"0.1.1\"\n\n[workspace.dependencies]\n\
+             skeletons = { path = \"crates/skeletons\", version = \"0.1.1\" }\n",
+        );
+    }
+
+    #[test]
+    fn a_bump_over_an_exact_pin_writes_an_exact_pin_and_each_entry_keeps_its_own_shape() {
+        // One entry is pinned and one is bare, so a bump that wrote every
+        // requirement in a single shape would get one of them wrong.
+        let mut document = parse(
+            "[workspace.package]\nversion = \"0.1.0\"\n\n[workspace.dependencies]\n\
+             skeletons = { path = \"crates/skeletons\", version = \"=0.1.0\" } # pinned\n\
+             wearer = { path = \"crates/wearer\", version = \"0.1.0\" }\n",
+        );
+        let rewritten =
+            set_release_version(&mut document, release("0.1.1")).expect("the bump applies");
+        assert_eq!(rewritten, ["skeletons", "wearer"]);
+        assert_eq!(
+            document.to_string(),
+            "[workspace.package]\nversion = \"0.1.1\"\n\n[workspace.dependencies]\n\
+             skeletons = { path = \"crates/skeletons\", version = \"=0.1.1\" } # pinned\n\
+             wearer = { path = \"crates/wearer\", version = \"0.1.1\" }\n",
+        );
+    }
+
+    #[test]
+    fn an_internal_requirement_that_is_neither_bare_nor_exact_is_refused_and_nothing_changes() {
+        // Each requirement is written inside a manifest whose first internal
+        // dependency is valid, so a refusal that came after the first write
+        // would leave the document changed.
+        let requirements = [
+            "^0.1.0",
+            "~0.1.0",
+            ">=0.1.0",
+            "0.1",
+            "*",
+            "= 0.1.0",
+            " 0.1.0",
+            "0.1.0 ",
+            "=0.1.0 ",
+            ">=0.1.0, <0.2.0",
+            "=0.1.0-rc.1",
+        ];
+        for requirement in requirements {
+            let text = format!(
+                "[workspace.package]\nversion = \"0.1.0\"\n\n[workspace.dependencies]\n\
+                 skeletons = {{ path = \"crates/skeletons\", version = \"0.1.0\" }}\n\
+                 wearer = {{ path = \"crates/wearer\", version = \"{requirement}\" }}\n"
+            );
+            let mut document = parse(&text);
+            assert_eq!(
+                set_release_version(&mut document, release("0.1.1")),
+                Err(ManifestError::InternalRequirementNotBareOrExact {
+                    name: "wearer".to_string(),
+                    requirement: requirement.to_string(),
+                }),
+                "for {requirement:?}"
+            );
+            assert_eq!(document.to_string(), text, "for {requirement:?}");
+        }
+    }
+
+    #[test]
+    fn the_refusal_of_an_unsupported_requirement_names_the_dependency_and_the_requirement() {
+        let error = ManifestError::InternalRequirementNotBareOrExact {
+            name: "wearer".to_string(),
+            requirement: "^0.1.0".to_string(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "[workspace.dependencies] wearer requires \"^0.1.0\", which is neither a bare \
+             version nor an exact = pin"
+        );
     }
 
     #[test]
@@ -415,18 +594,25 @@ mod tests {
         let internal = internal_dependency_names(&document).expect("the shape is valid");
         assert_eq!(
             internal,
-            ["skeletons"],
-            "the one crate this workspace releases"
+            ["skeletons", "skeletons-engine"],
+            "the crates another member depends on by path"
         );
-        let mut drift: Vec<String> = internal
+        // A command line may take any compatible version of the bundle. The
+        // engine is built against the bundle and the library and released
+        // with them, so it is asked for at exactly the workspace version.
+        let expected = [
+            ("skeletons", version.clone()),
+            ("skeletons-engine", format!("={version}")),
+        ];
+        let mut drift: Vec<String> = expected
             .iter()
-            .filter_map(|name| {
-                let requirement = document["workspace"]["dependencies"][name.as_str()]["version"]
+            .filter_map(|(name, expected)| {
+                let requirement = document["workspace"]["dependencies"][*name]["version"]
                     .as_str()
                     .unwrap_or_default();
-                (requirement != version).then(|| {
+                (requirement != expected).then(|| {
                     format!(
-                        "[workspace.dependencies] {name} requires {requirement:?}, not {version:?}"
+                        "[workspace.dependencies] {name} requires {requirement:?}, not {expected:?}"
                     )
                 })
             })
@@ -435,8 +621,9 @@ mod tests {
         let members = member_manifests();
         assert_eq!(
             members.len(),
-            4,
-            "skeletons, skeletons-ritual, skeletons-wearer and xtask: {members:?}"
+            6,
+            "skeletons, skeletons-engine, skeletons-library, skeletons-ritual, skeletons-wearer \
+             and xtask: {members:?}"
         );
         for manifest_path in &members {
             drift.extend(member_drift(Path::new(manifest_path)));
@@ -446,5 +633,118 @@ mod tests {
             "every crate must release at the workspace version {version}:\n{}",
             drift.join("\n")
         );
+    }
+
+    /// The parsed manifest of the workspace member named `name`.
+    fn member_manifest(name: &str) -> DocumentMut {
+        member_manifests()
+            .iter()
+            .map(|path| parse(&std::fs::read_to_string(path).expect("the member manifest reads")))
+            .find(|document| document["package"]["name"].as_str() == Some(name))
+            .unwrap_or_else(|| panic!("{name} is a workspace member"))
+    }
+
+    /// What is wrong with how `manifest`'s `[dependencies]` asks for the
+    /// engine: nothing, when it is `workspace = true` and carries no `version`
+    /// or `path` of its own, however the entry is written.
+    fn engine_dependency_drift(name: &str, manifest: &DocumentMut) -> Option<String> {
+        let Some(entry) = manifest
+            .get("dependencies")
+            .and_then(|dependencies| dependencies.get("skeletons-engine"))
+            .and_then(Item::as_table_like)
+        else {
+            return Some(format!(
+                "{name} has no [dependencies] skeletons-engine, or not as a table or a key"
+            ));
+        };
+        if entry.get("workspace").and_then(Item::as_bool) != Some(true) {
+            return Some(format!(
+                "{name} does not take skeletons-engine with workspace = true"
+            ));
+        }
+        ["version", "path"].into_iter().find_map(|key| {
+            entry.get(key).map(|found| {
+                format!(
+                    "{name} gives skeletons-engine a {key} of its own ({}), which the workspace \
+                     entry alone should decide",
+                    found.to_string().trim()
+                )
+            })
+        })
+    }
+
+    #[test]
+    fn the_bundle_and_the_library_both_ask_for_exactly_the_engine_of_their_own_release() {
+        // Reads the real manifests. Both published crates that sit on the
+        // engine take it through the root `[workspace.dependencies]` entry, so
+        // that entry is the only place its version is written, and that entry
+        // is the workspace version behind an `=`: no other engine can resolve
+        // beside either crate.
+        let root = parse(ROOT_MANIFEST);
+        let version = workspace_version(&root).expect("the root manifest has a version");
+        let expected = format!("={version}");
+        let requirement = root["workspace"]["dependencies"]["skeletons-engine"]["version"]
+            .as_str()
+            .unwrap_or_default();
+        let mut drift = Vec::new();
+        if requirement != expected {
+            drift.push(format!(
+                "[workspace.dependencies] skeletons-engine requires {requirement:?}, not \
+                 {expected:?}"
+            ));
+        }
+        for name in ["skeletons", "skeletons-library"] {
+            drift.extend(engine_dependency_drift(name, &member_manifest(name)));
+        }
+        assert!(
+            drift.is_empty(),
+            "the bundle and the library must ask for exactly the engine they release with:\n{}",
+            drift.join("\n")
+        );
+    }
+
+    #[test]
+    fn a_dependent_that_gives_the_engine_a_version_or_path_of_its_own_is_found() {
+        // The check above has to see each way a crate built on the engine can
+        // step outside the workspace entry, so it is run over manifests written
+        // for the purpose: the accepted forms first, then each way of drifting.
+        let accepted = [
+            "[dependencies]\nskeletons-engine.workspace = true\n",
+            "[dependencies]\nskeletons-engine = { workspace = true, features = [\"commands\"] }\n",
+        ];
+        for text in accepted {
+            assert_eq!(
+                engine_dependency_drift("dependent", &parse(text)),
+                None,
+                "for {text:?}"
+            );
+        }
+        let refused = [
+            ("[dependencies]\n", "has no [dependencies] skeletons-engine"),
+            (
+                "[dependencies]\nskeletons-engine = \"0.1.0\"\n",
+                "has no [dependencies]",
+            ),
+            (
+                "[dependencies]\nskeletons-engine = { version = \"=0.1.0\" }\n",
+                "does not take skeletons-engine with workspace = true",
+            ),
+            (
+                "[dependencies]\nskeletons-engine = { workspace = true, version = \"0.1.0\" }\n",
+                "a version of its own (\"0.1.0\")",
+            ),
+            (
+                "[dependencies]\nskeletons-engine = { workspace = true, path = \"../engine\" }\n",
+                "a path of its own (\"../engine\")",
+            ),
+        ];
+        for (text, found) in refused {
+            let drift = engine_dependency_drift("dependent", &parse(text))
+                .unwrap_or_else(|| panic!("{text:?} is refused"));
+            assert!(
+                drift.starts_with("dependent ") && drift.contains(found),
+                "for {text:?}: {drift}"
+            );
+        }
     }
 }

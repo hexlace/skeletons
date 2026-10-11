@@ -26,9 +26,9 @@ skeletons.workspace = true
 # The integration tests for `skeletons check`/`skeletons sync` under
 # `tests/` run the built binary and read its `--json` output back. The
 # shape of that output is decided and versioned (`format_version`, in
-# `crates/skeletons/src/check/json.rs` and `.docs/wearing.md`); tests still
-# parse it as `serde_json::Value` and read facts through a small number of
-# named accessor helpers, kept in one place, so the shape stays in one
+# `crates/skeletons-engine/src/check/json.rs` and `.docs/wearing.md`); tests
+# still parse it as `serde_json::Value` and read facts through a small number
+# of named accessor helpers, kept in one place, so the shape stays in one
 # place too rather than being asserted on scattered raw text. Not needed by
 # anything this crate ships.
 serde_json.workspace = true

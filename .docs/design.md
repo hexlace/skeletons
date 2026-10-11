@@ -259,7 +259,7 @@ of its own, so a value can never accidentally reopen the grammar it was
 substituted into. That matters most for a wearer's text, which the skeleton's
 author did not write: a `text` value of `{{cadence}}` or of
 `# skeletons:partial ecosystems` is written into the render exactly as typed
-(tested by `crates/skeletons/src/acceptance/optional_text.rs` →
+(tested by `crates/skeletons-engine/src/acceptance/optional_text.rs` →
 `a_text_value_holding_a_placeholder_is_written_verbatim_not_filled_again` and
 → `a_text_value_that_is_a_directive_is_written_verbatim_not_selected`).
 
@@ -375,7 +375,7 @@ matching while the bytes are identical, as changed once they are edited, and
 `an_edited_verbatim_workflow_reads_as_changed_and_the_templated_file_still_matches`,
 and → `sync_restores_an_edited_verbatim_workflow_to_its_exact_bytes`; the render
 itself, beside a file that still fills, in
-`crates/skeletons/src/acceptance/verbatim.rs` →
+`crates/skeletons-engine/src/acceptance/verbatim.rs` →
 `a_verbatim_file_is_claimed_byte_for_byte_beside_a_file_that_still_fills`).
 
 **The declaration is stated, never inferred.** A file that holds `${{` could be
@@ -419,7 +419,7 @@ never parsed, and is refused as unused.
 
 Nothing in a verbatim file is read as text. No line of it is a directive or a
 hidden one, and it need not be UTF-8, so a skeleton can claim a binary file
-(tested by `crates/skeletons/src/acceptance/verbatim.rs` →
+(tested by `crates/skeletons-engine/src/acceptance/verbatim.rs` →
 `everything_the_grammar_reads_is_inert_inside_a_verbatim_file`, and →
 `a_verbatim_file_need_not_be_utf_8`). The UTF-8 requirement exists only because
 finding placeholders is a text operation, and a verbatim file is never searched.
@@ -544,11 +544,11 @@ A render is bounded in three ways, each for a different part of the work:
   long is refused as the wearer's choice, and the refusal names the `text`
   option the wearer set that contributes the most bytes to the render, the
   first by name when two contribute the same (tested by
-  `crates/skeletons/src/acceptance/optional_text.rs` →
+  `crates/skeletons-engine/src/acceptance/optional_text.rs` →
   `a_render_made_too_large_by_the_wearers_text_names_the_option_contributing_most`,
   and → `a_tie_for_the_most_bytes_in_a_too_large_render_names_the_first_option_by_name`).
   An option that took its default is never named, since the wearer wrote
-  nothing to shorten (tested by `crates/skeletons/src/skeleton.rs` →
+  nothing to shorten (tested by `crates/skeletons-engine/src/skeleton.rs` →
   `a_heavy_default_does_not_take_the_blame_for_the_wearers_text`).
 
 A skeleton is configuration text, and all three limits sit far above what any
@@ -613,7 +613,7 @@ positive-proof check (rule (b), below). There, a path present on disk is
 looked up in the index by exact spelling (`--literal-pathspecs`), so an
 index entry listed under a case or normalisation variant proves nothing
 about the claimed spelling and is refused rather than trusted
-(`crates/skeletons/src/sync/proof.rs` →
+(`crates/skeletons-engine/src/sync/proof.rs` →
 `a_case_variant_in_the_index_is_not_in_this_index_under_the_claimed_spelling`,
 and →
 `an_nfd_claim_whose_committed_entry_was_normalised_to_nfc_is_listed_as`).
@@ -633,7 +633,7 @@ reads back as the same bytes in `$'…'` under a UTF-8 locale, with a note
 saying why; case and full-fold variants
 look different and stay as they are, escaped only as any text is. One helper
 does this for every message that names variants side by side, and `--json` keeps
-the exact strings (`crates/skeletons/src/survey/spelling.rs` →
+the exact strings (`crates/skeletons-engine/src/survey/spelling.rs` →
 `a_composed_and_a_decomposed_spelling_are_each_followed_by_their_code_points`,
 → `the_kelvin_and_angstrom_signs_look_like_their_letters_and_are_written_out`
 and → `case_and_full_fold_variants_are_visibly_different_and_stay_readable`, and
@@ -663,10 +663,10 @@ other pair is folded, the component's fold once and not once per entry. The exac
 that stops at the first match and folds nothing. Neither changes an answer: the folded ASCII
 name is the name lowercased, which proptests hold to the full rule over every ASCII string
 and over listings mixing ASCII with the characters that fold onto it
-(`crates/skeletons/src/skeleton/folding.rs` →
+(`crates/skeletons-engine/src/skeleton/folding.rs` →
 `an_ascii_name_folds_as_the_full_rule_folds_it`, →
 `colliding_gives_the_answer_folding_both_names_gives`, and
-`crates/skeletons/src/claim/location.rs` →
+`crates/skeletons-engine/src/claim/location.rs` →
 `the_listing_scan_gives_the_answers_folding_every_entry_gives` and →
 `listing_the_exact_spelling_finds_it_exactly_when_the_directory_lists_it`).
 
@@ -678,7 +678,7 @@ cannot be staged. Both are decided when the claim is built, from the name alone 
 one directory's own limit, so `check` and `sync` agree on every machine and nothing is created
 before a claim is refused: a component of more than 255 bytes, or a last component of more than
 239, is refused as `unsafe-path`, cause `name-too-long`, naming the name and its length
-(`crates/skeletons/src/claim.rs` →
+(`crates/skeletons-engine/src/claim.rs` →
 `a_last_component_of_239_bytes_is_the_longest_that_can_be_staged`, →
 `a_component_of_more_than_255_bytes_is_refused_as_a_name_that_cannot_exist`, →
 `a_directory_may_be_255_bytes_but_not_256` and → `the_limit_counts_bytes_not_characters`, and
@@ -698,7 +698,7 @@ component. The set is taken from git v2.53.0's source (`read-cache.c`,
 `ritual/tests/check_untrackable_names.rs` asks git itself, in a
 scratch repository, about every name it tests. A backslash that is a component's
 first character is not a separator to git, and so is not one here. The shapes
-are in `crates/skeletons/src/claim.rs`, one test each (→
+are in `crates/skeletons-engine/src/claim.rs`, one test each (→
 `dotgit_followed_by_a_period_is_untrackable` and its neighbours), with
 `names_git_tracks_are_accepted` holding the names that must stay valid.
 
@@ -729,7 +729,7 @@ refuses exactly what git would ignore and nothing git keeps visible. It is
 asked whatever `core.ignorecase` says, so it answers the same on every
 platform, at the price of also refusing an index-only case variant on a git
 that would have kept it visible, which is rare and names the entry
-(`crates/skeletons/src/sync/proof.rs` →
+(`crates/skeletons-engine/src/sync/proof.rs` →
 `an_absent_path_git_folds_onto_a_tracked_entry_is_tracked_but_absent`, and →
 `the_case_fold_is_asked_of_git_whatever_core_ignorecase_says`, and
 `ritual/tests/sync_free_paths.rs` → `a_path_git_hides_under_another_case_is_refused_not_created` and
@@ -752,20 +752,20 @@ alone is not enough for this — git can hold a path clean while the work
 tree genuinely diverges from it (`--assume-unchanged`, `--skip-worktree`),
 or while the file holds bytes a clean filter would drop on the way in —
 which is what rule (b)'s own per-path proof exists to catch
-(`crates/skeletons/src/sync/proof.rs` →
+(`crates/skeletons-engine/src/sync/proof.rs` →
 `an_assume_unchanged_edit_is_refused_as_hidden_from_the_work_tree` and →
 `a_line_a_lossy_clean_filter_strips_is_not_what_git_checks_out`).
 
 A file that already matches is never rewritten at all, since doing so
 would still change its mtime and permissions for no reason. `sync` shares
 `check`'s own claim resolution — the one `survey` both call
-(`crates/skeletons/src/survey.rs` → `survey`) for the same symlink-free walk
+(`crates/skeletons-engine/src/survey.rs` → `survey`) for the same symlink-free walk
 from the workspace root and the same drift compare — so the two can never
 disagree: a bone `check` reports drifted is always one `sync` would write
 (tested by `ritual/tests/sync.rs` →
 `sync_creates_a_missing_file_matching_the_render_and_then_check_reports_matches`),
 and a path either one refuses as unsafe is refused by both, since both walk
-it through the very same function (`crates/skeletons/src/claim/location.rs` →
+it through the very same function (`crates/skeletons-engine/src/claim/location.rs` →
 `a_symlinked_intermediate_directory_is_refused_naming_it`).
 
 That walk also refuses a claim that lies inside another repository. Every
@@ -776,7 +776,7 @@ refused by) is another repository: a file written there is that
 repository's to track, and this one's `git status` shows it as one changed or
 untracked directory at most. It is refused as `unsafe-path`, cause
 `inside-another-repository`, by `check` and `sync` alike, since both walk it
-(`crates/skeletons/src/claim/location.rs` →
+(`crates/skeletons-engine/src/claim/location.rs` →
 `a_directory_holding_a_dotgit_directory_below_the_root_is_another_repository`,
 and `ritual/tests/sync_git_ignores.rs` →
 `check_refuses_an_absent_claim_inside_a_submodule`, →
@@ -803,7 +803,7 @@ before it lands. Both rules are checked only once there
 is something to write — with nothing to write, nothing can be overwritten,
 so an unrelated dirty tree never blocks a `sync` that would have done
 nothing anyway. Neither is anything else about git: `sync` runs its
-survey and its write plan first (`crates/skeletons/src/sync.rs` → `run`), and
+survey and its write plan first (`crates/skeletons-engine/src/sync.rs` → `run`), and
 opens the work tree — the redirecting-variable refusal below and the
 `rev-parse` — only when the plan is not empty. So with nothing to write it
 needs no git at all, and answers the same inside a git hook, outside a git
@@ -821,7 +821,7 @@ or change inside a submodule. Ignored files do not count. The status
 question is asked under flags that defeat configuration that would
 otherwise hide dirt from a plain `git status`
 (`status.showUntrackedFiles`, `diff.ignoreSubmodules`,
-`submodule.<name>.ignore`; `crates/skeletons/src/work_tree/clean.rs` →
+`submodule.<name>.ignore`; `crates/skeletons-engine/src/work_tree/clean.rs` →
 `status_show_untracked_files_no_does_not_hide_an_untracked_file` and →
 `a_submodule_edit_is_dirty_even_under_ignore_all_configuration`). A file
 merely deleted in the work tree still counts as dirty — the whole-tree
@@ -840,7 +840,7 @@ tracked in this repository's index as one stage-0 entry, mode `100644` or
 flagged skip-worktree or assume-unchanged), whose on-disk bytes are exactly
 what `git cat-file --filters --path=<prefix><path> <index-object>` writes:
 the bytes `git checkout` would put there for that entry, its smudge side
-included (`crates/skeletons/src/sync/proof.rs` → `a_clean_tracked_file_is_held`). The
+included (`crates/skeletons-engine/src/sync/proof.rs` → `a_clean_tracked_file_is_held`). The
 `--path` is relative to the repository's top level, where git reads
 attributes from, so from a workspace below it the workspace's own prefix
 leads the claimed path; without it git applies no attribute and the raw blob
@@ -871,7 +871,7 @@ writes it, so the refusal offers exactly that, after a copy is kept. Different
 bytes mean the object and the path do not decide the checkout (a smudge that
 adds the process id): `git checkout` would write yet another variant and the
 next run would refuse again, so the refusal states that cause and names no
-remedy (`crates/skeletons/src/sync/proof.rs` →
+remedy (`crates/skeletons-engine/src/sync/proof.rs` →
 `a_second_checkout_that_differs_from_the_first_is_not_reproducible` and →
 `a_file_whose_checkout_differs_every_time_git_is_asked_is_not_reproducible`,
 and `ritual/tests/sync_messages.rs` →
@@ -888,7 +888,7 @@ right command names the fact and nothing else. A path tracked but absent
 from the work tree ends in the command that brings the entry back:
 `git sparse-checkout add` for a sparse checkout that leaves it out, or
 `git update-index --no-skip-worktree` and then `git checkout`, since clearing
-the flag alone leaves the file deleted (`crates/skeletons/src/sync/message.rs` →
+the flag alone leaves the file deleted (`crates/skeletons-engine/src/sync/message.rs` →
 `each_remedy_a_line_names_fits_its_cause`, →
 `the_lines_that_deliberately_name_no_remedy_name_none`, →
 `the_unproven_summary_offers_no_remedy_of_its_own` and →
@@ -909,7 +909,7 @@ holds exactly what git holds, which is the case no comparison of bytes can
 catch, so the same `ls-files -v --stage` question that names the one entry
 (the `-v` is the flag letter, `S`, `h` or `s`) refuses a flagged one before
 `cat-file` is ever asked
-(`crates/skeletons/src/sync/proof.rs` →
+(`crates/skeletons-engine/src/sync/proof.rs` →
 `an_assume_unchanged_edit_is_refused_as_hidden_from_the_work_tree`, →
 `a_skip_worktree_edit_is_refused_as_hidden_from_the_work_tree`, →
 `a_flagged_file_whose_bytes_equal_git_s_is_refused_for_each_flag`, and →
@@ -927,13 +927,13 @@ file `sync` wrote there would be ignored by git: `sync` would report
 `created` while `HEAD` kept the committed bytes. So the absent branch asks
 the same `ls-files --stage` question the present branch does, with git's
 own case fold (above) in place of the exact spelling
-(`crates/skeletons/src/sync/proof.rs` → `prove_absent`), and any entry at any
+(`crates/skeletons-engine/src/sync/proof.rs` → `prove_absent`), and any entry at any
 stage, at the path itself or beneath it (a literal pathspec matches a
 directory prefix), or at or beneath another case of it, refuses the path as
 tracked in git's index but absent from the work tree; the user runs
 `git sparse-checkout add` or `git update-index --no-skip-worktree` and then
 `sync` again
-(`crates/skeletons/src/sync/proof.rs` →
+(`crates/skeletons-engine/src/sync/proof.rs` →
 `a_skip_worktree_path_absent_from_the_work_tree_is_tracked_but_absent`, →
 `an_absent_path_with_a_tracked_entry_beneath_it_names_that_entry`, →
 `an_absent_path_git_folds_onto_a_tracked_entry_is_tracked_but_absent`, →
@@ -958,7 +958,7 @@ path followed by `/**`, and not a literal `<a>/`, because git reads a
 trailing `/` as matching a gitlink of that name, which would hide exactly the
 submodule the question is for. Any record refuses every write under it, as a
 file or link where a directory is needed, or, for a gitlink, as a submodule
-(`crates/skeletons/src/sync/proof/above.rs` →
+(`crates/skeletons-engine/src/sync/proof/above.rs` →
 `a_file_the_index_tracks_at_a_directory_above_the_claim_refuses_it`, →
 `a_gitlink_at_a_directory_above_is_a_submodule_even_when_nothing_is_checked_out`, →
 `a_directory_git_tracks_files_beneath_is_not_an_entry_above_the_claim`, →
@@ -982,7 +982,7 @@ read from them: `git check-ignore --no-index -q -- ./<claim>` gives the verdict
 as its exit status (`0` ignored, `1` not ignored; a `!` pattern that undoes an
 earlier one exits `1`, so that claim is created), and only when that says
 ignored, `-v` prints the rule as `<source>:<line>:<pattern>`, which the message
-quotes as git prints it (`crates/skeletons/src/sync/proof/ignored.rs`). Only a
+quotes as git prints it (`crates/skeletons-engine/src/sync/proof/ignored.rs`). Only a
 write `sync` would create is asked. A file that is present is tracked, since
 `sync` proves that first, and git does not ignore what it tracks, so a claim
 added with `git add -f` is updated whatever a rule says; a claim the index holds
@@ -1001,16 +1001,16 @@ pathspec, finds the tracked `kept.log`, and says the absent `*.log` is not
 ignored). What it does read is a leading `:(…)` as pathspec magic, so the path
 is passed after `./`, which makes `./:(top)a.yml` the file called `:(top)a.yml`,
 and a leading `-` a name and not an option
-(`crates/skeletons/src/git/command.rs` →
+(`crates/skeletons-engine/src/git/command.rs` →
 `a_check_ignore_path_is_the_claim_after_a_dot_slash`, and
-`crates/skeletons/src/sync/proof/ignored.rs` →
+`crates/skeletons-engine/src/sync/proof/ignored.rs` →
 `a_glob_character_in_a_claim_is_an_ordinary_character_of_its_name`, →
 `a_claim_that_opens_like_pathspec_magic_is_a_file_of_that_name`, →
 `a_claim_that_begins_with_a_dash_is_a_name_not_an_option` and →
 `a_tracked_file_a_claim_reads_like_a_glob_of_does_not_answer_for_the_claim`).
 Exit `128`, any other status, a rule line `skeletons` cannot read, and output
 past the cap are each a refusal, never a claim created on an answer that was not
-read (`crates/skeletons/src/sync/proof/ignored.rs` →
+read (`crates/skeletons-engine/src/sync/proof/ignored.rs` →
 `exit_zero_is_ignored_and_exit_one_is_not_ignored`, →
 `exit_128_is_a_failed_check_carrying_gits_own_detail`, →
 `output_that_is_not_one_rule_line_parses_to_nothing`, and
@@ -1034,7 +1034,7 @@ git's index holds at the depth of the writes and above is listed once
 (`ls-files -z` with one glob per depth, `*`, `*/*`, and so on, paths only),
 and each entry that is one name with a claim, or with a directory above it,
 under the fold the render, overlap detection and the walk use, but is spelled
-differently, is a candidate (`crates/skeletons/src/sync/fold_variant.rs` →
+differently, is a candidate (`crates/skeletons-engine/src/sync/fold_variant.rs` →
 `an_entry_one_name_with_the_claim_but_spelled_otherwise_is_the_same_path`, →
 `an_entry_at_a_directory_above_the_claim_spelled_otherwise_is_a_directory_above`, →
 `an_entry_beneath_a_variant_of_the_claim_is_not_a_candidate` and →
@@ -1043,9 +1043,9 @@ file exists, each candidate's spelling is looked up on the filesystem: if it
 finds the very file `sync` just created, or the very directory the claim
 needs, the filesystem takes the two for one name and the write is refused
 with nothing written; if it finds nothing, they are two names, and nothing is
-refused (`crates/skeletons/src/sync/write/fold_probe.rs` →
+refused (`crates/skeletons-engine/src/sync/write/fold_probe.rs` →
 `a_variant_the_filesystem_folds_is_refused_and_one_it_keeps_apart_is_not`, and
-`crates/skeletons/src/sync/write.rs` →
+`crates/skeletons-engine/src/sync/write.rs` →
 `a_fold_variant_the_filesystem_takes_for_the_claim_is_refused_with_nothing_written`,
 and `ritual/tests/sync_git_ignores.rs` →
 `an_index_entry_hidden_under_the_other_unicode_spelling_is_refused_not_created`).
@@ -1062,19 +1062,19 @@ since a `status` cut short may have dropped exactly the record that says
 dirty. Each of the five commands' output is classified by a pure function
 that takes the stream as `Result<&[u8], Truncated>`, so a stream that ran
 past its cap cannot be reached as bytes without handling that
-(`crates/skeletons/src/subprocess.rs` → `stdout`); a unit test hands each
+(`crates/skeletons-engine/src/subprocess.rs` → `stdout`); a unit test hands each
 one a truncated stream and the same bytes uncut
-(`crates/skeletons/src/work_tree.rs` →
+(`crates/skeletons-engine/src/work_tree.rs` →
 `truncated_stdout_reads_as_git_output_too_large`, →
-`crates/skeletons/src/work_tree/clean.rs` →
+`crates/skeletons-engine/src/work_tree/clean.rs` →
 `truncated_status_stdout_reads_as_git_output_too_large_never_clean`, →
-`crates/skeletons/src/work_tree/index_records.rs` →
+`crates/skeletons-engine/src/work_tree/index_records.rs` →
 `truncated_ls_files_stdout_reads_as_too_large`, →
-`crates/skeletons/src/sync/proof.rs` →
+`crates/skeletons-engine/src/sync/proof.rs` →
 `truncated_cat_file_stdout_reads_as_output_too_large`,
-`crates/skeletons/src/sync/proof/listing.rs` →
+`crates/skeletons-engine/src/sync/proof/listing.rs` →
 `a_truncated_listing_is_refused_as_too_large_never_searched_in_part`, and
-`crates/skeletons/src/sync/proof/ignored.rs` →
+`crates/skeletons-engine/src/sync/proof/ignored.rs` →
 `truncated_output_is_refused_whatever_the_exit_status_says`).
 
 Every git command is also bounded in time (30 seconds), and one that runs
@@ -1084,9 +1084,9 @@ it up, and how to find out. A `cat-file` names the content filter the
 repository configures for the path and `git check-attr filter`, which names it;
 a `status` names a filter or a slow filesystem and says to run it by hand; an
 `ls-files` names another process holding git's index, and a `check-ignore`
-names a slow filesystem (`crates/skeletons/src/work_tree.rs` →
+names a slow filesystem (`crates/skeletons-engine/src/work_tree.rs` →
 `a_command_killed_for_running_too_long_is_a_timeout_naming_the_question`,
-`crates/skeletons/src/work_tree/message/timed_out.rs` →
+`crates/skeletons-engine/src/work_tree/message/timed_out.rs` →
 `a_checkout_that_timed_out_names_the_path_the_command_and_the_filter`, and
 `ritual/tests/sync_messages.rs` →
 `a_content_filter_that_times_out_is_named_with_its_path_command_and_a_remedy`).
@@ -1100,7 +1100,7 @@ is set in its own environment, whatever its value — each one redirects
 which repository, work tree, index, object store or attribute source git
 would actually answer about, so a `sync` that ran anyway could be checking
 one repository and writing into another
-(`crates/skeletons/src/work_tree.rs` → `open`, called once there is
+(`crates/skeletons-engine/src/work_tree.rs` → `open`, called once there is
 something to write and before either rule is asked). The refusal exists
 because inside `git commit <paths>` or `git commit -a` the index git is
 using may be a temporary one, and a file written mid-commit is not part of
@@ -1122,13 +1122,13 @@ file is `.<name>.skeletons-sync`, created exclusively (`create_new`: it fails on
 already there, a dangling symbolic link included, so it never truncates and never writes
 through a link). Something already at that path is refused by name and left alone,
 because a leftover is something a person should see (tested by
-`crates/skeletons/src/sync/write.rs` →
+`crates/skeletons-engine/src/sync/write.rs` →
 `a_symlink_at_the_staging_path_is_refused_and_nothing_is_written_through_it`).
 A directory this user may not create in (a `create_dir` or a staging file refused
 with a permission error) is named, with `chmod u+w` for it, and not left as the
-operating system's "Permission denied" (`crates/skeletons/src/sync/write/staging.rs` →
+operating system's "Permission denied" (`crates/skeletons-engine/src/sync/write/staging.rs` →
 `creating_in_a_directory_this_user_cannot_write_is_not_writable_and_names_it`,
-`crates/skeletons/src/sync/write.rs` →
+`crates/skeletons-engine/src/sync/write.rs` →
 `a_directory_that_cannot_be_written_is_reported_by_name_with_nothing_written`, and
 `ritual/tests/sync_messages.rs` →
 `a_directory_sync_cannot_write_into_is_named_with_a_remedy`).
@@ -1139,13 +1139,13 @@ a claimed path, a directory above one, or beneath one is refused with nothing wr
 on a filesystem that ignores case the staged bytes of one bone would land on another's
 path (`ritual/tests/sync_free_paths.rs` →
 `a_staging_name_that_folds_onto_another_claim_is_refused_before_anything_is_written`;
-`crates/skeletons/src/sync/write/staging_claim.rs` →
+`crates/skeletons-engine/src/sync/write/staging_claim.rs` →
 `a_staging_name_that_folds_onto_nothing_claimed_is_free`). Claims `a/b` and `a/.B.skeletons-sync`
 are the case in point: on such a filesystem `a/b` would receive the other bone's bytes and
 `verify` would then fail.
 Every staging file and every directory `sync` creates is recorded in the same call that
 creates it, so any failure, including one between creating a staging file and filling
-it, removes everything this run created (`crates/skeletons/src/sync/write/staging.rs` →
+it, removes everything this run created (`crates/skeletons-engine/src/sync/write/staging.rs` →
 `every_created_staging_file_is_removed_when_staging_fails_after_creation`). Each is
 recorded with the device and inode it was created as, and every removal (a rollback, the
 backstop that runs when a panic unwinds, and the removal of a staging name after its
@@ -1173,12 +1173,13 @@ The second is at the start of the commit, over every write, before the first lan
 while later files were staged still writes nothing. The third is immediately before each write's own
 rename or link (`ritual/tests/sync_reverify.rs` →
 `a_file_touched_while_a_later_path_is_proven_is_not_overwritten`;
-`crates/skeletons/src/sync/write.rs` →
+`crates/skeletons-engine/src/sync/write.rs` →
 `a_change_found_after_the_first_write_landed_leaves_it_and_names_both_lists`). A file `sync`
 replaces is renamed over its target. A file it creates is hard-linked to its target and the staging
 name removed, and a link fails with `AlreadyExists` where a rename would silently replace, so a file
-that appears after the last look is refused, never overwritten (`crates/skeletons/src/sync/write.rs`
-→ `a_file_that_appears_after_prepare_is_not_replaced_by_commit` and →
+that appears after the last look is refused, never overwritten
+(`crates/skeletons-engine/src/sync/write.rs` →
+`a_file_that_appears_after_prepare_is_not_replaced_by_commit` and →
 `a_link_into_a_path_that_is_taken_is_refused_and_replaces_nothing`). A staging name that survives
 its own link is named after the writes are reported and fails the run, since it is a second link to
 the new file and an untracked file that would stop the next `sync`.
@@ -1192,9 +1193,10 @@ a filesystem without hard links answers differs by platform, and reading it woul
 to know why the link failed, which `sync` does not. The message says that `sync` creates
 new files with hard links and carries the operating system's own error, unchanged, which
 says the rest. Nothing is added to support such a filesystem, and there is no separate
-probe, since the first link is the probe (`crates/skeletons/src/sync/write/landing.rs` →
+probe, since the first link is the probe (`crates/skeletons-engine/src/sync/write/landing.rs` →
 `landing_order_puts_every_absent_write_before_any_held_one`;
-`crates/skeletons/src/sync/write.rs` → `a_link_that_fails_leaves_every_replacement_unwritten`,
+`crates/skeletons-engine/src/sync/write.rs` →
+`a_link_that_fails_leaves_every_replacement_unwritten`,
 → `a_link_that_fails_says_sync_creates_new_files_with_hard_links_and_carries_the_os_error`,
 → `a_link_that_fails_for_any_other_reason_says_the_same` and →
 `a_failure_after_absent_writes_landed_names_them_in_path_order`). Only a workspace
@@ -1207,11 +1209,11 @@ Each written file is read back afterwards through `symlink_metadata` (a regular 
 a link), its bytes compared with its render, its spelling confirmed by the directory
 listing, and a carried permission confirmed. A file that no longer reads back as written
 was changed by something else in the instant after the commit: that is reported with its
-path and a non-zero exit, never a panic (`crates/skeletons/src/sync/write.rs` →
+path and a non-zero exit, never a panic (`crates/skeletons-engine/src/sync/write.rs` →
 `a_file_changed_after_commit_is_reported_and_not_a_panic`).
 `sync` never writes outside the workspace root, including through a symbolic link at or
 above a claimed path: the walk `check` uses refuses such a claim before either command
-touches it (`crates/skeletons/src/claim/location.rs` →
+touches it (`crates/skeletons-engine/src/claim/location.rs` →
 `a_symlinked_intermediate_directory_is_refused_naming_it`), every path `sync` itself
 creates is created exclusively, and each write's path is walked again immediately before
 it lands, as above. The instant after that last walk is the one limit (see
@@ -1234,11 +1236,11 @@ filter that downloads is the filter's own doing (see
 [Known limits](#known-limits)). It never stages, commits or
 stashes anything either. It runs exactly five kinds of git command —
 `rev-parse`, `status`, `ls-files`, `cat-file` and `check-ignore`, each
-built with `--no-optional-locks` (`crates/skeletons/src/git/command.rs` →
+built with `--no-optional-locks` (`crates/skeletons-engine/src/git/command.rs` →
 `command`) — and none of them writes git's own index, refs, config or
 object database (tested by snapshotting every byte under `.git/` before
 and after, outside `lfs/objects/`:
-`crates/skeletons/src/sync/proof.rs` →
+`crates/skeletons-engine/src/sync/proof.rs` →
 `dot_git_is_byte_identical_before_and_after_check_clean_and_prove`). A
 content filter the wearer configured in the repository runs while
 `cat-file` writes a file's checkout — its smudge side, exactly as it runs
@@ -1266,7 +1268,7 @@ a wearer already wrote, rather than adding a setting nobody asked for:
   cargo-release's own workspace default — whenever the remote holds any of
   that shape for this skeleton, and only falling back to reading the
   repository's plain `vX.Y.Z`/`X.Y.Z` tags when it holds none (tested by
-  `crates/skeletons/src/behind/version_tag.rs` →
+  `crates/skeletons-engine/src/behind/version_tag.rs` →
   `release_tags_on_a_many_crate_remote_reads_only_this_packages_own_prefixed_tags`).
   The prefixed shape is read whatever the repository's crate count:
   `git ls-remote` lists tags, not crates, so the count cannot be read from
@@ -1301,7 +1303,7 @@ failure, a timeout, a git remote that no longer exists — the skeleton reads
 **undetermined** too, never **current**: every arm of `determine` that
 cannot answer returns `Behind::Undetermined` rather than falling through to
 `Current`, so no path reads a failure as "not
-behind" by omission (`crates/skeletons/src/behind.rs`; tested by
+behind" by omission (`crates/skeletons-engine/src/behind.rs`; tested by
 `ritual/tests/check_behind_registry.rs` →
 `network_unreachable_reads_undetermined_and_does_not_change_the_default_exit_status`).
 
@@ -1319,11 +1321,11 @@ locked side is read from Cargo's own checkout — the same checkout
 `cargo metadata` already resolved this skeleton's own directory from — with
 one local `git rev-parse --show-prefix HEAD HEAD:./`, giving the skeleton's
 own directory prefix and its tree object at the locked commit
-(`crates/skeletons/src/behind/cargo_checkout.rs` → `locked_directory`). The
+(`crates/skeletons-engine/src/behind/cargo_checkout.rs` → `locked_directory`). The
 remote side is the head commit alone, fetched (`--depth=1
 --filter=blob:none`) into a temporary bare repository this crate creates
-and removes (`crates/skeletons/src/behind/snapshot.rs` → `directory_trees`;
-`crates/skeletons/src/behind/temporary_directory.rs`), never the wearer's
+and removes (`crates/skeletons-engine/src/behind/snapshot.rs` → `directory_trees`;
+`crates/skeletons-engine/src/behind/temporary_directory.rs`), never the wearer's
 repository or Cargo's own checkout, both of which are only ever read. The
 two directories' tree objects are compared: equal is **current**, whatever
 commit history separates the locked commit from the remote head — a commit
@@ -1339,7 +1341,7 @@ head reads **undetermined**, never behind or current: Cargo finds a git
 package by name anywhere in the repository, so a moved directory may be
 unchanged, and guessing either answer would be wrong as often as it was
 right. `check`'s own git removes every repository-redirecting variable
-(`crates/skeletons/src/git/command.rs`), so `GIT_DIR` in a wearer's own
+(`crates/skeletons-engine/src/git/command.rs`), so `GIT_DIR` in a wearer's own
 environment can never redirect this fetch into their own repository; `sync`
 never asks any of this at all. `git` itself (already required for `sync`'s
 own work-tree checks) is what asks a git remote, so it reads the running
@@ -1353,22 +1355,22 @@ the pin locked: one that cannot be read, or whose `HEAD` is some other
 commit, reads `checkout-unreadable`, never a comparison of tree objects
 taken from the wrong commit. The one command that reads it returns a
 prefix, a commit and a tree, and anything else — two lines, a malformed
-object id — is refused (`crates/skeletons/src/behind/cargo_checkout.rs` →
+object id — is refused (`crates/skeletons-engine/src/behind/cargo_checkout.rs` →
 `locked_directory`, tested by `two_lines_instead_of_three_fails_to_parse`,
 → `a_bad_object_id_line_fails_to_parse`, → `a_directory_that_is_not_a_repository_is_unreadable`
 and → `a_checkout_at_another_commit_than_the_locked_one_is_refused_naming_its_own_head`,
-with the wording of both refusals tested in `crates/skeletons/src/behind/branch_directory.rs`
+with the wording of both refusals tested in `crates/skeletons-engine/src/behind/branch_directory.rs`
 → `a_checkout_at_another_commit_reads_checkout_unreadable_naming_both_commits`
 and → `an_unreadable_checkout_reads_checkout_unreadable_carrying_the_diagnostic`). A failure creating or
 initialising the temporary repository, before any network request was made,
 reads `local-failure`, so a local fault is not reported as an unreachable
-remote (`crates/skeletons/src/behind/branch_directory.rs` →
+remote (`crates/skeletons-engine/src/behind/branch_directory.rs` →
 `finalize_branch_directory_reads_each_snapshot_failure_as_its_own_undetermined_reason`).
 The temporary directory is `skeletons-behind-<pid>-<slot>-<attempt>` under the
 operating system's temporary directory, created exclusively (owner-only on
 Unix) so a name already taken by anything, a symbolic link included, is
 never reused, and removed when its owner is dropped, whichever way the
-comparison ends (`crates/skeletons/src/behind/temporary_directory.rs` →
+comparison ends (`crates/skeletons-engine/src/behind/temporary_directory.rs` →
 `a_name_already_taken_by_something_else_is_retried_under_the_next_attempt`
 and → `drop_removes_the_directory_and_everything_under_it`; end to end,
 `ritual/tests/check_behind_branch_directory.rs` →
@@ -1392,7 +1394,7 @@ directory all work, the version grammar is Cargo's own, and `skeletons` reads no
 source and resolves no version. Every flag that takes a value is handed over as
 `--flag=value`, one argument, so a url or directory that begins with `-` cannot
 be read as an option of `cargo add`
-(`crates/skeletons/src/wear/cargo_add.rs` →
+(`crates/skeletons-engine/src/wear/cargo_add.rs` →
 `a_value_that_begins_with_a_hyphen_stays_inside_its_own_flag`).
 
 **The package it writes into is the command line's own.** A task built to
@@ -1405,7 +1407,7 @@ dependencies, since a project's root manifest may be a `[workspace]` with no
 `[package]`. The dependency is a dev-dependency because the skeleton is not part
 of that command line's build. A command line outside the workspace it runs in
 is refused, writing nothing
-(`crates/skeletons/src/wear/prospect.rs` →
+(`crates/skeletons-engine/src/wear/prospect.rs` →
 `a_package_that_is_no_member_is_refused_naming_the_package_and_the_root`).
 
 **A refusal puts the files back; it does not run `cargo remove`.** `cargo add`
@@ -1416,14 +1418,14 @@ before the first change and, when the run returns a failure, writes both back as
 they were, byte for byte
 (`ritual/tests/wear_refusals.rs` →
 `a_crate_that_is_not_a_skeleton_is_refused_after_cargo_ran_and_nothing_changes`,
-and `crates/skeletons/src/wear.rs` →
+and `crates/skeletons-engine/src/wear.rs` →
 `a_crate_that_is_not_a_skeleton_puts_the_manifest_and_lockfile_back_byte_for_byte`).
 Rollback undoes a failure and does not undo a panic, so every condition the
 wearer can cause or act on, found after `cargo add`, is a returned failure,
 including the two that are defects in `skeletons`
-(`crates/skeletons/src/wear/confirm.rs` →
+(`crates/skeletons-engine/src/wear/confirm.rs` →
 `a_workspace_that_does_not_report_the_wearing_at_all_is_a_defect`, and
-`crates/skeletons/src/wear/refusal.rs` →
+`crates/skeletons-engine/src/wear/refusal.rs` →
 `a_table_that_changed_something_else_is_called_a_defect`): a panic there would
 leave the project half-written. A violated invariant is still a defect that
 panics, and a few assertions in the workspace reader and the process runner can
@@ -1437,7 +1439,7 @@ are checked.
 The clean tree is the same whole-tree question `sync` asks, through the same
 code, counting every uncommitted path rather than only the two files `wear`
 changes, because a person's own edits to them would otherwise be mixed into
-what `wear` wrote (`crates/skeletons/src/work_tree.rs` → `open_clean`, and
+what `wear` wrote (`crates/skeletons-engine/src/work_tree.rs` → `open_clean`, and
 `ritual/tests/wear_refusals.rs` →
 `a_work_tree_with_uncommitted_changes_is_refused_and_nothing_changes`).
 
@@ -1449,7 +1451,7 @@ be tracked and read from the work tree, tagged `H` and not `h`, `S` or `s`, and
 a tracked `Cargo.lock` has to be too; otherwise `wear` refuses before writing,
 because a dependency and a table written into a file git does not watch would
 leave a lockfile that no committed manifest explains
-(`crates/skeletons/src/wear/hand_back.rs` →
+(`crates/skeletons-engine/src/wear/hand_back.rs` →
 `a_file_flagged_so_git_does_not_read_it_is_refused_for_each_flag_and_each_file`
 and →
 `a_manifest_git_holds_nothing_for_is_refused_and_a_lockfile_is_allowed`;
@@ -1473,7 +1475,7 @@ permission bits, so an access control list, an immutable flag and a read-only
 mount answer as they would for the real write, and a process that can write any
 file passes, which is right because it can also restore. A missing `Cargo.lock`
 is the `--locked` read's to refuse
-(`crates/skeletons/src/wear/writable.rs` →
+(`crates/skeletons-engine/src/wear/writable.rs` →
 `a_path_that_cannot_be_opened_for_writing_is_refused_for_either_file_whoever_runs_it`,
 and `ritual/tests/wear_refusals.rs` →
 `a_read_only_manifest_is_refused_before_anything_is_written` and →
@@ -1487,7 +1489,7 @@ root, so `wear` does not change the working directory. Nothing inside the
 rollback run depends on the working directory: `cargo add`, the read back and
 every `git` question are given the directory they run in, which is where the
 command was run, so a relative `--path` still means what the wearer typed
-(`crates/skeletons/src/wear.rs` → `run`). The one exception is `rollback`'s own
+(`crates/skeletons-engine/src/wear.rs` → `run`). The one exception is `rollback`'s own
 `reading <path> failed` and `writing <path> failed`, which name the path as it
 was handed; both checks before the write make them unreachable short of a race
 with another writer.
@@ -1511,14 +1513,14 @@ settles a skeleton already worn, a key a dependency already holds and a wearing
 table with no dependency under it, each in `wear`'s own words and with nothing
 changed. A key is compared as `rustc` names a dependency, with `-` and `_` the
 same, because two dependencies that differ only there are one name to the
-compiler (`crates/skeletons/src/wear/prospect.rs` →
+compiler (`crates/skeletons-engine/src/wear/prospect.rs` →
 `a_hyphen_and_an_underscore_collide_because_rustc_names_them_alike`), and a
 dependency under a target-specific table holds its key like any other
-(`crates/skeletons/src/wear/prospect.rs` →
+(`crates/skeletons-engine/src/wear/prospect.rs` →
 `a_target_specific_dependency_holds_its_key_like_any_other`). A wearing table
 is compared the same way: one at another spelling of the key is refused, since
 `wear` would write a second table beside it and `sync` would refuse the pair
-(`crates/skeletons/src/wear/prospect.rs` →
+(`crates/skeletons-engine/src/wear/prospect.rs` →
 `a_wearing_table_at_the_other_spelling_of_the_key_is_refused_naming_it_as_written`).
 The work tree is
 asked last, so a request that is wrong is refused as wrong whether or not the
@@ -1531,7 +1533,7 @@ than a person means to type there, and checks a rename only after it has
 written it, so a key it would then refuse leaves a broken manifest. The
 narrower grammar is checked first, and it also keeps a crate spec from ever
 reaching `cargo add` as an option
-(`crates/skeletons/src/wear/request.rs` → `a_key_outside_the_grammar_is_refused`,
+(`crates/skeletons-engine/src/wear/request.rs` → `a_key_outside_the_grammar_is_refused`,
 and → `a_crate_name_is_held_to_the_grammar_a_key_is_and_is_refused_as_a_crate_name`).
 A key outside it can still be written by hand. The crate name and the key are
 two types sharing the one grammar, so one cannot be passed for the other.
@@ -1544,19 +1546,19 @@ replaces the standard library's prelude and `test` the harness's
 never mention skeletons, after `sync` and `check` have both passed. The key is
 compared as `rustc` names it, with `-` and `_` the same, so `proc-macro` is
 refused as `proc_macro` is, whether it is typed or defaulted from a crate's
-name (`crates/skeletons/src/wear/request.rs` →
+name (`crates/skeletons-engine/src/wear/request.rs` →
 `the_crates_the_compiler_provides_are_refused_as_keys_explicit_or_defaulted`,
 and `ritual/tests/wear_refusals.rs` →
 `a_key_that_names_a_crate_the_compiler_provides_is_refused_and_nothing_changes`).
 A crate of that name is fine under another key
-(`crates/skeletons/src/wear/request.rs` →
+(`crates/skeletons-engine/src/wear/request.rs` →
 `a_crate_named_for_the_compiler_is_a_fine_crate_under_another_key`).
 
 **The table goes where `toml_edit` puts it.** The empty table is written in
 place, so every comment and blank line the wearer wrote stays, after the last
 `[package…]` table with one blank line around it. That placement is
 `toml_edit`'s own and is pinned by tests rather than decided here
-(`crates/skeletons/src/wear/table.rs` →
+(`crates/skeletons-engine/src/wear/table.rs` →
 `with_no_metadata_the_table_goes_right_after_package`, and →
 `a_trailing_comment_and_a_missing_final_newline_are_kept`). The edited manifest
 is compared against an independent parse of the original before it is kept: it

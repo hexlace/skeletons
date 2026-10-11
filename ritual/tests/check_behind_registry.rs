@@ -12,7 +12,7 @@
 //! dependency would — see `support::write_vendored_crates_io_skeleton` and
 //! `support::write_vendored_other_registry_skeleton`. Whether a skeleton is
 //! *behind* is decided by asking a captured, real answer from crates.io,
-//! never a hand-written one: see `crates/skeletons/src/behind/captures/readme.md`
+//! never a hand-written one: see `crates/skeletons-engine/src/behind/captures/readme.md`
 //! for how and when those answers were captured, and what each one proves.
 //!
 //! A git remote that cannot be reached at all is covered separately, in
@@ -28,7 +28,7 @@ fn a_registry_pinned_skeleton_reports_behind_when_a_newer_non_yanked_release_exi
 -> support::TestOutcome {
     // Locked at `semver` 1.0.7. The captured, real crates.io index for
     // `semver` lists a newer, non-yanked, non-prerelease release, 1.0.28 —
-    // see `crates/skeletons/src/behind/captures/readme.md`. `check` must ask
+    // see `crates/skeletons-engine/src/behind/captures/readme.md`. `check` must ask
     // crates.io (through the captured-index seam) and report behind, naming
     // 1.0.28, and the query itself must show up in the remote-query log —
     // the positive control that a `behind` answer here is a read one, not

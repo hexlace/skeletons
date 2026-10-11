@@ -33,24 +33,70 @@ All of these must pass:
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p skeletons --all-targets -- -D warnings
-cargo test -p skeletons
+cargo clippy -p skeletons-engine --all-targets -- -D warnings
+cargo clippy -p skeletons-engine -p skeletons --all-targets -- -D warnings
+cargo clippy -p skeletons-library --all-targets -- -D warnings
+cargo test -p skeletons-engine
+cargo test -p skeletons-engine -p skeletons
+cargo test -p skeletons-library
 cargo test --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
+RUSTDOCFLAGS="-D warnings" cargo doc -p skeletons-engine --no-deps --document-private-items
 cargo deny --locked check
 ```
 
-The two `-p skeletons` commands build the bundle alone. A workspace build
-compiles `skeletons` with its `test-util` feature, which `ritual`'s
-dev-dependency turns on for every package in that build, so code or a test
-seam that depends on the feature being on or off is only seen by the run
-that has it the other way.
+The engine has two configurations. Without its `commands` feature it only
+reads a workspace and surveys it; with the feature it also holds the commands
+and everything only they use. The `-p skeletons-engine` commands build it
+without the feature, and the `-p skeletons-engine -p skeletons` commands build
+it with the feature, which the bundle turns on, and without `test-util`. A
+workspace build compiles `skeletons-engine` with the feature on, and with
+`test-util` too, which `ritual`'s dev-dependency turns on for every package in
+that build, so code or a test seam that depends on a feature being on or off
+is only seen by the run that has it the other way. The `-p skeletons-library`
+commands are the same kind of run from the other side: built alone, the library
+compiles the engine without the feature, as a project that depends on it
+does, where the workspace build always has the feature on. A doc link from an
+item that is always built to one that only the commands build is the same kind
+of mismatch, and only the engine's own `cargo doc` sees it break.
+
+That the engine without the feature holds none of the commands' dependencies
+(the command-line framework, the network client and the TLS stack under it,
+the manifest editor and the query-string decoder) is a test in `xtask`, which
+`cargo test --workspace` runs. It asks `cargo tree` for the engine's graph over
+normal and build dependencies and looks for each of them, and asks
+again with the feature on to prove the question can see them. It also holds
+that graph, and the library's, to one version of each package.
 
 CI runs the same, with clippy and the tests on both Linux and macOS, and
 three more: every crate is packaged and built from its package alone, as
-crates.io would receive it; the bundle's tests then run from that unpacked
-package (see [Test skeletons](#test-skeletons)); and the test suite runs on
-the oldest toolchain its `rust-version` declares.
+crates.io would receive it; the tests of the three published crates then run
+from their unpacked packages (see [Test skeletons](#test-skeletons)), the
+engine's as packaged and with `--features commands`, and the bundle's and the
+library's against the unpacked engine, patched in because crates.io does not
+have that version until the release is published, and without `--locked`
+because the patch changes what the lockfile records for the engine; and the
+test suite runs on the oldest toolchain its `rust-version` declares, the
+engine and the library without the engine's feature included.
+
+## The crates
+
+Three crates are published, and they release together:
+
+- `crates/skeletons-engine` is the engine: reading a workspace, rendering,
+  surveying, and, behind its `commands` feature, the three commands with
+  their wording. It is published only because the other two depend on it, and
+  it promises no stability.
+- `crates/skeletons` is the ritual bundle a project mounts: `task()` over the
+  engine with `commands` on. It is supported.
+- `crates/skeletons-library` is the supported library for a program that wants
+  the verdict as data: `check` over the engine without `commands`. It is
+  supported.
+
+The library's tests go through its public API only. Each writes the workspace
+and the skeletons it reads into a temporary directory of its own and reaches
+no other crate's fixtures, and they never touch the network. One of them
+builds a git repository, so they need `git` on `PATH`.
 
 ## Dependencies
 
@@ -63,13 +109,18 @@ above runs the same check locally.
 
 ## Releasing
 
-`skeletons` follows [Semantic Versioning](https://semver.org/), and it is the
-only crate here that is published. Every member inherits
+`skeletons` follows [Semantic Versioning](https://semver.org/). Three crates
+here are published, `skeletons`, `skeletons-library` and `skeletons-engine`,
+and all three release together at one version. Every member inherits
 `version.workspace = true`, the `skeletons` requirement in the root
-`[workspace.dependencies]` is that same version, and a test in `xtask`
-fails if either stops being true. `skeletons-ritual`, `skeletons-wearer` and
-`xtask` inherit the version too, and are never published. `rituals`, `rituals-core` and
-`rituals-compose` come from crates.io at a version of their own, which a release never touches.
+`[workspace.dependencies]` is that same version, and the `skeletons-engine`
+requirement is that version with a leading `=`. `skeletons` and
+`skeletons-library` each ask for the engine through that entry alone, so both
+ask for exactly the version they release with and no other combination can
+resolve. A test in `xtask` fails if any of this stops being true.
+`skeletons-ritual`, `skeletons-wearer` and `xtask` inherit the version too, and
+are never published. `rituals`, `rituals-core` and `rituals-compose` come from
+crates.io at a version of their own, which a release never touches.
 
 A release takes three steps, and GitHub Actions does the work between them:
 
@@ -85,8 +136,9 @@ A release takes three steps, and GitHub Actions does the work between them:
    top, then every pull request merged since the previous release, then
    everyone who authored or co-authored a commit.
 3. Write the prose and publish the release. Publishing creates the tag, and
-   **Publish** publishes `skeletons` to crates.io through trusted publishing.
-   If it fails, run it again: a version crates.io already has is skipped.
+   **Publish** publishes the three crates to crates.io through trusted
+   publishing, the engine first. If it fails, run it again: a crate at a
+   version crates.io already has is skipped.
 
 Each of these workflows runs as two jobs, split on one rule: **a token that
 can write, to this repository or to crates.io, only ever exists in a job that
@@ -128,9 +180,10 @@ cargo xtask release-contributors hexlace/skeletons v0.1.0 <commit> <dir>   # nee
 
 `bump` edits `Cargo.toml` and `Cargo.lock` in place; put them back with
 `git checkout -- Cargo.toml Cargo.lock` after trying it. `publish-plan` asks
-crates.io whether it already has `skeletons` at the tag's version, then
-packages and builds everything it would upload without uploading anything,
-and it has to run on a committed tree. It prints the plan on stdout: a
+crates.io whether it already has each of the three published crates at the
+tag's version, then packages and builds everything it would upload without
+uploading anything, and it has to run on a committed tree. It prints the plan
+on stdout: a
 `publish=` line and an `exclude=` line, the form the workflow hands from one
 job to the next. The dry run checks the package, not the registry: a version
 crates.io already has, such as a yanked one, shows up only as a warning,
@@ -162,7 +215,7 @@ is `publish = false` too.
 ## Test skeletons
 
 The render's own tests read from real skeletons under
-`crates/skeletons/test-skeletons/` — each one a complete crate, written the way a
+`crates/skeletons-engine/test-skeletons/` — each one a complete crate, written the way a
 skeleton author actually writes one, rather than data built directly in test code
 standing in for a skeleton.
 
@@ -176,7 +229,7 @@ standing in for a skeleton.
   unreadable manifest, a missing `package.name`, a bound reached by a
   filesystem entity git cannot store) is exercised by a unit test instead,
   directly against the function that decides it. The order the refusals come
-  in is pinned the same way: a test in `crates/skeletons/src/skeleton/`
+  in is pinned the same way: a test in `crates/skeletons-engine/src/skeleton/`
   builds one skeleton in a scratch directory with a defect at each stage and
   removes them one at a time, so it needs no fixture here and also runs from
   the published package.
@@ -187,20 +240,20 @@ standing in for a skeleton.
   (control bytes a render must keep, a missing final newline), and a rewrite
   would silently break what they test.
 
-`crates/skeletons/Cargo.toml` excludes the whole `test-skeletons/` directory
+`crates/skeletons-engine/Cargo.toml` excludes the whole `test-skeletons/` directory
 from the published package (the `"/test-skeletons"` entry of its `exclude`
 list), along with the captured crates.io responses and `cargo` output that
 other tests read. So the tests that read those files, or the documents under
-`.docs/`, are compiled only in a checkout: `crates/skeletons/build.rs` sets
+`.docs/`, are compiled only in a checkout: `crates/skeletons-engine/build.rs` sets
 the `skeletons_checkout` cfg when `test-skeletons/` sits beside the manifest,
 and an unpacked `.crate` never has it. A test that reads a file the package
 leaves out goes behind `#[cfg(skeletons_checkout)]`; without that it fails to
-compile, or fails at run time on a path that is not there, when the bundle's
+compile, or fails at run time on a path that is not there, when the engine's
 tests run from the package. CI does run them there, in its `package` job's
 `test the published package` step, and reruns from the package are how a
 missing gate is found. `build.rs` notices `test-skeletons/` being removed but
 not coming back, so a checkout that lost the directory and has it again needs
-`cargo clean -p skeletons` before its tests see the cfg.
+`cargo clean -p skeletons-engine` before its tests see the cfg.
 
 The repository's root `.gitignore` still applies inside a test skeleton's own
 `files/` or `partials/` — a file created there that matches one of its
@@ -215,7 +268,7 @@ index is read through two seams that do not exist in a production build —
 
 - `SKELETONS_TEST_ONLY_CRATES_IO_INDEX`, pointed at a directory of
   captured sparse-index files (see
-  `crates/skeletons/src/behind/captures/readme.md`). Unset in a test
+  `crates/skeletons-engine/src/behind/captures/readme.md`). Unset in a test
   build, every crates.io query answers unreachable rather than falling
   back to a real request.
 - `SKELETONS_TEST_ONLY_REMOTE_LOG`, appended one line before each remote
@@ -229,19 +282,23 @@ A third seam shortens how long a local git question waits:
 
 - `SKELETONS_TEST_ONLY_LOCAL_GIT_TIMEOUT_SECONDS`, a whole number of seconds
   above zero, replaces the 30 seconds every local git command is otherwise
-  given (`crates/skeletons/src/git/local_timeout.rs`), so a test of what a
+  given (`crates/skeletons-engine/src/git/local_timeout.rs`), so a test of what a
   timeout says need not wait it out. Anything else in the variable, zero
   included, stops the test with a panic naming it, rather than reading as
   unset. A production build does not read the variable at all.
   `ritual/tests/support/slow_filter.rs` builds the repository whose content
   filter stalls, for the tests that use the variable.
 
-`test-util` is `skeletons`' public cargo feature that compiles those seams in,
-for tests only: a command line must never enable it outside
-`[dev-dependencies]`. The seams are gated on `#[cfg(any(test, feature =
-"test-util"))]`, so `skeletons`' own unit-test build has them without the
-feature. It is never a default feature and a production command line never
-enables it. `ritual/Cargo.toml` and `wearer/Cargo.toml` are what turn it
+`test-util` is the cargo feature that compiles those seams in, for tests only:
+a command line must never enable it outside `[dev-dependencies]`. The feature
+is `skeletons-engine`'s, where the seams are, and `skeletons` forwards it under
+the same name, which is how a project reaches it. Every seam sits in the
+commands, so on the engine alone the feature changes nothing unless `commands`
+is on too; the two features are independent, and neither turns on the other.
+The seams are gated on `#[cfg(any(test, feature = "test-util"))]`, so the
+engine's own unit-test build has them without the feature. It is never a
+default feature and a production command line never enables it.
+`ritual/Cargo.toml` and `wearer/Cargo.toml` are what turn it
 on for the acceptance suites: each re-declares `skeletons` as a
 dev-dependency with `features = ["test-util"]`, and Cargo unifies that into
 the `ritual` and `wearer` binaries `cargo test` builds (the ones
@@ -251,7 +308,7 @@ activates a dev-dependency.
 
 A fourth variable, `SKELETONS_TEST_ONLY_BUILD_SCRIPT_MARKER`, is unrelated to
 `test-util`: it is read by the `build-script-marker` test skeleton's own
-`build.rs` (`crates/skeletons/test-skeletons/renders/build-script-marker/`),
+`build.rs` (`crates/skeletons-engine/test-skeletons/renders/build-script-marker/`),
 never by `skeletons` itself. Pointed at a path, that build script writes a marker
 file there if it ever runs at all — proof, observable from the test process, that
 `check`/`sync` never ran a worn skeleton's own build script. A test that
@@ -275,7 +332,7 @@ suite also removes `GIT_CONFIG_GLOBAL` and
 `GIT_CONFIG_SYSTEM` and sets `GIT_CONFIG_NOSYSTEM=1` for every git it
 spawns, and removes every one of `skeletons`'s own repository-redirecting
 variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, and the rest
-`REDIRECTING_VARIABLES` in `crates/skeletons/src/git/command.rs` names)
+`REDIRECTING_VARIABLES` in `crates/skeletons-engine/src/git/command.rs` names)
 from the processes it runs `skeletons` under — without that, running the
 suite from inside a git hook, which exports `GIT_DIR` into every child
 process, would trip the very refusal this crate's own `sync` adds against
@@ -309,7 +366,7 @@ passing vacuously or being compiled out:
 )]
 ```
 
-See `crates/skeletons/src/claim/location.rs` →
+See `crates/skeletons-engine/src/claim/location.rs` →
 `a_directory_that_cannot_be_read_is_unreadable` for the pattern this
 follows. `#[cfg(target_os = "…")]` is never used to choose between two
 *expected outcomes* — that would make macOS and Linux compile and check

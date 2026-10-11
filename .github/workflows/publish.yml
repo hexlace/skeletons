@@ -1,5 +1,6 @@
-# Publish — publishes `skeletons` to crates.io when a GitHub release is
-# published.
+# Publish — publishes the three crates this repository releases, `skeletons`,
+# `skeletons-library` and the `skeletons-engine` both are built on, to crates.io
+# when a GitHub release is published.
 #
 # Two jobs, split so that no build script or proc macro ever runs where a
 # crates.io token exists or can be minted. `cargo publish` normally compiles
@@ -20,7 +21,7 @@
 #      upload and which to leave out, so a run that failed partway can be run
 #      again.
 #
-# `publish` runs in the `crates-io` environment, and the crate's trusted
+# `publish` runs in the `crates-io` environment, and each crate's trusted
 # publisher on crates.io names this file and that environment, so a token is
 # only ever issued to this job. It compiles nothing. It checks out the SHA
 # `verify` checked, and refuses unless the tag still points at it and every

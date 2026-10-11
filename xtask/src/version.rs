@@ -1,7 +1,7 @@
 //! A release version, and the tag that names one.
 //!
 //! Only a full `MAJOR.MINOR.PATCH` release is accepted: no pre-release and no
-//! build metadata. `skeletons` is released at full versions only, and the
+//! build metadata. The crates here are released at full versions only, and the
 //! release workflows hold every tag to this same grammar in shell, in the
 //! jobs that hold a token and run no Rust, so this parser and those checks
 //! have to agree on exactly one shape.

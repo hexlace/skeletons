@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "crates/skeletons",
+    "crates/skeletons-engine",
+    "crates/skeletons-library",
     "ritual",
     "wearer",
     "xtask",
@@ -27,11 +29,18 @@ rituals-compose = "0.2.0"
 # by. `path` is what a build in this repository uses; `version` is what a
 # published crate's manifest keeps, since crates.io has no path to follow.
 skeletons = { path = "crates/skeletons", version = "0.2.0" }
-# Property-based testing for the text grammars under `crates/skeletons/src/skeleton`:
+# The engine behind it, which the bundle and `skeletons-library` are both built
+# on. The three crates are built against one another and released at one
+# version, so the requirement admits that version alone, and both of the others
+# take the engine through this entry and no other. It names no feature: the
+# bundle asks for the engine's `commands` in its own manifest, and the library
+# asks for none.
+skeletons-engine = { path = "crates/skeletons-engine", version = "=0.2.0" }
+# Property-based testing for the text grammars under `crates/skeletons-engine/src/skeleton`:
 # a parser needs inputs no one would think to write by hand. Dev-only, so it
 # adds nothing to what a project depending on `skeletons` compiles. `default-features
 # = false` with `std` alone is the minimal build that runs on the standard
-# library without any of proptest's optional extras, none of which this crate
+# library without any of proptest's optional extras, none of which the engine
 # uses.
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 # Reading a skeleton's manifest: the ecosystem's own reader for TOML, and Cargo's
@@ -44,7 +53,7 @@ proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 # arbitrary TOML data — `serde` is a dependency here regardless (below), so
 # naming it adds no new dependency weight of its own.
 toml = { version = "1.1.6", default-features = false, features = ["std", "serde", "parse"] }
-# Parsing `cargo metadata --format-version 1`'s JSON into `skeletons`' own schema
+# Parsing `cargo metadata --format-version 1`'s JSON into the engine's own schema
 # slice (`workspace/schema.rs`), following `rituals-compose`'s own precedent
 # for reading the same format. `derive` is `serde_derive`; both are already
 # compiled into every `ritual` binary through `rituals-core` ->
@@ -66,7 +75,8 @@ toml_edit = { version = "0.22", default-features = false, features = [
     "display",
 ] }
 # Parsing a locked package's version, and comparing crates.io index entries
-# against it. One package, no dependencies of its own.
+# against it; also the type behind `skeletons-library`'s `Version`. One
+# package, no dependencies of its own.
 semver = { version = "1.0.28", default-features = false, features = ["std"] }
 # Decoding a git source query string (`?branch=a%2Fb`): cargo percent-encodes
 # `/` and other characters in a branch or tag name, and this is the crate
@@ -74,11 +84,12 @@ semver = { version = "1.0.28", default-features = false, features = ["std"] }
 form_urlencoded = "1.2.2"
 # Building disposable directories and files for `workspace/*`'s and `sync`'s
 # own unit tests (real symlinks, a read-only directory to fail a write
-# into). Dev-only, so it adds nothing to what a project depending on `skeletons`
-# compiles.
+# into), and the workspaces `skeletons-library`'s tests read. Dev-only, so it
+# adds nothing to what a project depending on `skeletons` or
+# `skeletons-library` compiles.
 tempfile = "3"
 # Asking crates.io's sparse index whether a registry-pinned skeleton is behind
-# (`behind/crates_io.rs`). Blocking, not async: nothing else in this crate
+# (`behind/crates_io.rs`). Blocking, not async: nothing else in the engine
 # is async, so `reqwest` (which would also pull in `tokio` and `hyper`) has
 # nothing to justify it, and `ureq` is the ecosystem's own blocking client.
 # `default-features = false, features = ["rustls"]` takes TLS through

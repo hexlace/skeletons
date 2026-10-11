@@ -581,6 +581,14 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 name = "skeletons"
 version = "0.2.0"
 dependencies = [
+ "rituals",
+ "skeletons-engine",
+]
+
+[[package]]
+name = "skeletons-engine"
+version = "0.2.0"
+dependencies = [
  "caseless",
  "form_urlencoded",
  "proptest",
@@ -595,6 +603,15 @@ dependencies = [
  "unicode-normalization",
  "unicode-properties",
  "ureq",
+]
+
+[[package]]
+name = "skeletons-library"
+version = "0.2.0"
+dependencies = [
+ "semver",
+ "skeletons-engine",
+ "tempfile",
 ]
 
 [[package]]

@@ -11,7 +11,7 @@
 //! limit is about how wide a line reads and several lines hold non-ASCII text
 //! on purpose.
 //!
-//! `crates/skeletons/test-skeletons/` is skipped, a deliberate deviation from
+//! `crates/skeletons-engine/test-skeletons/` is skipped, a deliberate deviation from
 //! `TS-LINE-LIMIT` ("no exceptions"). Those crates are fixture data whose
 //! exact bytes are what the tests check (a hidden-marker case holds invisible
 //! characters, for instance), so their lines are whatever the case under test
@@ -29,7 +29,7 @@ use std::process::Command;
 
 /// The directory whose lines are exempt from `TS-LINE-LIMIT`, relative to the
 /// repository root; the module documentation says why.
-const FIXTURE_DIRECTORY: &str = "crates/skeletons/test-skeletons/";
+const FIXTURE_DIRECTORY: &str = "crates/skeletons-engine/test-skeletons/";
 
 /// The repository root: `xtask` sits directly under it.
 fn repository_root() -> Result<PathBuf, Box<dyn Error>> {

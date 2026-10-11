@@ -30,7 +30,8 @@ ignore = []
 [licenses]
 # Each licence here is one the tree needs, and each is permissive: none
 # is copyleft, so none reaches into the source of a project that compiles
-# `skeletons` in. What they ask of it is to keep their notices, and Apache-2.0
+# `skeletons` or `skeletons-library` in. What they ask of it is to keep their
+# notices, and Apache-2.0
 # its NOTICE file where a crate has one. Where a crate offers a choice, `MIT` or
 # `Apache-2.0` is taken; the others are here because some crate offers
 # nothing else:

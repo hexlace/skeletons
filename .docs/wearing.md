@@ -1178,10 +1178,11 @@ on the flag, and the flags exclude each other: giving both is a usage error,
 which exits with status 2 before `remove` looks at the project.
 
 - **Neither flag** deletes the files when that is plainly what was asked and
-  never guesses when it is not. If every claimed file that is in the work tree
-  and that git could give back (see below) still matches what the skeleton
-  renders, they are the skeleton's files, unchanged, and stopping wearing it
-  means they go: all of them are deleted. If any one has changed, `remove`
+  never guesses when it is not. If every claimed file that is in the work tree,
+  that git could give back (see below) and that is not `Cargo.lock` (see below)
+  still matches what the skeleton renders, they are the skeleton's
+  files, unchanged, and stopping wearing it means they go: all of them are
+  deleted. If any one has changed, `remove`
   deletes none of them, not even the ones that match, and says which have
   changed and where all of them are, so the project can keep them as its own or
   clear them out by hand.
@@ -1194,6 +1195,33 @@ which exits with status 2 before `remove` looks at the project.
 A claimed file that is missing is nothing to delete. It is no reason to refuse
 and no reason to keep the others, and no line names it. When none of the files
 is in the work tree, the output says so.
+
+**`Cargo.lock` is never deleted.** It is the one file `remove` writes that a
+skeleton can claim: `remove` brings it current once the manifest is edited, and
+deleting it would undo that and leave a project Cargo cannot read, since every
+later locked Cargo command reads it. So a claimed `Cargo.lock` is never deleted
+and never moved, under any flag. `remove` settles it before it writes anything,
+by comparing each claimed path with the lockfile's path taken relative to the
+workspace root as a claim is. The comparison is exact text. A claim that spells
+`Cargo.lock` in another case, or in another Unicode normalisation, never gets
+this far: the survey accepts a claimed component only when its directory lists
+an entry spelled exactly so, so it refuses that wearing's claim, and `remove`
+then cannot tell which files the wearing claims (see the refusals below). A
+claimed `Cargo.lock` is **left in place and named**, in the place of its
+`deleted` line, with its own reason:
+
+```text
+left Cargo.lock in place: it is the lockfile remove has just brought current, and the project needs it
+```
+
+The line has no clause about deleting it by hand, since deleting it breaks the
+project. Git is not asked about it, and with `--keep-files` nothing is said
+about it, as about no other file. It does not count as changed, whatever it
+holds: a claimed lockfile almost never equals what a skeleton renders, so
+counting it would make a bare `remove` keep every other file every time, which
+says nothing about what the project did with the skeleton's files. Whether any
+file has changed is judged over the files git could give back, `Cargo.lock`
+aside.
 
 Whatever flag deletes a file, it deletes it only if git could give it back. A
 clean work tree does not say that: an untracked file git ignores, a file git is told
@@ -1216,6 +1244,9 @@ all kept and listed, and the files left are still named. The reasons are:
 | `it is marked skip-worktree in git's index` (or `assume-unchanged`, or both) | git is told not to read it from the work tree |
 | `it is not what git would check out for it` | its bytes differ from what git's checkout, content filter included, would write |
 | `git could not show that it holds it` | every other way the proof fails: a conflicted, linked or submodule entry, a mode other than a regular file's, a checkout that failed, a file that is not a regular file on disk, or one that has gone or changed since `remove` looked |
+
+Each of these lines ends `, so git could not give it back; delete it by hand if
+it should go`. The line for `Cargo.lock`, above, does not.
 
 After the files are gone, **a directory the deletion leaves empty is removed**,
 deepest first, and so is each directory above it that this empties in turn.
@@ -1276,7 +1307,8 @@ that has a dependency, and a refused wearing that has none. The last line says
 what to commit: the manifest always, `Cargo.lock` when this run changed it and
 git tracks it (`git add` refuses a lockfile git ignores, and a lockfile Cargo
 left alone has nothing to commit), and the deleted files when there are any. The
-lines between them depend on the flag and on which files git could give back.
+lines between them depend on the flag, on which files git could give back and
+on whether a skeleton claims `Cargo.lock`.
 
 A bare `remove` with every file matching, for a skeleton worn as `toolchain`
 that claims `rust-toolchain.toml` and `rustfmt.toml`:
@@ -1351,13 +1383,26 @@ kept its other 2 files, because 1 has changed from what the skeleton renders: th
 commit ritual/Cargo.toml and Cargo.lock to record it
 ```
 
+A claimed `Cargo.lock` beside an ordinary file that matches, under a bare
+`remove` or `--delete-files`: the lockfile is left and named in its place in
+path order, the ordinary file is deleted, and the lockfile is not what decides
+it:
+
+```text
+stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
+left Cargo.lock in place: it is the lockfile remove has just brought current, and the project needs it
+deleted rust-toolchain.toml
+commit ritual/Cargo.toml, Cargo.lock and the 1 deleted file to record it
+```
+
 With one file kept the summary is `kept its other file, because it has changed
 from what the skeleton renders: it is the project's own now, to keep or to
 delete by hand`, and with several `kept its other 3 files, because 2 have
 changed from what the skeleton renders: ...`. When git could not give back any
-of the files that are there, nothing is kept or deleted by the rule: each is
-named with its reason, no summary follows, and the last line names no deleted
-files.
+of the files that are there, and none of them is `Cargo.lock`, nothing is kept
+or deleted by the rule: each is named with its reason, no summary follows, and
+the last line names no deleted files. The same holds when the only file there
+is `Cargo.lock`.
 
 The other reasons take the place of `git does not track it`, each word for word
 as the table above gives it, with `it is marked skip-worktree and

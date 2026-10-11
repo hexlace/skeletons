@@ -17,7 +17,10 @@ use std::path::{Path, PathBuf};
 use super::wear::{
     COMMAND_LINE_PACKAGE, commit_everything, fixture_for_wearing, git_step, the_single_refusal_line,
 };
-use super::{Fixture, Report, TestOutcome, checked_in_test_skeleton, json, write_package_manifest};
+use super::{
+    Fixture, Report, TestOutcome, checked_in_test_skeleton, json, path_dependency_on,
+    wearing_table, write_minimal_skeleton, write_package_manifest,
+};
 
 /// The command line's manifest in a workspace whose root package is the
 /// command line's own package, as `remove` names it.
@@ -353,4 +356,79 @@ pub(crate) fn fixture_wearing_in_another_member(key: &str) -> Result<Fixture, Bo
     fixture.generate_lockfile()?;
     fixture.init_git_repository()?;
     Ok(fixture)
+}
+
+/// The directory, inside a fixture from [`fixture_wearing_a_skeleton_that_claims`],
+/// holding the skeleton it wears.
+pub(crate) const CLAIMING_DIRECTORY: &str = "claiming-skeleton";
+
+/// The crate and the dependency key of the skeleton
+/// [`fixture_wearing_a_skeleton_that_claims`] writes.
+pub(crate) const CLAIMING: &str = "claiming";
+
+/// A workspace whose root package is the command line's own and wears
+/// [`CLAIMING`], a skeleton written into the fixture that claims exactly
+/// `claims`, each a path and the bytes the skeleton renders there. Committed
+/// clean, lockfile included, and not synced.
+///
+/// No checked-in skeleton claims `Cargo.lock` or a Cargo manifest, so a
+/// scenario that needs one builds the skeleton here, as the scenarios that need
+/// a file name of their own do.
+pub(crate) fn fixture_wearing_a_skeleton_that_claims(
+    claims: &[(&str, &str)],
+) -> Result<Fixture, Box<dyn Error>> {
+    let fixture = Fixture::new()?;
+    let skeleton = fixture.root().join(CLAIMING_DIRECTORY);
+    let (first, rest) = claims.split_first().ok_or("a skeleton claims a file")?;
+    write_minimal_skeleton(&skeleton, CLAIMING, first.0, first.1)?;
+    for (path, contents) in rest {
+        fixture.write(
+            &format!("{CLAIMING_DIRECTORY}/files/{path}"),
+            contents.as_bytes(),
+        )?;
+    }
+    let extra = format!(
+        "[dev-dependencies]\n{}\n{}",
+        path_dependency_on(CLAIMING, &skeleton),
+        wearing_table(CLAIMING, ""),
+    );
+    write_package_manifest(fixture.root(), "", COMMAND_LINE_PACKAGE, &extra)?;
+    fixture.generate_lockfile()?;
+    fixture.init_git_repository()?;
+    Ok(fixture)
+}
+
+/// Makes the skeleton [`fixture_wearing_a_skeleton_that_claims`] wrote render
+/// `relative` as the bytes the work tree holds there now, and commits, so the
+/// file matches what the skeleton renders.
+pub(crate) fn make_the_skeleton_render_what_is_there(
+    fixture: &Fixture,
+    relative: &str,
+) -> TestOutcome {
+    let bytes = fixture.read(relative)?;
+    fixture.write(&format!("{CLAIMING_DIRECTORY}/files/{relative}"), &bytes)?;
+    commit_everything(fixture, "fixture: the skeleton renders what is there")
+}
+
+/// The reasons `check` gives for refusing the wearing under `key`, joined by
+/// `; `, which is how `remove` words them when it cannot tell which files the
+/// wearing claims.
+pub(crate) fn check_refusal_reasons(
+    fixture: &Fixture,
+    key: &str,
+) -> Result<String, Box<dyn Error>> {
+    let report = fixture.run(&["skeletons", "check", "--json"])?;
+    let document = json::parse(&report.stdout)?;
+    let mut reasons = Vec::new();
+    for refusal in json::refusals(&document)? {
+        if json::refusal_dependency(refusal)? == Some(key) {
+            reasons.push(json::refusal_message(refusal)?.to_owned());
+        }
+    }
+    assert!(
+        !reasons.is_empty(),
+        "precondition: check must refuse this wearing; stdout was: {}",
+        report.stdout
+    );
+    Ok(reasons.join("; "))
 }

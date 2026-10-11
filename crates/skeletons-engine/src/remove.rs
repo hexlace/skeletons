@@ -17,7 +17,8 @@
 //! - [`resolve`] reads the name the wearer typed as a key or a crate, and
 //!   finds the one wearing it means;
 //! - [`files`] decides from the typed flag and the survey which files git is
-//!   asked about, then from git's answers which go, are kept or are left, and
+//!   asked about, then from git's answers which go, are kept or are left, the
+//!   lockfile `remove` brings current among the latter and never deleted, and
 //!   which cannot be known at all;
 //! - [`manifest`] edits the manifest's text and checks the edit against an
 //!   independent parse;
@@ -45,7 +46,7 @@ mod non_empty;
 mod refusal;
 mod resolve;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rituals::{CommandLine, Failure, Outcome, Task, clap, report};
 use rituals_compose::rollback;
@@ -177,12 +178,16 @@ impl Prepared {
 /// so a request that is wrong is refused as wrong whether or not the tree is
 /// clean, and then the manifest and lockfile are proven ones git can hand back
 /// ([`hand_back::check`]) and can be written in place ([`writable::check`]).
-/// Every file that is in the work tree is then asked of git
-/// ([`give_back::fate`]), and only with git's answers is it decided whether a
-/// bare run keeps the files that changed or deletes them: a file git could not
-/// give back is left whatever the flag and counts for nothing in that
-/// decision. The holding path is shown to be free when any file is to be
-/// deleted.
+/// Every file that is in the work tree, and that is not the lockfile, is then
+/// asked of git ([`give_back::fate`]), and only with git's answers is it
+/// decided whether a bare run keeps the files that changed or deletes them: a
+/// file git could not give back is left whatever the flag and counts for
+/// nothing in that decision, and so is the lockfile a skeleton claims, which
+/// `remove` brings current and so never deletes, and which was set aside when
+/// the files were planned. Before anything is written, the files to delete are
+/// checked against the real paths of the manifest and the lockfile
+/// ([`assert_nothing_written_is_moved`]). The holding path is shown to be free
+/// when any file is to be deleted.
 fn prepare(
     command_line: &CommandLine,
     name: &str,
@@ -223,14 +228,16 @@ fn prepare(
         wearing.key(),
     );
     let wearing = wearing.according_to(&claimed);
-    let plan = files::plan(files_flag, claimed).map_err(|unknowable| {
-        RemoveRefusal::FilesUnknowable {
-            key: wearing.key().clone(),
-            unknowable,
-        }
-        .into_failure()
-    })?;
     let command_line_crate = CommandLineCrate::new(package, member, &prospect.workspace.root);
+    let plan = files::plan(files_flag, claimed, &command_line_crate.lockfile_shown).map_err(
+        |unknowable| {
+            RemoveRefusal::FilesUnknowable {
+                key: wearing.key().clone(),
+                unknowable,
+            }
+            .into_failure()
+        },
+    )?;
     // `remove` changes the manifest and `Cargo.lock` in place and deletes
     // files, so git is the only way back for what `rollback` could not take
     // back, and only for what was committed: an edit made by something else
@@ -247,6 +254,7 @@ fn prepare(
     let files = plan
         .settle(|path| give_back::fate(&work_tree, &clean, path))
         .map_err(|abort| git_could_not_be_asked(&abort, &prospect))?;
+    assert_nothing_written_is_moved(&files, &prospect.workspace.root, &command_line_crate);
     if !files.to_delete().is_empty() && !deletion::holding_path_is_free(&prospect.workspace.root) {
         return Err(RemoveRefusal::HoldingPathInTheWay.into_failure());
     }
@@ -258,6 +266,33 @@ fn prepare(
         command_line_crate,
         lockfile,
     })
+}
+
+/// Asserts that no file about to be moved away is the manifest or the lockfile
+/// the run is about to write.
+///
+/// This is a claim about the code, not about the project: the lockfile is set
+/// aside when the files are planned, and the walk of a skeleton's files refuses
+/// any name like a Cargo manifest, so a skeleton cannot claim a manifest. It is
+/// checked here, against the real absolute paths and before anything is
+/// written, because a panic inside [`rollback::attempt`] would skip the undo
+/// and leave the project half written.
+fn assert_nothing_written_is_moved(
+    files: &Settlement,
+    workspace_root: &Path,
+    command_line_crate: &CommandLineCrate,
+) {
+    for file in files.to_delete() {
+        let path = file.to_path(workspace_root);
+        assert_ne!(
+            path, command_line_crate.manifest_path,
+            "the manifest remove writes is never among the files it moves away"
+        );
+        assert_ne!(
+            path, command_line_crate.lockfile_path,
+            "the lockfile remove writes is never among the files it moves away"
+        );
+    }
 }
 
 /// The failure for a workspace that could not be read, in the words `check`
@@ -303,6 +338,8 @@ fn write(changes: &mut Changes, prepared: &Prepared) -> Result<Done, Failure> {
 /// the read back taken as arguments so a test can stand in for `cargo`.
 ///
 /// The files go last, so the manifest is already changed when a move fails.
+/// None of them is the manifest or the lockfile just written; [`prepare`] has
+/// checked that.
 ///
 /// Every failure the wearer can cause or act on is an `Err`, so that
 /// `rollback` puts the project back: it does that when the run returns a
@@ -429,7 +466,9 @@ mod tests {
     use super::message::Lockfile;
     use super::names::WearingKey;
     use super::resolve::{Candidate, Standing};
-    use super::{Done, Prepared, RemoveArguments, deletion, write_with};
+    use super::{
+        Done, Prepared, RemoveArguments, assert_nothing_written_is_moved, deletion, write_with,
+    };
     use crate::claim::ClaimPath;
     use crate::command_line_crate::CommandLineCrate;
     use crate::command_line_crate::hand_back::Tracking;
@@ -855,6 +894,47 @@ mod tests {
             .expect("the holding directory is deleted");
 
         assert!(!holding.exists());
+    }
+
+    #[test]
+    #[should_panic(expected = "the lockfile remove writes is never among the files it moves away")]
+    fn the_lockfile_among_the_files_to_move_is_a_defect_in_the_plan() {
+        // The decision that sets the lockfile aside is made in `files`, so a
+        // settlement that hands it to the mover is a defect there, found in
+        // `prepare` before anything is written.
+        let project = Project::new(WORN, deleting(&["Cargo.lock"]));
+
+        assert_nothing_written_is_moved(
+            &project.prepared.files,
+            &project.prepared.workspace_root,
+            &project.prepared.command_line_crate,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "the manifest remove writes is never among the files it moves away")]
+    fn the_manifest_among_the_files_to_move_is_a_defect_in_the_plan() {
+        let project = Project::new(WORN, deleting(&["Cargo.toml"]));
+
+        assert_nothing_written_is_moved(
+            &project.prepared.files,
+            &project.prepared.workspace_root,
+            &project.prepared.command_line_crate,
+        );
+    }
+
+    #[test]
+    fn files_that_are_neither_the_manifest_nor_the_lockfile_may_be_moved() {
+        let project = Project::new(
+            WORN,
+            deleting(&["ci.yml", "Cargo.lock.bak", "sub/Cargo.toml"]),
+        );
+
+        assert_nothing_written_is_moved(
+            &project.prepared.files,
+            &project.prepared.workspace_root,
+            &project.prepared.command_line_crate,
+        );
     }
 
     #[test]

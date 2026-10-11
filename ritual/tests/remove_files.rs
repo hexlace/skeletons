@@ -18,12 +18,14 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use support::remove::{
-    Entry, HOLDING_DIRECTORY, MANIFEST, Worn, assert_check_wears_nothing, assert_printed,
-    assert_refused, commit_line, kept_other_summary, kept_summary, mark, no_dependency_line,
-    porcelain, run_remove, stopped_wearing_line, took_out_line, tree_state,
+    CLAIMING, Entry, HOLDING_DIRECTORY, MANIFEST, Worn, assert_check_wears_nothing, assert_printed,
+    assert_refused, check_refusal_reasons, commit_line, fixture_wearing_a_skeleton_that_claims,
+    kept_other_summary, kept_summary, make_the_skeleton_render_what_is_there, mark,
+    no_dependency_line, porcelain, run_remove, stopped_wearing_line, sync_and_commit,
+    took_out_line, tree_state,
 };
 use support::wear::{commit_everything, fixture_for_wearing, git_step};
-use support::{Fixture, TestOutcome, json, path_dependency_on_test_skeleton, wearing_table};
+use support::{Fixture, TestOutcome, path_dependency_on_test_skeleton, wearing_table};
 
 const NESTED: &str = "nested-dotfiles";
 
@@ -589,20 +591,8 @@ fn fixture_with_unknowable_files() -> Result<(Fixture, String), Box<dyn std::err
         wearing_table(NESTED, "bogus = \"x\"\n"),
     );
     let fixture = fixture_for_wearing(&extra)?;
-    let report = fixture.run(&["skeletons", "check", "--json"])?;
-    let document = json::parse(&report.stdout)?;
-    let mut reasons = Vec::new();
-    for refusal in json::refusals(&document)? {
-        if json::refusal_dependency(refusal)? == Some(NESTED) {
-            reasons.push(json::refusal_message(refusal)?.to_owned());
-        }
-    }
-    assert!(
-        !reasons.is_empty(),
-        "precondition: check must refuse this wearing; stdout was: {}",
-        report.stdout
-    );
-    Ok((fixture, reasons.join("; ")))
+    let reasons = check_refusal_reasons(&fixture, NESTED)?;
+    Ok((fixture, reasons))
 }
 
 #[test]
@@ -681,6 +671,192 @@ fn a_wearing_table_with_no_dependency_is_taken_out_with_keep_files() -> TestOutc
     assert!(
         !manifest.contains("ghost"),
         "the table must be gone; manifest was:\n{manifest}"
+    );
+    Ok(())
+}
+
+/// The line `remove` prints for the lockfile it has just brought current, when
+/// a skeleton claims it.
+const LEFT_LOCKFILE_LINE: &str = concat!(
+    "left Cargo.lock in place: it is the lockfile remove has just brought current, ",
+    "and the project needs it",
+);
+
+/// A workspace wearing a skeleton that claims `Cargo.lock` and `ci.yml`, with
+/// `ci.yml` written as the skeleton renders it and committed, and the real
+/// lockfile, which differs from what the skeleton renders there, left as it
+/// is. `sync` cannot reach this state: it would write the skeleton's bytes over
+/// the lockfile, and a workspace Cargo cannot read is no workspace to remove
+/// from.
+fn fixture_claiming_a_lockfile_that_differs() -> Result<Fixture, Box<dyn std::error::Error>> {
+    let fixture = fixture_wearing_a_skeleton_that_claims(&[
+        ("Cargo.lock", "# what the skeleton renders\n"),
+        ("ci.yml", "ci: yes\n"),
+    ])?;
+    fixture.write("ci.yml", b"ci: yes\n")?;
+    commit_everything(&fixture, "fixture: a claimed file")?;
+    Ok(fixture)
+}
+
+/// Asserts the lockfile is still in the work tree and Cargo can still read the
+/// workspace with it, which `check` does with `--locked`.
+fn assert_the_lockfile_is_still_usable(fixture: &Fixture) -> TestOutcome {
+    assert!(
+        fs::exists(fixture.root().join("Cargo.lock"))?,
+        "the lockfile must not be moved away"
+    );
+    assert!(
+        !fs::exists(fixture.root().join(HOLDING_DIRECTORY))?,
+        "no holding directory may be left"
+    );
+    assert_check_wears_nothing(fixture)
+}
+
+#[test]
+fn delete_files_leaves_a_claimed_lockfile_it_has_just_brought_current() -> TestOutcome {
+    // The skeleton claims `Cargo.lock`, which differs from what it renders,
+    // and `ci.yml`. `--delete-files` deletes `ci.yml` and must not move the
+    // lockfile away: `remove` has just rewritten it and Cargo reads the
+    // workspace through it. It is named in the place of a `deleted` line.
+    let fixture = fixture_claiming_a_lockfile_that_differs()?;
+
+    let report = run_remove(&fixture, &[CLAIMING, "--delete-files"])?;
+
+    assert_printed(
+        &report,
+        &[
+            stopped_wearing_line(CLAIMING, CLAIMING, MANIFEST),
+            LEFT_LOCKFILE_LINE.to_owned(),
+            "deleted ci.yml".to_owned(),
+            commit_line(MANIFEST, true, 1),
+        ],
+    );
+    assert!(!fs::exists(fixture.root().join("ci.yml"))?, "ci.yml goes");
+    assert_the_lockfile_is_still_usable(&fixture)
+}
+
+#[test]
+fn bare_deletes_the_matching_file_beside_a_claimed_lockfile_and_keeps_none() -> TestOutcome {
+    // The lockfile differs from the render, as a claimed lockfile almost always
+    // does. It is left and named, and it is not a change to the project that
+    // would make bare `remove` keep `ci.yml`: the one ordinary file matches and
+    // is deleted.
+    let fixture = fixture_claiming_a_lockfile_that_differs()?;
+
+    let report = run_remove(&fixture, &[CLAIMING])?;
+
+    assert_printed(
+        &report,
+        &[
+            stopped_wearing_line(CLAIMING, CLAIMING, MANIFEST),
+            LEFT_LOCKFILE_LINE.to_owned(),
+            "deleted ci.yml".to_owned(),
+            commit_line(MANIFEST, true, 1),
+        ],
+    );
+    assert!(!fs::exists(fixture.root().join("ci.yml"))?, "ci.yml goes");
+    assert_the_lockfile_is_still_usable(&fixture)
+}
+
+#[test]
+fn bare_leaves_a_claimed_lockfile_that_still_matches_what_the_skeleton_renders() -> TestOutcome {
+    // The skeleton renders the very lockfile the workspace holds, so `sync`
+    // can be run and leaves it a match; this is the state a synced skeleton can
+    // claim `Cargo.lock` in. Matching is no reason to delete it: `remove`
+    // rewrites it first and Cargo needs what it wrote.
+    let fixture = fixture_wearing_a_skeleton_that_claims(&[
+        ("Cargo.lock", "# replaced below\n"),
+        ("ci.yml", "ci: yes\n"),
+    ])?;
+    make_the_skeleton_render_what_is_there(&fixture, "Cargo.lock")?;
+    sync_and_commit(&fixture)?;
+
+    let report = run_remove(&fixture, &[CLAIMING])?;
+
+    assert_printed(
+        &report,
+        &[
+            stopped_wearing_line(CLAIMING, CLAIMING, MANIFEST),
+            LEFT_LOCKFILE_LINE.to_owned(),
+            "deleted ci.yml".to_owned(),
+            commit_line(MANIFEST, true, 1),
+        ],
+    );
+    assert_the_lockfile_is_still_usable(&fixture)
+}
+
+#[test]
+fn a_claim_that_spells_the_lockfile_in_another_case_is_refused_rather_than_deleted() -> TestOutcome
+{
+    // The skeleton claims `cargo.lock`, and the work tree lists `Cargo.lock`.
+    // Whether the filesystem folds the two onto one file or keeps them apart,
+    // the survey refuses a claim whose directory lists a variant of its
+    // spelling, so the files the wearing claims cannot be known: both ways of
+    // deleting refuse, and write nothing, and the lockfile is not touched.
+    let fixture = fixture_wearing_a_skeleton_that_claims(&[
+        ("cargo.lock", "# what the skeleton renders\n"),
+        ("ci.yml", "ci: yes\n"),
+    ])?;
+    let reasons = check_refusal_reasons(&fixture, CLAIMING)?;
+    let before = tree_state(fixture.root())?;
+
+    for arguments in [vec![CLAIMING], vec![CLAIMING, "--delete-files"]] {
+        let report = run_remove(&fixture, &arguments)?;
+
+        assert_refused(
+            &report,
+            &format!(
+                "remove cannot tell which files `{CLAIMING}` claims, so it wrote nothing: \
+                 {reasons}; fix that and run the `remove` task again, or give it --keep-files \
+                 to stop wearing `{CLAIMING}` and leave every file in place"
+            ),
+        );
+    }
+
+    assert_eq!(
+        tree_state(fixture.root())?,
+        before,
+        "a refused remove must leave the work tree as it was"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_skeleton_that_claims_a_cargo_manifest_leaves_the_files_unknowable_and_the_manifest_untouched()
+-> TestOutcome {
+    // A skeleton whose `files/` holds a `Cargo.toml` is refused by `check`,
+    // because the render refuses any file named like a Cargo manifest, so the
+    // files the wearing claims cannot be known and `remove` refuses to delete
+    // them. It is worn here as it was written, so the manifest `remove` would
+    // edit is the workspace's own and stays exactly as it was: no skeleton can
+    // ever claim it, which is why `remove` needs no rule to leave it be.
+    let fixture = fixture_wearing_a_skeleton_that_claims(&[
+        ("Cargo.toml", "# what the skeleton renders\n"),
+        ("ci.yml", "ci: yes\n"),
+    ])?;
+    let reasons = check_refusal_reasons(&fixture, CLAIMING)?;
+    let manifest = fixture.read(MANIFEST)?;
+    let before = tree_state(fixture.root())?;
+
+    let report = run_remove(&fixture, &[CLAIMING, "--delete-files"])?;
+
+    assert_refused(
+        &report,
+        &format!(
+            "remove cannot tell which files `{CLAIMING}` claims, so it wrote nothing: \
+             {reasons}; fix that and run the `remove` task again, or give it --keep-files \
+             to stop wearing `{CLAIMING}` and leave every file in place"
+        ),
+    );
+    assert_eq!(
+        fixture.read(MANIFEST)?,
+        manifest,
+        "the manifest must be untouched"
+    );
+    assert_eq!(
+        tree_state(fixture.root())?,
+        before,
+        "a refused remove must leave the work tree as it was"
     );
     Ok(())
 }

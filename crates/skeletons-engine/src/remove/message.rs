@@ -162,19 +162,30 @@ fn kept_summary(remaining: &[Remaining]) -> String {
     }
 }
 
-/// `` left {path} in place: {why git could not give it back}, so git could not
-/// give it back; delete it by hand if it should go ``.
+/// `` left {path} in place: {why}, so git could not give it back; delete it by
+/// hand if it should go ``, or, for the lockfile `remove` brings current,
+/// `` left {path} in place: it is the lockfile remove has just brought current,
+/// and the project needs it ``.
+///
+/// The second has no clause about deleting it by hand: deleting the lockfile
+/// breaks the project.
 fn left_line(path: &str, because: LeftBecause) -> String {
-    let because = match because {
+    let path = Escaped(path);
+    let git = match because {
+        LeftBecause::Lockfile => {
+            return format!(
+                "left {path} in place: it is the lockfile remove has just brought current, and \
+                 the project needs it"
+            );
+        }
         LeftBecause::NotTracked => "git does not track it".to_owned(),
         LeftBecause::Hidden(flag) => format!("it is marked {} in git's index", flag.marked()),
         LeftBecause::NotWhatGitChecksOut => "it is not what git would check out for it".to_owned(),
         LeftBecause::CannotShowItHolds => "git could not show that it holds it".to_owned(),
     };
     format!(
-        "left {} in place: {because}, so git could not give it back; delete it by hand if it \
-         should go",
-        Escaped(path)
+        "left {path} in place: {git}, so git could not give it back; delete it by hand if it \
+         should go"
     )
 }
 
@@ -735,5 +746,68 @@ mod tests {
                 assert!(!line.contains(other), "{line:?} names {other}");
             }
         }
+    }
+
+    #[test]
+    fn the_lockfile_is_left_and_says_why_without_telling_the_wearer_to_delete_it() {
+        // Deleting the lockfile breaks the project, so unlike a file git could
+        // not give back, its line has no clause about deleting it by hand. The
+        // path is the one the claim spells.
+        let files = Settlement::Deleting(vec![
+            left("Cargo.lock", LeftBecause::Lockfile),
+            deleted("ci.yml"),
+        ]);
+
+        assert_eq!(
+            lines(&worn("ci", "a-skeleton"), &files, TRACKED)[1..],
+            [
+                "left Cargo.lock in place: it is the lockfile remove has just brought current, \
+                 and the project needs it",
+                "deleted ci.yml",
+                "commit ritual/Cargo.toml, Cargo.lock and the 1 deleted file to record it",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_lockfile_is_listed_in_its_place_among_the_files_kept() {
+        let files = Settlement::Kept(vec![
+            left_remaining("Cargo.lock", LeftBecause::Lockfile),
+            kept("ci.yml", Presence::Changed),
+        ]);
+
+        assert_eq!(
+            lines(&worn("ci", "a-skeleton"), &files, TRACKED)[1..],
+            [
+                "left Cargo.lock in place: it is the lockfile remove has just brought current, \
+                 and the project needs it",
+                "kept ci.yml, which has changed",
+                "kept its other file, because it has changed from what the skeleton renders: it \
+                 is the project's own now, to keep or to delete by hand",
+                "commit ritual/Cargo.toml and Cargo.lock to record it",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_lockfile_alone_leaves_no_file_to_count_in_the_commit_line() {
+        let files = Settlement::Deleting(vec![left("Cargo.lock", LeftBecause::Lockfile)]);
+
+        assert_eq!(
+            lines(&worn("ci", "a-skeleton"), &files, TRACKED).pop(),
+            Some("commit ritual/Cargo.toml and Cargo.lock to record it".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_path_of_the_lockfile_is_shown_escaped_once_on_one_line() {
+        // A claimed path can hold a line break, and the line for the lockfile
+        // names it as every other line does.
+        let files = Settlement::Deleting(vec![left(&poison(), LeftBecause::Lockfile)]);
+
+        let printed = lines(&worn("ci", "a-skeleton"), &files, TRACKED);
+
+        assert_escaped_once(&printed[1], "the lockfile line");
+        assert_one_line(&printed[1], "the lockfile line");
     }
 }

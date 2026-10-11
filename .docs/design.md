@@ -1746,6 +1746,58 @@ can refuse is given a place in the reason before the crate builds
 `every_reason_the_proof_gives_is_placed`). A question to git that cannot be
 asked at all is an abort before anything is written, as it is for `sync`.
 
+**The lockfile `remove` brings current is never deleted, under any flag.** The
+proof above is about git, and a file can pass it and still not be the wearer's
+to lose: `remove` brings `Cargo.lock` current, so a skeleton that claims
+`Cargo.lock` has a file the run has just rewritten, and moving it away
+afterwards leaves a project in which every later locked Cargo command fails,
+with the last read of the workspace made before the move and so unable to
+notice. The lockfile is therefore decided before anything is written, in the
+same place and the same kind of decision as a file git could not give back:
+each claimed path is compared, as exact text, with the lockfile's path spelled
+relative to the workspace root as a claim is. A match is left and named, with a
+reason of its own that says the project needs it and does not tell the wearer
+to delete it by hand, since deleting it breaks the project. It is not asked of
+git, since it is left whatever git would say, and it is not counted as changed:
+a claimed lockfile almost never equals what a skeleton renders, so counting it
+would make a bare `remove` keep every other file every time, which says nothing
+about what the project did with the skeleton's files. A claim spelled in another
+case needs no case-folding comparison, on a case-insensitive filesystem or any
+other: the survey accepts a claim only when its directory lists an entry
+spelled exactly so, and refuses the wearing's claims when it lists a variant
+(`ritual/tests/remove_files.rs` →
+`a_claim_that_spells_the_lockfile_in_another_case_is_refused_rather_than_deleted`).
+The set of files handed to the mover is built from the files git was asked
+about and could give back, and the lockfile is set aside before anyone asks, so
+the set cannot hold it; `prepare` asserts that again, against the real absolute
+paths and before anything is written, because an assertion inside the attempt
+would skip the undo (`crates/skeletons-engine/src/remove/files.rs` →
+`a_claimed_lockfile_is_never_among_the_files_to_delete`, and
+`crates/skeletons-engine/src/remove.rs` →
+`the_lockfile_among_the_files_to_move_is_a_defect_in_the_plan`). The decisions,
+and what the wearer reads for each
+(`crates/skeletons-engine/src/remove/files.rs` →
+`a_claimed_lockfile_is_set_aside_whatever_its_state_and_whatever_the_flag`, →
+`a_claimed_file_is_the_lockfile_only_when_its_text_is_exactly_the_path`, →
+`keep_files_says_nothing_about_a_claimed_lockfile`, →
+`a_claimed_lockfile_is_no_change_to_the_project_so_bare_deletes_the_rest`, and →
+`a_claimed_lockfile_is_left_among_the_files_kept_for_a_change`;
+`crates/skeletons-engine/src/remove/message.rs` →
+`the_lockfile_is_left_and_says_why_without_telling_the_wearer_to_delete_it`;
+`ritual/tests/remove_files.rs` →
+`delete_files_leaves_a_claimed_lockfile_it_has_just_brought_current`, →
+`bare_deletes_the_matching_file_beside_a_claimed_lockfile_and_keeps_none`,
+and → `bare_leaves_a_claimed_lockfile_that_still_matches_what_the_skeleton_renders`).
+
+The manifest `remove` edits needs no rule of its own, because a skeleton cannot
+claim a file named like a Cargo manifest: the render refuses one, at any depth
+and in any case (`crates/skeletons-engine/src/acceptance/manifests.rs` →
+`a_name_that_folds_to_cargo_toml_is_refused_the_same_way`), so `check` refuses
+such a skeleton, the files it claims are unknowable, and `remove` refuses it
+under a bare run and under `--delete-files` alike
+(`ritual/tests/remove_files.rs` →
+`a_skeleton_that_claims_a_cargo_manifest_leaves_the_files_unknowable_and_the_manifest_untouched`).
+
 **Files are moved, and deleted only after the run has succeeded.** Rollback
 records a file it writes and restores it from its bytes, so a file it restored
 would lose its mode, and it records no deletion at all. A file it moves comes

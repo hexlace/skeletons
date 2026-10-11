@@ -345,8 +345,10 @@ where it is. `--delete-files` and `--keep-files` exclude each other.
 A file is deleted only if git could give it back, by the same proof `sync`
 requires before it overwrites one. A file git ignores, hides or would not check
 out as it is stays where it is, with the reason, and the wearing still goes. It
-counts as neither deleted nor changed, so it never makes the others stay. If a
-run fails after it has begun to write, the manifest, `Cargo.lock` and every file
+counts as neither deleted nor changed, so it never makes the others stay. A
+`Cargo.lock` that a skeleton claims is left the same way under every flag,
+because `remove` has just rewritten it and the project needs it. If a run
+fails after it has begun to write, the manifest, `Cargo.lock` and every file
 are put back and it says so. The full reading, every refusal and the limits are
 in [`.docs/wearing.md`](.docs/wearing.md#remove).
 

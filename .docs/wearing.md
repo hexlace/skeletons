@@ -352,10 +352,16 @@ cargo ritual skeletons sync
 `sync` takes no arguments. It reads the workspace the same way `check`
 does — fresh, from `cargo metadata` and the wearing tables it finds — except
 offline: it makes no network request of its own, so `behind` is never
-asked, and a clone whose skeleton sources were never fetched aborts with
+asked, and a clone whose locked sources were not all fetched aborts with
 `cargo metadata --locked --offline failed (sync makes no network request): `
 followed by cargo's own words, as an unreadable lockfile aborts `check`. The
-command names no remedy; `cargo fetch` is what the wearer runs.
+read needs every locked source, not only the skeletons', and building the
+workspace does not leave them all: `cargo build` downloads only what it needs
+to build on the machine it runs on, so a package locked for another platform is
+missing, and so is a dev-dependency, which is how `wear` adds a skeleton. The
+command names no remedy. `cargo fetch --locked` is what the wearer runs, or
+`check`, which reads the same workspace with the network allowed and so
+downloads whatever is missing.
 
 For every bone that has drifted, `sync` writes the bytes its skeleton
 renders for it, verbatim; a file that already matches is never touched. It

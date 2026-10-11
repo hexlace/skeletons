@@ -1247,8 +1247,8 @@ it lands, as above. The instant after that last walk is the one limit (see
 `sync` makes no network request of its own: whether a skeleton is behind
 has no bearing on what it writes, so `behind` is never computed for it, and
 it reads the workspace with `cargo metadata --offline`, so a clone whose
-skeleton sources were never fetched aborts with cargo's own offline message rather
-than fetching anything on `sync`'s behalf (tested by
+locked sources were not all fetched aborts with cargo's own offline message
+rather than fetching anything on `sync`'s behalf (tested by
 `ritual/tests/sync.rs` →
 `sync_makes_no_network_request_as_observed_through_the_remote_query_log`,
 which reads the test-only remote-query log the same workspace's `check`
@@ -2228,12 +2228,15 @@ is never compared against and never counts as newer, whether or not it was
 made after the one locked; a repository whose remote tags releases outside
 both shapes will never see `behind` for a genuinely newer one.
 
-**`sync` needs the locked sources already fetched.** It reads the workspace
+**`sync` needs every locked source already fetched.** It reads the workspace
 with `cargo metadata --offline`, making no network request of its own, so a
-clone whose skeleton dependencies were never fetched aborts with cargo's own
-offline message rather than fetching anything on `sync`'s behalf; running
-`cargo fetch` first is the wearer's own responsibility, the same as for
-building the workspace at all.
+clone whose locked sources were not all fetched aborts with cargo's own
+offline message rather than fetching anything on `sync`'s behalf. Building the
+workspace does not fetch them all: a build leaves out packages locked for other
+platforms, and dev-dependencies, which is how `wear` adds a skeleton. Running
+`cargo fetch --locked` first, or `check`, which reads with the network allowed,
+is the wearer's own responsibility. The library's `check` reads the same way
+and needs the same.
 
 **`remove` edits the command line's own manifest and nothing else.** A
 dependency that member inherited from `[workspace.dependencies]` leaves the

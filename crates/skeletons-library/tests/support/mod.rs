@@ -3,9 +3,12 @@
 //!
 //! A test reaches the library only through its public API and builds every
 //! input it reads. The two skeletons and the project that wears them are
-//! written here as text, the lockfile is made by the cargo that built the
-//! tests, and every child process gets a `CARGO_HOME` and `HOME` of its own, so
-//! a test never reads or writes the cargo cache of whoever runs it.
+//! written here as text, and the lockfile is made by the cargo that built the
+//! tests. The cargo and git processes the fixture starts each get a
+//! `CARGO_HOME` and `HOME` of its own, so they never read or write the cargo
+//! cache of whoever runs the tests. The call under test is not one of them: it
+//! runs cargo in the test process, with the environment that process inherited,
+//! its real `CARGO_HOME` included, and the tests never change that environment.
 
 // Every file under `tests/` is compiled as its own binary and includes this
 // module afresh, and each one uses only the helpers its own tests need. A

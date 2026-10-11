@@ -1,4 +1,12 @@
 //! The library makes no network request.
+//!
+//! The call under test runs cargo with the environment of the test process, so
+//! its `CARGO_HOME` is the real one of whoever runs the tests. The test below
+//! relies on that home being unable to hold what it asks for: the skeleton's
+//! source is a `file://` URL to a repository the test has just made in a fresh
+//! temporary directory, which no cargo home can have fetched before. If the
+//! offline read ever regressed into a fetch, it would land in that inherited
+//! cargo home.
 
 mod support;
 

@@ -26,6 +26,7 @@ use std::fmt;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub struct Version(semver::Version);
 
 impl Version {

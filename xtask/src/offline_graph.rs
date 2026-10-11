@@ -7,7 +7,8 @@
 //! half must not pay for the second, and nothing in the engine's own tests
 //! can say so, because they build the engine with whatever features the test
 //! run unifies. So the question goes to Cargo itself: `cargo tree` for one
-//! package at a time, normal edges only, against the lockfile as it stands.
+//! package at a time, over normal and build edges, against the lockfile as it
+//! stands.
 //!
 //! `--package` resolves that package alone, so another workspace member that
 //! turns `commands` on cannot turn it on for the package asked about, and the
@@ -39,15 +40,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::process::{self, Program};
 
 /// The packages that only the commands bring in: the command-line framework
-/// and its composition crate, the argument parser, and the network client
-/// with the TLS stack under it.
-const COMMANDS_ONLY: [&str; 6] = [
+/// and its composition crate, the argument parser, the network client with the
+/// TLS stack under it, the manifest editor, and the query-string decoder.
+const COMMANDS_ONLY: [&str; 8] = [
     "rituals",
     "rituals-compose",
     "clap",
     "ureq",
     "rustls",
     "ring",
+    "toml_edit",
+    "form_urlencoded",
 ];
 
 /// The packages whose default build must hold none of [`COMMANDS_ONLY`]. A
@@ -63,16 +66,16 @@ enum Features {
     Commands,
 }
 
-/// What `cargo tree` prints for `root`'s normal dependency graph, built with
-/// `features`: one line per package, `root` first.
-fn normal_tree(root: &str, features: Features) -> String {
+/// What `cargo tree` prints for `root`'s dependency graph over normal and build
+/// edges, built with `features`: one line per package, `root` first.
+fn dependency_tree(root: &str, features: Features) -> String {
     let mut arguments = vec![
         "tree",
         "--locked",
         "--package",
         root,
         "--edges",
-        "normal",
+        "normal,build",
         "--prefix",
         "none",
         "--format",
@@ -86,10 +89,10 @@ fn normal_tree(root: &str, features: Features) -> String {
         .unwrap_or_else(|error| panic!("the graph of {root} could not be read: {error}"))
 }
 
-/// The names of the packages in `root`'s normal dependency graph, `root`
-/// itself included, built with `features`.
-fn normal_graph(root: &str, features: Features) -> Vec<String> {
-    package_names(&normal_tree(root, features))
+/// The names of the packages in `root`'s dependency graph over normal and
+/// build edges, `root` itself included, built with `features`.
+fn dependency_graph(root: &str, features: Features) -> Vec<String> {
+    package_names(&dependency_tree(root, features))
 }
 
 /// The package name on each line of `cargo tree --prefix none --format {p}`:
@@ -158,8 +161,8 @@ fn duplicates(packages: &[Package]) -> Vec<Duplicate> {
 #[cfg(test)]
 mod tests {
     use super::{
-        COMMANDS_ONLY, Duplicate, Features, WITHOUT_COMMANDS, duplicates, normal_graph,
-        normal_tree, package_names, packages,
+        COMMANDS_ONLY, Duplicate, Features, WITHOUT_COMMANDS, dependency_graph, dependency_tree,
+        duplicates, package_names, packages,
     };
 
     /// A line is read by its first word, whether it carries a version alone,
@@ -256,7 +259,7 @@ mod tests {
     #[test]
     fn a_build_without_the_commands_holds_one_version_of_each_package() {
         for root in WITHOUT_COMMANDS {
-            let found = packages(&normal_tree(root, Features::Default));
+            let found = packages(&dependency_tree(root, Features::Default));
 
             assert!(
                 found.iter().any(|package| package.name == root),
@@ -278,7 +281,7 @@ mod tests {
     #[test]
     fn a_build_without_the_commands_holds_none_of_their_dependencies() {
         for root in WITHOUT_COMMANDS {
-            let graph = normal_graph(root, Features::Default);
+            let graph = dependency_graph(root, Features::Default);
 
             assert!(
                 graph.iter().any(|package| package == root),
@@ -302,7 +305,7 @@ mod tests {
     /// absence reported there means nothing.
     #[test]
     fn the_engine_with_the_commands_holds_all_of_their_dependencies() {
-        let graph = normal_graph("skeletons-engine", Features::Commands);
+        let graph = dependency_graph("skeletons-engine", Features::Commands);
 
         for package in COMMANDS_ONLY {
             assert!(
@@ -317,7 +320,7 @@ mod tests {
     /// `commands` in its own manifest, and the query must follow that edge.
     #[test]
     fn a_dependent_that_asks_for_the_commands_holds_all_of_their_dependencies() {
-        let graph = normal_graph("skeletons", Features::Default);
+        let graph = dependency_graph("skeletons", Features::Default);
 
         for package in COMMANDS_ONLY {
             assert!(

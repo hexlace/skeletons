@@ -59,7 +59,8 @@ That the engine without the feature holds none of the commands' dependencies
 (the command-line framework, the network client and the TLS stack under it) is
 a test in `xtask`, which `cargo test --workspace` runs. It asks `cargo tree`
 for the engine's normal dependency graph and looks for each of them, and asks
-again with the feature on to prove the question can see them.
+again with the feature on to prove the question can see them. It also holds
+that graph, and the library's, to one version of each package.
 
 CI runs the same, with clippy and the tests on both Linux and macOS, and
 three more: every crate is packaged and built from its package alone, as

@@ -23,6 +23,18 @@
 //! packages must all be present when the commands are asked for, directly and
 //! through a dependent that asks for them. A query that could not see the
 //! graph would find nothing in the first and fail the second.
+//!
+//! The same graphs are also held to one version of each package. A project that
+//! lints for duplicate crate versions is affected by whatever the library drags
+//! in, so for each package in the first list no package may appear at two
+//! different versions. The control for that is a parsed sample whose text the
+//! test states, not the live graph with the commands on. That graph does hold
+//! two versions of some packages today, but only because of what third-party
+//! crates currently depend on, so an ordinary dependency update could remove
+//! them and turn a control red for a reason that has nothing to do with this
+//! workspace.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::process::{self, Program};
 
@@ -51,9 +63,9 @@ enum Features {
     Commands,
 }
 
-/// The names of the packages in `root`'s normal dependency graph, `root`
-/// itself included, built with `features`.
-fn normal_graph(root: &str, features: Features) -> Vec<String> {
+/// What `cargo tree` prints for `root`'s normal dependency graph, built with
+/// `features`: one line per package, `root` first.
+fn normal_tree(root: &str, features: Features) -> String {
     let mut arguments = vec![
         "tree",
         "--locked",
@@ -70,9 +82,14 @@ fn normal_graph(root: &str, features: Features) -> Vec<String> {
         Features::Default => {}
         Features::Commands => arguments.extend(["--features", "commands"]),
     }
-    let tree = process::query(Program::Cargo, &crate::workspace::root(), &arguments)
-        .unwrap_or_else(|error| panic!("the graph of {root} could not be read: {error}"));
-    package_names(&tree)
+    process::query(Program::Cargo, &crate::workspace::root(), &arguments)
+        .unwrap_or_else(|error| panic!("the graph of {root} could not be read: {error}"))
+}
+
+/// The names of the packages in `root`'s normal dependency graph, `root`
+/// itself included, built with `features`.
+fn normal_graph(root: &str, features: Features) -> Vec<String> {
+    package_names(&normal_tree(root, features))
 }
 
 /// The package name on each line of `cargo tree --prefix none --format {p}`:
@@ -85,9 +102,65 @@ fn package_names(tree: &str) -> Vec<String> {
         .collect()
 }
 
+/// A package at one version, as `cargo tree` prints it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Package {
+    name: String,
+    version: String,
+}
+
+/// The name and version on each line of `cargo tree --prefix none --format
+/// {p}`: the first two words. A line with no second word names no version and
+/// is skipped, as are blank lines; Cargo prints a version for every package.
+fn packages(tree: &str) -> Vec<Package> {
+    tree.lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            let name = words.next()?;
+            let version = words.next()?;
+            Some(Package {
+                name: name.to_owned(),
+                version: version.to_owned(),
+            })
+        })
+        .collect()
+}
+
+/// A package name that appears at more than one version.
+#[derive(Debug, PartialEq, Eq)]
+struct Duplicate {
+    name: String,
+    /// Every version the name appears at, each once, in order.
+    versions: Vec<String>,
+}
+
+/// The package names in `packages` that appear at two or more different
+/// versions, in name order. The same name and version on several lines, which
+/// is how a repeated subtree and a path package print, is one package.
+fn duplicates(packages: &[Package]) -> Vec<Duplicate> {
+    let mut versions_by_name: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for package in packages {
+        versions_by_name
+            .entry(&package.name)
+            .or_default()
+            .insert(&package.version);
+    }
+    versions_by_name
+        .into_iter()
+        .filter(|(_, versions)| versions.len() > 1)
+        .map(|(name, versions)| Duplicate {
+            name: name.to_owned(),
+            versions: versions.into_iter().map(str::to_owned).collect(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{COMMANDS_ONLY, Features, WITHOUT_COMMANDS, normal_graph, package_names};
+    use super::{
+        COMMANDS_ONLY, Duplicate, Features, WITHOUT_COMMANDS, duplicates, normal_graph,
+        normal_tree, package_names, packages,
+    };
 
     /// A line is read by its first word, whether it carries a version alone,
     /// a version and a path, a trailing repeat marker, or only a name.
@@ -111,6 +184,92 @@ mod tests {
     fn an_empty_tree_names_no_package() {
         assert_eq!(package_names(""), Vec::<String>::new());
         assert_eq!(package_names("\n  \n"), Vec::<String>::new());
+    }
+
+    /// The positive control for the duplicate finder: a sample holding one
+    /// name at two versions reports that name with both, and only it.
+    #[test]
+    fn a_name_at_two_versions_is_a_duplicate() {
+        let tree = "root v0.1.0 (/some/path)\n\
+                    foo v1.0.0\n\
+                    bar v3.0.0\n\
+                    foo v2.1.0\n";
+
+        assert_eq!(
+            duplicates(&packages(tree)),
+            [Duplicate {
+                name: "foo".to_owned(),
+                versions: vec!["v1.0.0".to_owned(), "v2.1.0".to_owned()],
+            }]
+        );
+    }
+
+    /// The same name at the same version on several lines is one package: a
+    /// repeated subtree ends in `(*)`, and a package from a path carries it in
+    /// parentheses.
+    #[test]
+    fn a_name_at_one_version_repeated_is_not_a_duplicate() {
+        let tree = "root v0.1.0 (/some/path)\n\
+                    foo v1.0.0\n\
+                    foo v1.0.0 (*)\n\
+                    member v0.1.0 (/some/path)\n\
+                    member v0.1.0 (/some/path) (*)\n\
+                    foo v1.0.0\n";
+
+        assert_eq!(duplicates(&packages(tree)), Vec::<Duplicate>::new());
+    }
+
+    /// Nothing is a duplicate when Cargo printed nothing.
+    #[test]
+    fn an_empty_tree_has_no_duplicate() {
+        assert_eq!(duplicates(&packages("")), Vec::<Duplicate>::new());
+        assert_eq!(duplicates(&packages("\n  \n")), Vec::<Duplicate>::new());
+    }
+
+    /// A line is read as its name and its version, whatever follows them.
+    #[test]
+    fn a_package_line_holds_a_name_and_a_version() {
+        let tree = "skeletons-engine v1.2.3 (/some/path)\n\
+                    \n\
+                    serde v1.0.0\n\
+                    semver v1.0.0 (*)\n";
+
+        let found: Vec<(String, String)> = packages(tree)
+            .into_iter()
+            .map(|package| (package.name, package.version))
+            .collect();
+
+        assert_eq!(
+            found,
+            [
+                ("skeletons-engine".to_owned(), "v1.2.3".to_owned()),
+                ("serde".to_owned(), "v1.0.0".to_owned()),
+                ("semver".to_owned(), "v1.0.0".to_owned()),
+            ]
+        );
+    }
+
+    /// Asks Cargo for the default build of each root in `WITHOUT_COMMANDS`
+    /// and requires that the root is in the answer with a version, so an empty
+    /// or unparsed answer cannot pass, and that no package appears at two
+    /// versions.
+    #[test]
+    fn a_build_without_the_commands_holds_one_version_of_each_package() {
+        for root in WITHOUT_COMMANDS {
+            let found = packages(&normal_tree(root, Features::Default));
+
+            assert!(
+                found.iter().any(|package| package.name == root),
+                "{root} built without the commands is missing from its own graph, with a \
+                 version: the query answered {found:?}"
+            );
+            let repeated = duplicates(&found);
+            assert!(
+                repeated.is_empty(),
+                "{root} built without the commands holds a package at more than one version: \
+                 {repeated:?}"
+            );
+        }
     }
 
     /// Asks Cargo for the default build of each root in `WITHOUT_COMMANDS`

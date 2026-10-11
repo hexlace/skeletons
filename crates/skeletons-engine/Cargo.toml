@@ -108,9 +108,11 @@ commands = [
 # unit-test build has the same seams without the feature, since they are
 # gated on `any(test, feature = "test-util")`; the feature is for a
 # dependent's tests, and for tests only. A project reaches it through the
-# `test-util` feature of `skeletons`, which forwards to this one. Never
-# enabled by a plain `cargo build` or `cargo run` of a command line that mounts
-# the bundle, and never to be enabled outside `[dev-dependencies]`. In this
+# `test-util` feature of `skeletons`, which forwards to this one. Never to be
+# enabled outside `[dev-dependencies]`, where it stays out of a plain
+# `cargo build` or `cargo run` of a command line that mounts the bundle only
+# under feature resolver 2 or later; under resolver 1 Cargo unifies a
+# dev-dependency's features into every build. In this
 # repository the two command-line packages ask for it as a dev-dependency
 # feature of `skeletons`, so it is on only in a build that includes their test
 # targets (`cargo test`, or a build or lint given `--tests` or `--all-targets`).

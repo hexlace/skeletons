@@ -27,7 +27,11 @@ skeletons-engine = { workspace = true, features = ["commands"] }
 # dependent's `[dev-dependencies]` only, and never enabled outside them: Cargo
 # turns it on only in a build that includes a test, bench or example target
 # (`cargo test`, or a build, check or clippy given `--tests` or
-# `--all-targets`), never in a plain `cargo build` or `cargo run`.
+# `--all-targets`), and not in a plain `cargo build` or `cargo run`, provided the
+# workspace uses feature resolver 2 or later (edition 2021 and later select it
+# for a package; a virtual workspace sets `resolver = "2"` or `"3"`). Under
+# resolver 1 Cargo unifies a dev-dependency's features into every build, so the
+# seams would be on in a plain build too.
 test-util = ["skeletons-engine/test-util"]
 
 [package.metadata.ritual]

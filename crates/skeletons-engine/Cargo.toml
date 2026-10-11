@@ -9,17 +9,18 @@ keywords.workspace = true
 description = "The engine behind skeletons and skeletons-library. Published for those two, with no stability promise: depend on one of them instead."
 readme = "readme.md"
 categories = ["development-tools"]
-# Test skeletons are real crates under this one's own directory, each with a
-# `Cargo.toml` Cargo would otherwise see as packageable content. They exist
-# to be read from a checkout by this crate's own test suite, never to ship in
-# the published package: excluding the whole directory here is the one line
-# that keeps them out, since a directory holding its own `Cargo.toml` is
-# still packaged alongside loose files that sit next to it.
+# Test skeletons are real crates under this one's own directory. They exist to
+# be read from a checkout by this crate's own test suite, never to ship in the
+# published package. Cargo already leaves a subdirectory out of a package when
+# it holds its own `Cargo.toml`, but not the files beside those directories:
+# `test-skeletons/.gitattributes` would ship, and it is the file `build.rs`
+# reads as the mark of a checkout. Excluding the whole directory keeps all of
+# it out, whatever is added there later.
 #
 # `src/behind/captures` is real, captured crates.io sparse-index responses.
 # `behind/index_entries.rs`'s own unit tests read them at compile time
-# (`include_bytes!`); `ritual/tests/` reads them again at runtime, from this
-# same checkout, for the registry-`behind` tests. Neither reader is
+# (`include_bytes!`); the repository's `ritual/tests/` reads them again at
+# runtime, from the same checkout, for the registry-`behind` tests. Neither reader is
 # production code, so this ships to no wearer's build either.
 #
 # `src/workspace/fixtures` is captured `cargo` output and a `cargo metadata`

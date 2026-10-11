@@ -16,7 +16,7 @@
 #              feature, the bundle's and the library's against the unpacked
 #              engine
 #   msrv     — cargo test on the oldest toolchain `rust-version` declares
-#   deny     — cargo deny check: advisories, licences, bans and sources, as
+#   deny     — cargo deny --locked check: advisories, licences, bans and sources, as
 #              `deny.toml` sets them; weekly, advisories alone
 #
 # The engine has two configurations, without its `commands` feature and with

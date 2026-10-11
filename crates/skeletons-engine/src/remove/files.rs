@@ -3,17 +3,20 @@
 //! not give them back, and when none of that can be said at all.
 //!
 //! The decision is in two steps, so that each is a pure function of values.
-//! [`plan`] reads the mode the wearer typed and the files the skeleton claims,
+//! [`plan`] reads the flag the wearer typed and the files the skeleton claims,
 //! and says what to try: nothing, a keep, or a deletion of the files that are
 //! there. [`Plan::settle`] then takes git's answer for each file about to be
-//! deleted and says what became of it, which is what the success lines report.
+//! deleted and says what became of them, which is what the success lines
+//! report.
 
+use super::names::{ManifestShown, WearingKey};
+use super::non_empty::NonEmpty;
 use crate::claim::{ClaimPath, Drift, DriftReason};
 use crate::survey::{Refusal, RefusedWearing, Survey};
 
-/// What the wearer typed about the skeleton's files.
+/// Which flag the wearer typed about the skeleton's files, if one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Mode {
+pub(crate) enum FilesFlag {
     /// Neither flag: delete every file that still matches what the skeleton
     /// renders, and keep every file if the project has changed one.
     Bare,
@@ -23,9 +26,9 @@ pub(crate) enum Mode {
     KeepFiles,
 }
 
-impl Mode {
-    /// The flag that was typed, or `None` for neither, as it is typed.
-    pub(crate) const fn flag(self) -> Option<&'static str> {
+impl FilesFlag {
+    /// The flag as it is typed, or `None` for neither.
+    pub(crate) const fn typed(self) -> Option<&'static str> {
         match self {
             Self::Bare => None,
             Self::DeleteFiles => Some("--delete-files"),
@@ -68,10 +71,11 @@ pub(crate) struct ClaimedFile {
 /// The survey drops a skeleton's rows whenever it refuses the skeleton, and
 /// drops the claims that overlap, so a set of rows is the whole set of files
 /// only when no refusal names the wearing. Each reason is a refusal's own
-/// message, which is already one escaped line.
+/// message, which is already one escaped line. There is always at least one,
+/// since files are unknowable only because a refusal names the wearing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Unknowable {
-    pub(crate) reasons: Vec<String>,
+    pub(crate) reasons: NonEmpty<String>,
 }
 
 /// The files one wearing claims: all of them, or not known.
@@ -87,23 +91,28 @@ pub(crate) enum Claimed {
 impl Claimed {
     /// The files of the wearing `key` in the manifest shown as `manifest`, as
     /// `survey` found them.
-    pub(crate) fn of(survey: &Survey<'_>, manifest: &str, key: &str) -> Self {
+    pub(crate) fn of(survey: &Survey<'_>, manifest: &ManifestShown, key: &WearingKey) -> Self {
         let names_the_wearing = |wearing: &RefusedWearing| {
-            wearing.manifest == manifest && wearing.dependency.as_deref() == Some(key)
+            wearing.manifest == manifest.as_str()
+                && wearing.dependency.as_deref() == Some(key.as_str())
         };
-        let reasons: Vec<String> = survey
+        let mut reasons = survey
             .refusals
             .iter()
             .filter(|refusal| refusal.record().wearings.iter().any(names_the_wearing))
-            .map(Refusal::message)
-            .collect();
-        if !reasons.is_empty() {
-            return Self::Unknown(Unknowable { reasons });
+            .map(Refusal::message);
+        if let Some(first) = reasons.next() {
+            return Self::Unknown(Unknowable {
+                reasons: NonEmpty::new(first, reasons.collect()),
+            });
         }
         let files = survey
             .rows
             .iter()
-            .filter(|row| row.claimant.manifest == manifest && row.claimant.dependency == key)
+            .filter(|row| {
+                row.claimant.manifest == manifest.as_str()
+                    && row.claimant.dependency == key.as_str()
+            })
             .map(|row| ClaimedFile {
                 path: row.path.clone(),
                 state: FileState::of(row.drift),
@@ -142,8 +151,7 @@ pub(crate) enum Presence {
 /// can give back any of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Plan {
-    /// `--keep-files`: nothing is touched, and which files there are makes no
-    /// difference.
+    /// `--keep-files`: nothing is touched, whatever the survey found.
     LeaveAll,
     /// Bare, with a file the project has changed: nothing is deleted, and
     /// every file that is there is kept, in path order.
@@ -186,7 +194,7 @@ pub(crate) struct Disposition {
 
 /// What became of the files, which is what the success lines report.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Outcome {
+pub(crate) enum Settlement {
     /// Every file was left where it is, because `--keep-files` was typed.
     LeftAll,
     /// Every file that is there was kept because the project changed one.
@@ -200,6 +208,9 @@ impl Plan {
     /// Turns the plan into what became of the files, asking `fate` about each
     /// file the plan deletes, in path order, and only those.
     ///
+    /// A plan to delete settles into one disposition for each path planned, in
+    /// the same order.
+    ///
     /// # Errors
     ///
     /// Returns the first error `fate` returns: a question to git that could
@@ -207,23 +218,35 @@ impl Plan {
     pub(crate) fn settle<Error>(
         self,
         mut fate: impl FnMut(&ClaimPath) -> Result<Fate, Error>,
-    ) -> Result<Outcome, Error> {
+    ) -> Result<Settlement, Error> {
         match self {
-            Self::LeaveAll => Ok(Outcome::LeftAll),
-            Self::KeepAll(kept) => Ok(Outcome::Kept(kept)),
+            Self::LeaveAll => Ok(Settlement::LeftAll),
+            Self::KeepAll(kept) => Ok(Settlement::Kept(kept)),
             Self::Delete(paths) => {
-                let mut dispositions = Vec::with_capacity(paths.len());
+                let planned = paths.len();
+                let mut dispositions = Vec::with_capacity(planned);
                 for path in paths {
                     let answer = fate(&path)?;
                     dispositions.push(Disposition { path, fate: answer });
                 }
-                Ok(Outcome::Deleting(dispositions))
+                assert_eq!(
+                    dispositions.len(),
+                    planned,
+                    "each path planned is settled once"
+                );
+                assert!(
+                    dispositions
+                        .windows(2)
+                        .all(|pair| pair[0].path < pair[1].path),
+                    "the files are settled in path order, as they were planned"
+                );
+                Ok(Settlement::Deleting(dispositions))
             }
         }
     }
 }
 
-impl Outcome {
+impl Settlement {
     /// The files to delete: those git can give back, in path order.
     pub(crate) fn to_delete(&self) -> Vec<&ClaimPath> {
         match self {
@@ -239,23 +262,21 @@ impl Outcome {
 
 /// Decides what to try with the files of one wearing.
 ///
-/// `claimed` is called only when the mode needs to know the files:
-/// `--keep-files` touches none, so the closure is never called and files that
-/// cannot be known stop nothing. A caller that has surveyed for another reason
-/// hands the answer in through the closure all the same.
+/// `--keep-files` touches no file, so it leaves every one whatever `claimed`
+/// is, and files that cannot be known stop nothing. Every other flag deletes
+/// from the files that are there, and so needs to know them all.
 ///
 /// # Errors
 ///
-/// Returns [`Unknowable`] when the mode would delete files and a refusal
-/// names the wearing, so the files it claims are not all known.
-pub(crate) fn plan(mode: Mode, claimed: impl FnOnce() -> Claimed) -> Result<Plan, Unknowable> {
-    let claimed = match mode {
-        Mode::KeepFiles => return Ok(Plan::LeaveAll),
-        Mode::Bare | Mode::DeleteFiles => claimed(),
-    };
-    let files = match claimed {
-        Claimed::Unknown(unknowable) => return Err(unknowable),
-        Claimed::Known(files) => files,
+/// Returns [`Unknowable`] when the flag would delete files and a refusal names
+/// the wearing, so the files it claims are not all known.
+pub(crate) fn plan(flag: FilesFlag, claimed: Claimed) -> Result<Plan, Unknowable> {
+    let files = match (flag, claimed) {
+        (FilesFlag::KeepFiles, _) => return Ok(Plan::LeaveAll),
+        (FilesFlag::Bare | FilesFlag::DeleteFiles, Claimed::Unknown(unknowable)) => {
+            return Err(unknowable);
+        }
+        (FilesFlag::Bare | FilesFlag::DeleteFiles, Claimed::Known(files)) => files,
     };
     let present: Vec<Kept> = files
         .iter()
@@ -272,12 +293,14 @@ pub(crate) fn plan(mode: Mode, claimed: impl FnOnce() -> Claimed) -> Result<Plan
         })
         .collect();
     let any_changed = present.iter().any(|kept| kept.state == Presence::Changed);
-    Ok(match (mode, any_changed) {
-        (Mode::Bare, true) => Plan::KeepAll(present),
-        (Mode::Bare, false) | (Mode::DeleteFiles, _) => {
+    Ok(match (flag, any_changed) {
+        (FilesFlag::Bare, true) => Plan::KeepAll(present),
+        (FilesFlag::Bare, false) | (FilesFlag::DeleteFiles, _) => {
             Plan::Delete(present.into_iter().map(|kept| kept.path).collect())
         }
-        (Mode::KeepFiles, _) => unreachable!("--keep-files returned before the files were read"),
+        (FilesFlag::KeepFiles, _) => {
+            unreachable!("--keep-files returned before the files were looked at")
+        }
     })
 }
 
@@ -286,10 +309,12 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        Claimed, ClaimedFile, Disposition, Fate, FileState, Kept, LeftBecause, Mode, Outcome, Plan,
-        Presence, Unknowable, plan,
+        Claimed, ClaimedFile, Disposition, Fate, FileState, FilesFlag, Kept, LeftBecause, Plan,
+        Presence, Settlement, Unknowable, plan,
     };
     use crate::claim::{Claimant, Drift, DriftReason, Overlap};
+    use crate::remove::names::{ManifestShown, WearingKey};
+    use crate::remove::non_empty::NonEmpty;
     use crate::survey::poison::claim;
     use crate::survey::{Refusal, Row, Survey};
     use crate::workspace::WearingRefusal;
@@ -323,8 +348,16 @@ mod tests {
 
     fn unknown() -> Claimed {
         Claimed::Unknown(Unknowable {
-            reasons: vec!["one reason".to_owned()],
+            reasons: NonEmpty::new("one reason".to_owned(), Vec::new()),
         })
+    }
+
+    fn manifest(text: &str) -> ManifestShown {
+        ManifestShown::new(text)
+    }
+
+    fn key(text: &str) -> WearingKey {
+        WearingKey::new(text)
     }
 
     /// A survey of a workspace whose `a/Cargo.toml` wears `ci` and `lint`, and
@@ -383,7 +416,7 @@ mod tests {
         );
 
         assert_eq!(
-            Claimed::of(&survey, "a/Cargo.toml", "ci"),
+            Claimed::of(&survey, &manifest("a/Cargo.toml"), &key("ci")),
             Claimed::Known(vec![
                 file("a.yml", FileState::Changed),
                 file("m.yml", FileState::Missing),
@@ -402,13 +435,15 @@ mod tests {
             ],
         );
 
-        let Claimed::Unknown(unknowable) = Claimed::of(&survey, "a/Cargo.toml", "ci") else {
+        let Claimed::Unknown(unknowable) =
+            Claimed::of(&survey, &manifest("a/Cargo.toml"), &key("ci"))
+        else {
             panic!("a refusal names the wearing, so its files are unknown");
         };
 
         assert_eq!(
             unknowable.reasons,
-            [dangling("a/Cargo.toml", "ci").message()]
+            NonEmpty::new(dangling("a/Cargo.toml", "ci").message(), Vec::new())
         );
     }
 
@@ -425,7 +460,7 @@ mod tests {
         );
 
         assert_eq!(
-            Claimed::of(&survey, "a/Cargo.toml", "ci"),
+            Claimed::of(&survey, &manifest("a/Cargo.toml"), &key("ci")),
             Claimed::Known(vec![file("a.yml", FileState::Matches)])
         );
     }
@@ -449,13 +484,13 @@ mod tests {
             })],
         );
 
-        for key in ["ci", "lint"] {
+        for name in ["ci", "lint"] {
             assert!(
                 matches!(
-                    Claimed::of(&survey, "a/Cargo.toml", key),
+                    Claimed::of(&survey, &manifest("a/Cargo.toml"), &key(name)),
                     Claimed::Unknown(_)
                 ),
-                "{key}"
+                "{name}"
             );
         }
     }
@@ -463,22 +498,26 @@ mod tests {
     #[test]
     fn a_wearing_that_claims_nothing_and_is_refused_by_nothing_has_no_files() {
         assert_eq!(
-            Claimed::of(&survey_of(Vec::new(), Vec::new()), "a/Cargo.toml", "ci"),
+            Claimed::of(
+                &survey_of(Vec::new(), Vec::new()),
+                &manifest("a/Cargo.toml"),
+                &key("ci")
+            ),
             Claimed::Known(Vec::new())
         );
     }
 
     #[test]
-    fn each_mode_names_the_flag_that_was_typed_or_none() {
-        assert_eq!(Mode::Bare.flag(), None);
-        assert_eq!(Mode::DeleteFiles.flag(), Some("--delete-files"));
-        assert_eq!(Mode::KeepFiles.flag(), Some("--keep-files"));
+    fn each_flag_is_typed_as_itself_and_neither_as_nothing() {
+        assert_eq!(FilesFlag::Bare.typed(), None);
+        assert_eq!(FilesFlag::DeleteFiles.typed(), Some("--delete-files"));
+        assert_eq!(FilesFlag::KeepFiles.typed(), Some("--keep-files"));
     }
 
     #[test]
     fn bare_with_every_file_matching_deletes_them_all_in_path_order() {
         assert_eq!(
-            plan(Mode::Bare, all_matching),
+            plan(FilesFlag::Bare, all_matching()),
             Ok(Plan::Delete(paths(&["a.yml", "b/c.yml", "d.yml"])))
         );
     }
@@ -487,16 +526,14 @@ mod tests {
     fn bare_with_one_changed_file_keeps_every_file_that_is_there() {
         // The changed file is the project's own now, and the matching ones
         // are kept with it rather than leaving a half-deleted skeleton.
-        let claimed = || {
-            Claimed::known(vec![
-                file("a.yml", FileState::Matches),
-                file("b/c.yml", FileState::Changed),
-                file("d.yml", FileState::Missing),
-            ])
-        };
+        let claimed = Claimed::known(vec![
+            file("a.yml", FileState::Matches),
+            file("b/c.yml", FileState::Changed),
+            file("d.yml", FileState::Missing),
+        ]);
 
         assert_eq!(
-            plan(Mode::Bare, claimed),
+            plan(FilesFlag::Bare, claimed),
             Ok(Plan::KeepAll(vec![
                 kept("a.yml", Presence::Matches),
                 kept("b/c.yml", Presence::Changed),
@@ -506,84 +543,89 @@ mod tests {
 
     #[test]
     fn bare_with_a_file_missing_deletes_the_rest_without_naming_it() {
-        let claimed = || {
-            Claimed::known(vec![
-                file("a.yml", FileState::Matches),
-                file("b.yml", FileState::Missing),
-            ])
-        };
+        let claimed = Claimed::known(vec![
+            file("a.yml", FileState::Matches),
+            file("b.yml", FileState::Missing),
+        ]);
 
         assert_eq!(
-            plan(Mode::Bare, claimed),
+            plan(FilesFlag::Bare, claimed),
             Ok(Plan::Delete(paths(&["a.yml"])))
         );
     }
 
     #[test]
     fn bare_with_none_present_deletes_nothing() {
-        let claimed = || Claimed::known(vec![file("a.yml", FileState::Missing)]);
+        let claimed = Claimed::known(vec![file("a.yml", FileState::Missing)]);
 
-        assert_eq!(plan(Mode::Bare, claimed), Ok(Plan::Delete(Vec::new())));
+        assert_eq!(plan(FilesFlag::Bare, claimed), Ok(Plan::Delete(Vec::new())));
     }
 
     #[test]
     fn bare_over_a_skeleton_that_claims_no_file_deletes_nothing() {
         assert_eq!(
-            plan(Mode::Bare, || Claimed::known(Vec::new())),
+            plan(FilesFlag::Bare, Claimed::known(Vec::new())),
             Ok(Plan::Delete(Vec::new()))
         );
     }
 
     #[test]
     fn delete_files_deletes_changed_files_too_and_skips_missing_ones() {
-        let claimed = || {
-            Claimed::known(vec![
-                file("a.yml", FileState::Changed),
-                file("b.yml", FileState::Missing),
-                file("c.yml", FileState::Matches),
-            ])
-        };
+        let claimed = Claimed::known(vec![
+            file("a.yml", FileState::Changed),
+            file("b.yml", FileState::Missing),
+            file("c.yml", FileState::Matches),
+        ]);
 
         assert_eq!(
-            plan(Mode::DeleteFiles, claimed),
+            plan(FilesFlag::DeleteFiles, claimed),
             Ok(Plan::Delete(paths(&["a.yml", "c.yml"])))
         );
     }
 
     #[test]
     fn delete_files_with_none_present_deletes_nothing() {
-        let claimed = || Claimed::known(vec![file("a.yml", FileState::Missing)]);
+        let claimed = Claimed::known(vec![file("a.yml", FileState::Missing)]);
 
         assert_eq!(
-            plan(Mode::DeleteFiles, claimed),
+            plan(FilesFlag::DeleteFiles, claimed),
             Ok(Plan::Delete(Vec::new()))
         );
     }
 
     #[test]
-    fn keep_files_leaves_everything_and_never_asks_for_the_files() {
-        // `--keep-files` has no use for the files, so the closure that would
-        // hand them over must not be called, whether they could have been
-        // known or not.
-        let asked = std::cell::Cell::new(0_usize);
-        let claimed = || {
-            asked.set(asked.get() + 1);
-            unknown()
-        };
+    fn keep_files_leaves_everything_whether_the_files_are_known_or_not() {
+        // `--keep-files` has no use for the files: it leaves them all, however
+        // the survey found them. Each case is one way it can have found them,
+        // and the last is the one every other flag refuses.
+        let cases = [
+            all_matching(),
+            Claimed::known(vec![
+                file("a.yml", FileState::Changed),
+                file("b.yml", FileState::Missing),
+            ]),
+            Claimed::known(Vec::new()),
+            unknown(),
+        ];
 
-        assert_eq!(plan(Mode::KeepFiles, claimed), Ok(Plan::LeaveAll));
-        assert_eq!(asked.get(), 0, "the files were asked for");
+        for claimed in cases {
+            assert_eq!(
+                plan(FilesFlag::KeepFiles, claimed.clone()),
+                Ok(Plan::LeaveAll),
+                "{claimed:?}"
+            );
+        }
     }
 
     #[test]
     fn unknown_files_refuse_a_bare_run_and_a_delete_run_with_the_reasons() {
-        for mode in [Mode::Bare, Mode::DeleteFiles] {
+        for flag in [FilesFlag::Bare, FilesFlag::DeleteFiles] {
             assert_eq!(
-                plan(mode, unknown),
+                plan(flag, unknown()),
                 Err(Unknowable {
-                    reasons: vec!["one reason".to_owned()]
+                    reasons: NonEmpty::new("one reason".to_owned(), Vec::new())
                 }),
-                "{mode:?}"
+                "{flag:?}"
             );
         }
     }
@@ -626,7 +668,7 @@ mod tests {
         assert_eq!(asked, ["a.yml", "b.yml", "c.yml"]);
         assert_eq!(
             outcome,
-            Ok(Outcome::Deleting(vec![
+            Ok(Settlement::Deleting(vec![
                 Disposition {
                     path: claim("a.yml"),
                     fate: Fate::Deleted
@@ -641,6 +683,12 @@ mod tests {
                 },
             ]))
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "the files are settled in path order")]
+    fn settling_files_planned_out_of_path_order_is_a_defect_in_the_plan() {
+        let _ = Plan::Delete(paths(&["b.yml", "a.yml"])).settle(|_| Ok::<_, ()>(Fate::Deleted));
     }
 
     #[test]
@@ -662,20 +710,20 @@ mod tests {
             panic!("no file is deleted, so none is asked about")
         };
 
-        assert_eq!(Plan::LeaveAll.settle(never), Ok(Outcome::LeftAll));
+        assert_eq!(Plan::LeaveAll.settle(never), Ok(Settlement::LeftAll));
         assert_eq!(
             Plan::KeepAll(kept_all.clone()).settle(never),
-            Ok(Outcome::Kept(kept_all))
+            Ok(Settlement::Kept(kept_all))
         );
         assert_eq!(
             Plan::Delete(Vec::new()).settle(never),
-            Ok(Outcome::Deleting(Vec::new()))
+            Ok(Settlement::Deleting(Vec::new()))
         );
     }
 
     #[test]
     fn only_the_files_git_can_give_back_are_to_be_deleted() {
-        let outcome = Outcome::Deleting(vec![
+        let outcome = Settlement::Deleting(vec![
             Disposition {
                 path: claim("a.yml"),
                 fate: Fate::Deleted,
@@ -691,9 +739,9 @@ mod tests {
         ]);
 
         assert_eq!(outcome.to_delete(), [&claim("a.yml"), &claim("c.yml")]);
-        assert!(Outcome::LeftAll.to_delete().is_empty());
+        assert!(Settlement::LeftAll.to_delete().is_empty());
         assert!(
-            Outcome::Kept(vec![kept("a.yml", Presence::Changed)])
+            Settlement::Kept(vec![kept("a.yml", Presence::Changed)])
                 .to_delete()
                 .is_empty()
         );

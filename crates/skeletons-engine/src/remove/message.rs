@@ -5,7 +5,8 @@
 //! or a key from outside only through [`Escaped`], so each is one line however
 //! its words came.
 
-use super::files::{Fate, Kept, LeftBecause, Outcome, Presence};
+use super::files::{Fate, Kept, LeftBecause, Presence, Settlement};
+use super::names::ManifestShown;
 use super::resolve::{Candidate, Standing};
 use crate::command_line_crate::hand_back::Tracking;
 use crate::skeleton::Escaped;
@@ -27,9 +28,9 @@ pub(crate) struct Removed<'run> {
     /// The wearing that was taken out.
     pub(crate) wearing: &'run Candidate,
     /// The manifest it was taken out of, as a message shows it.
-    pub(crate) manifest: &'run str,
+    pub(crate) manifest: &'run ManifestShown,
     /// What became of the files.
-    pub(crate) files: &'run Outcome,
+    pub(crate) files: &'run Settlement,
     /// What happened to `Cargo.lock`.
     pub(crate) lockfile: Lockfile,
 }
@@ -54,8 +55,8 @@ pub(crate) fn removed_lines(removed: &Removed<'_>) -> Vec<String> {
 /// What was taken out of the manifest. A worn skeleton is named with its
 /// version. A wearing `check` refuses is not a skeleton to name: it says what
 /// was taken out, and says when there was no dependency to take.
-fn taken_out_line(wearing: &Candidate, manifest: &str) -> String {
-    let (key, manifest) = (Escaped(wearing.key()), Escaped(manifest));
+fn taken_out_line(wearing: &Candidate, manifest: &ManifestShown) -> String {
+    let (key, manifest) = (Escaped(wearing.key().as_str()), Escaped(manifest.as_str()));
     match wearing.standing() {
         Standing::Worn {
             crate_name,
@@ -77,18 +78,18 @@ fn taken_out_line(wearing: &Candidate, manifest: &str) -> String {
 
 /// The lines about the files: what became of each, in path order, and for kept
 /// files why they were kept.
-fn file_lines(files: &Outcome) -> Vec<String> {
+fn file_lines(files: &Settlement) -> Vec<String> {
     match files {
-        Outcome::LeftAll => vec!["left every file it claims in place".to_owned()],
-        Outcome::Kept(kept) => {
+        Settlement::LeftAll => vec!["left every file it claims in place".to_owned()],
+        Settlement::Kept(kept) => {
             let mut lines: Vec<String> = kept.iter().map(kept_line).collect();
             lines.push(kept_summary(kept));
             lines
         }
-        Outcome::Deleting(dispositions) if dispositions.is_empty() => {
+        Settlement::Deleting(dispositions) if dispositions.is_empty() => {
             vec!["none of its files is in the work tree, so there was nothing to delete".to_owned()]
         }
-        Outcome::Deleting(dispositions) => dispositions
+        Settlement::Deleting(dispositions) => dispositions
             .iter()
             .map(|disposition| match disposition.fate {
                 Fate::Deleted => {
@@ -151,7 +152,7 @@ fn left_line(path: &str, because: LeftBecause) -> String {
 }
 
 /// How many files the run deleted.
-fn deleted_count(files: &Outcome) -> usize {
+fn deleted_count(files: &Settlement) -> usize {
     files.to_delete().len()
 }
 
@@ -162,8 +163,8 @@ fn deleted_count(files: &Outcome) -> usize {
 /// ignores is refused by `git add`, and one this run left alone has nothing to
 /// commit. It is always at the workspace root, which is where the wearer sees it
 /// named.
-fn commit_line(manifest: &str, lockfile: Lockfile, deleted: usize) -> String {
-    let mut things = vec![Escaped(manifest).to_string()];
+fn commit_line(manifest: &ManifestShown, lockfile: Lockfile, deleted: usize) -> String {
+    let mut things = vec![Escaped(manifest.as_str()).to_string()];
     match lockfile {
         Lockfile::Changed(Tracking::Tracked) => things.push("Cargo.lock".to_owned()),
         Lockfile::Changed(Tracking::NotTracked) | Lockfile::Unchanged => {}
@@ -178,14 +179,23 @@ fn commit_line(manifest: &str, lockfile: Lockfile, deleted: usize) -> String {
 mod tests {
     use super::{Lockfile, Removed, removed_lines};
     use crate::command_line_crate::hand_back::Tracking;
-    use crate::remove::files::{Disposition, Fate, Kept, LeftBecause, Outcome, Presence};
+    use crate::remove::files::{Disposition, Fate, Kept, LeftBecause, Presence, Settlement};
+    use crate::remove::names::{ManifestShown, WearingKey};
     use crate::remove::resolve::{Candidate, Standing};
     use crate::survey::poison::{assert_escaped_once, assert_one_line, claim, poison};
     use crate::work_tree::index_entry::HiddenFlag;
 
-    fn worn(key: &str, crate_name: &str) -> Candidate {
+    fn key(text: &str) -> WearingKey {
+        WearingKey::new(text)
+    }
+
+    fn manifest(text: &str) -> ManifestShown {
+        ManifestShown::new(text)
+    }
+
+    fn worn(name: &str, crate_name: &str) -> Candidate {
         Candidate::new(
-            key,
+            key(name),
             Standing::Worn {
                 crate_name: crate_name.to_owned(),
                 version: semver::Version::new(0, 1, 0),
@@ -214,10 +224,10 @@ mod tests {
         }
     }
 
-    fn lines(wearing: &Candidate, files: &Outcome, lockfile: Lockfile) -> Vec<String> {
+    fn lines(wearing: &Candidate, files: &Settlement, lockfile: Lockfile) -> Vec<String> {
         removed_lines(&Removed {
             wearing,
-            manifest: "ritual/Cargo.toml",
+            manifest: &manifest("ritual/Cargo.toml"),
             files,
             lockfile,
         })
@@ -227,7 +237,7 @@ mod tests {
 
     #[test]
     fn a_worn_skeleton_is_named_with_its_version_and_every_file_is_listed() {
-        let files = Outcome::Deleting(vec![
+        let files = Settlement::Deleting(vec![
             deleted(".github/workflows/ci.yml"),
             deleted("root.yml"),
         ]);
@@ -247,14 +257,14 @@ mod tests {
     #[test]
     fn a_wearing_check_refuses_that_has_a_dependency_says_what_was_taken_out() {
         let wearing = Candidate::new(
-            "ci",
+            key("ci"),
             Standing::RefusedWithDependency {
                 crate_name: "not-a-skeleton".to_owned(),
             },
         );
 
         assert_eq!(
-            lines(&wearing, &Outcome::LeftAll, Lockfile::Unchanged),
+            lines(&wearing, &Settlement::LeftAll, Lockfile::Unchanged),
             [
                 "took the dependency `ci` and [package.metadata.skeletons.ci] out of \
                  ritual/Cargo.toml",
@@ -266,10 +276,10 @@ mod tests {
 
     #[test]
     fn a_wearing_check_refuses_that_has_no_dependency_says_there_was_none() {
-        let wearing = Candidate::new("ci", Standing::RefusedWithoutDependency);
+        let wearing = Candidate::new(key("ci"), Standing::RefusedWithoutDependency);
 
         assert_eq!(
-            lines(&wearing, &Outcome::LeftAll, TRACKED),
+            lines(&wearing, &Settlement::LeftAll, TRACKED),
             [
                 "took [package.metadata.skeletons.ci] out of ritual/Cargo.toml; no dependency \
                  was declared under `ci`",
@@ -284,7 +294,7 @@ mod tests {
         assert_eq!(
             lines(
                 &worn("ci", "a-skeleton"),
-                &Outcome::Deleting(Vec::new()),
+                &Settlement::Deleting(Vec::new()),
                 TRACKED
             )[1],
             "none of its files is in the work tree, so there was nothing to delete"
@@ -317,7 +327,7 @@ mod tests {
                 "git could not show that it holds it",
             ),
         ] {
-            let files = Outcome::Deleting(vec![left("local/notes.yml", because)]);
+            let files = Settlement::Deleting(vec![left("local/notes.yml", because)]);
 
             assert_eq!(
                 lines(&worn("ci", "a-skeleton"), &files, TRACKED)[1],
@@ -329,7 +339,7 @@ mod tests {
 
     #[test]
     fn deleted_and_left_files_are_listed_in_the_order_given_and_only_deleted_ones_are_counted() {
-        let files = Outcome::Deleting(vec![
+        let files = Settlement::Deleting(vec![
             deleted(".github/dependabot.yml"),
             left("a/deep.yml", LeftBecause::NotTracked),
             deleted("root.yml"),
@@ -351,10 +361,11 @@ mod tests {
 
     #[test]
     fn the_commit_line_counts_deleted_files_in_the_singular_and_the_plural() {
-        let one = Outcome::Deleting(vec![deleted("a.yml")]);
-        let three = Outcome::Deleting(vec![deleted("a.yml"), deleted("b.yml"), deleted("c.yml")]);
+        let one = Settlement::Deleting(vec![deleted("a.yml")]);
+        let three =
+            Settlement::Deleting(vec![deleted("a.yml"), deleted("b.yml"), deleted("c.yml")]);
 
-        let last = |files: &Outcome, lockfile| {
+        let last = |files: &Settlement, lockfile| {
             lines(&worn("ci", "a-skeleton"), files, lockfile)
                 .pop()
                 .expect("a run ends with its commit line")
@@ -376,7 +387,7 @@ mod tests {
 
     #[test]
     fn the_lockfile_is_named_only_when_git_tracks_it_and_this_run_changed_it() {
-        let files = Outcome::Deleting(Vec::new());
+        let files = Settlement::Deleting(Vec::new());
         let last = |lockfile| {
             lines(&worn("ci", "a-skeleton"), &files, lockfile)
                 .pop()
@@ -399,7 +410,7 @@ mod tests {
 
     #[test]
     fn files_that_were_kept_are_listed_with_why_and_summed_up_by_how_many_changed() {
-        let files = Outcome::Kept(vec![
+        let files = Settlement::Kept(vec![
             kept(".github/dependabot.yml", Presence::Matches),
             kept(".github/workflows/ci.yml", Presence::Changed),
         ]);
@@ -424,7 +435,7 @@ mod tests {
                 .enumerate()
                 .map(|(index, state)| kept(&format!("{index}.yml"), *state))
                 .collect();
-            let printed = lines(&worn("ci", "a"), &Outcome::Kept(kept), TRACKED);
+            let printed = lines(&worn("ci", "a"), &Settlement::Kept(kept), TRACKED);
             printed[printed.len() - 2].clone()
         };
 
@@ -450,7 +461,7 @@ mod tests {
     fn files_none_of_which_changed_are_never_a_reason_to_keep_them() {
         let _ = lines(
             &worn("ci", "a"),
-            &Outcome::Kept(vec![kept("a.yml", Presence::Matches)]),
+            &Settlement::Kept(vec![kept("a.yml", Presence::Matches)]),
             Lockfile::Unchanged,
         );
     }
@@ -462,39 +473,39 @@ mod tests {
         // named on several lines. Every shape of outcome and of wearing is
         // read, and each line stays one line with the name shown as `\n`.
         let outcomes = [
-            Outcome::LeftAll,
-            Outcome::Kept(vec![
+            Settlement::LeftAll,
+            Settlement::Kept(vec![
                 kept("a\nb.yml", Presence::Matches),
                 kept("c\nd.yml", Presence::Changed),
             ]),
-            Outcome::Deleting(vec![
+            Settlement::Deleting(vec![
                 deleted("a\nb.yml"),
                 left("c\nd.yml", LeftBecause::NotTracked),
             ]),
-            Outcome::Deleting(Vec::new()),
+            Settlement::Deleting(Vec::new()),
         ];
         let wearings = [
             Candidate::new(
-                &poison(),
+                key(&poison()),
                 Standing::Worn {
                     crate_name: poison(),
                     version: semver::Version::new(1, 2, 3),
                 },
             ),
             Candidate::new(
-                &poison(),
+                key(&poison()),
                 Standing::RefusedWithDependency {
                     crate_name: poison(),
                 },
             ),
-            Candidate::new(&poison(), Standing::RefusedWithoutDependency),
+            Candidate::new(key(&poison()), Standing::RefusedWithoutDependency),
         ];
 
         for wearing in &wearings {
             for outcome in &outcomes {
                 for line in removed_lines(&Removed {
                     wearing,
-                    manifest: &poison(),
+                    manifest: &manifest(&poison()),
                     files: outcome,
                     lockfile: TRACKED,
                 }) {
@@ -505,7 +516,7 @@ mod tests {
         }
         let first = &removed_lines(&Removed {
             wearing: &wearings[0],
-            manifest: &poison(),
+            manifest: &manifest(&poison()),
             files: &outcomes[0],
             lockfile: TRACKED,
         })[0];
@@ -514,7 +525,7 @@ mod tests {
 
     #[test]
     fn a_file_path_with_a_line_break_in_it_is_shown_escaped_once() {
-        let files = Outcome::Deleting(vec![
+        let files = Settlement::Deleting(vec![
             deleted(&poison()),
             left(&poison(), LeftBecause::NotTracked),
         ]);
@@ -526,20 +537,60 @@ mod tests {
     }
 
     #[test]
+    fn a_wearing_under_the_empty_key_is_taken_out_in_words_that_still_read_as_one_line() {
+        // `remove ""` where a wearing sits under the empty key: the key is
+        // shown as nothing between its backticks and its table's brackets,
+        // for each way `check` can stand on the wearing.
+        let first = |wearing: &Candidate| {
+            lines(wearing, &Settlement::LeftAll, Lockfile::Unchanged).remove(0)
+        };
+
+        assert_eq!(
+            first(&Candidate::new(
+                key(""),
+                Standing::Worn {
+                    crate_name: "a-skeleton".to_owned(),
+                    version: semver::Version::new(0, 1, 0),
+                }
+            )),
+            "stopped wearing a-skeleton 0.1.0: took the dependency `` and \
+             [package.metadata.skeletons.] out of ritual/Cargo.toml"
+        );
+        assert_eq!(
+            first(&Candidate::new(
+                key(""),
+                Standing::RefusedWithDependency {
+                    crate_name: "not-a-skeleton".to_owned()
+                }
+            )),
+            "took the dependency `` and [package.metadata.skeletons.] out of ritual/Cargo.toml"
+        );
+        assert_eq!(
+            first(&Candidate::new(key(""), Standing::RefusedWithoutDependency)),
+            "took [package.metadata.skeletons.] out of ritual/Cargo.toml; no dependency was \
+             declared under ``"
+        );
+    }
+
+    #[test]
     fn no_line_names_sync_or_wear() {
         // The lines are about `remove` alone, so they send the wearer to no
         // other command. `stopped wearing` is the wearer's word for the state
         // the skeleton was in, so it is not read as naming `wear`.
-        let files = Outcome::Deleting(vec![
+        let files = Settlement::Deleting(vec![
             deleted("a.yml"),
             left("b.yml", LeftBecause::CannotShowItHolds),
         ]);
         let all = lines(&worn("ci", "a-skeleton"), &files, TRACKED)
             .into_iter()
-            .chain(lines(&worn("ci", "a-skeleton"), &Outcome::LeftAll, TRACKED))
             .chain(lines(
                 &worn("ci", "a-skeleton"),
-                &Outcome::Kept(vec![kept("a.yml", Presence::Changed)]),
+                &Settlement::LeftAll,
+                TRACKED,
+            ))
+            .chain(lines(
+                &worn("ci", "a-skeleton"),
+                &Settlement::Kept(vec![kept("a.yml", Presence::Changed)]),
                 TRACKED,
             ));
 

@@ -7,6 +7,7 @@
 //! key anywhere in the manifest, which is how a dependency `remove` does not
 //! edit would show. Nothing the edit did is kept unless both hold.
 
+use super::names::{ManifestShown, WearingKey};
 use super::refusal::RemoveRefusal;
 use super::resolve::candidates_in;
 use crate::workspace::{Declared, Workspace};
@@ -26,22 +27,22 @@ use crate::workspace::{Declared, Workspace};
 pub(crate) fn confirm(
     workspace: &Workspace,
     declared: &[Declared],
-    manifest: &str,
-    key: &str,
+    manifest: &ManifestShown,
+    key: &WearingKey,
 ) -> Result<(), RemoveRefusal> {
     let table_remains = candidates_in(workspace, manifest, declared)
         .iter()
         .any(|candidate| candidate.key() == key);
     if table_remains {
         return Err(RemoveRefusal::StillWorn {
-            manifest: manifest.to_owned(),
-            key: key.to_owned(),
+            manifest: manifest.clone(),
+            key: key.clone(),
         });
     }
-    if declared.iter().any(|entry| entry.key == key) {
+    if declared.iter().any(|entry| entry.key == key.as_str()) {
         return Err(RemoveRefusal::DependencyRemains {
-            manifest: manifest.to_owned(),
-            key: key.to_owned(),
+            manifest: manifest.clone(),
+            key: key.clone(),
         });
     }
     Ok(())
@@ -52,11 +53,20 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::confirm;
+    use crate::remove::names::{ManifestShown, WearingKey};
     use crate::remove::refusal::RemoveRefusal;
     use crate::skeleton::Choices;
     use crate::workspace::{Declared, Pin, Wearing, WearingRefusal, Workspace, WornDependency};
 
     const MANIFEST: &str = "ritual/Cargo.toml";
+
+    fn manifest() -> ManifestShown {
+        ManifestShown::new(MANIFEST)
+    }
+
+    fn key(text: &str) -> WearingKey {
+        WearingKey::new(text)
+    }
 
     fn worn(manifest: &str, key: &str) -> Wearing {
         Wearing::Worn(WornDependency {
@@ -99,7 +109,7 @@ mod tests {
         let workspace = workspace_of(vec![worn(MANIFEST, "lint"), worn("tools/Cargo.toml", "ci")]);
 
         assert_eq!(
-            confirm(&workspace, &[declared("lint")], MANIFEST, "ci"),
+            confirm(&workspace, &[declared("lint")], &manifest(), &key("ci")),
             Ok(())
         );
     }
@@ -109,10 +119,10 @@ mod tests {
         let workspace = workspace_of(vec![worn(MANIFEST, "ci")]);
 
         assert_eq!(
-            confirm(&workspace, &[], MANIFEST, "ci"),
+            confirm(&workspace, &[], &manifest(), &key("ci")),
             Err(RemoveRefusal::StillWorn {
-                manifest: MANIFEST.to_owned(),
-                key: "ci".to_owned(),
+                manifest: manifest(),
+                key: key("ci"),
             })
         );
     }
@@ -124,10 +134,10 @@ mod tests {
         let workspace = workspace_of(vec![dangling(MANIFEST, "ci")]);
 
         assert_eq!(
-            confirm(&workspace, &[], MANIFEST, "ci"),
+            confirm(&workspace, &[], &manifest(), &key("ci")),
             Err(RemoveRefusal::StillWorn {
-                manifest: MANIFEST.to_owned(),
-                key: "ci".to_owned(),
+                manifest: manifest(),
+                key: key("ci"),
             })
         );
     }
@@ -140,12 +150,12 @@ mod tests {
             confirm(
                 &workspace,
                 &[declared("ci"), declared("lint")],
-                MANIFEST,
-                "ci"
+                &manifest(),
+                &key("ci")
             ),
             Err(RemoveRefusal::DependencyRemains {
-                manifest: MANIFEST.to_owned(),
-                key: "ci".to_owned(),
+                manifest: manifest(),
+                key: key("ci"),
             })
         );
     }
@@ -157,10 +167,10 @@ mod tests {
         let workspace = workspace_of(vec![worn(MANIFEST, "ci")]);
 
         assert_eq!(
-            confirm(&workspace, &[declared("ci")], MANIFEST, "ci"),
+            confirm(&workspace, &[declared("ci")], &manifest(), &key("ci")),
             Err(RemoveRefusal::StillWorn {
-                manifest: MANIFEST.to_owned(),
-                key: "ci".to_owned(),
+                manifest: manifest(),
+                key: key("ci"),
             })
         );
     }
@@ -172,7 +182,24 @@ mod tests {
             dangling("tools/Cargo.toml", "ci-next"),
         ]);
 
-        assert_eq!(confirm(&workspace, &[], MANIFEST, "ci"), Ok(()));
+        assert_eq!(confirm(&workspace, &[], &manifest(), &key("ci")), Ok(()));
+    }
+
+    #[test]
+    fn the_empty_key_is_a_key_like_any_other_to_confirm() {
+        // A table under the empty key is still there until it is gone, and a
+        // table under another key is not it.
+        let still_there = workspace_of(vec![dangling(MANIFEST, "")]);
+        let other = workspace_of(vec![dangling(MANIFEST, "ci")]);
+
+        assert_eq!(
+            confirm(&still_there, &[], &manifest(), &key("")),
+            Err(RemoveRefusal::StillWorn {
+                manifest: manifest(),
+                key: key(""),
+            })
+        );
+        assert_eq!(confirm(&other, &[], &manifest(), &key("")), Ok(()));
     }
 
     #[test]
@@ -180,7 +207,7 @@ mod tests {
         let workspace = workspace_of(vec![worn(MANIFEST, "ci-next")]);
 
         assert_eq!(
-            confirm(&workspace, &[declared("ci-next")], MANIFEST, "ci"),
+            confirm(&workspace, &[declared("ci-next")], &manifest(), &key("ci")),
             Ok(())
         );
     }

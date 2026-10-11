@@ -4,15 +4,19 @@
 //! `[package.metadata.skeletons.<key>]` table out of the running command
 //! line's own manifest, brings `Cargo.lock` current, and deletes the files the
 //! skeleton wrote only when that is plainly what was asked. Every decision it
-//! makes, and every word it says, is a pure function of values in
-//! [`resolve`], [`files`], [`manifest`], [`refusal`], [`message`] and
-//! [`confirm`], so each is held by a test that touches no disk, no process and
-//! no git. [`give_back`] and [`deletion`] are the two effects, each held by a
-//! test against a real directory or repository:
+//! makes, and every word it says, is a pure function of values in [`resolve`],
+//! [`files`], [`manifest`], [`refusal`], [`message`] and [`confirm`], so each
+//! is held by a test that touches no disk, no process and no git. [`give_back`]
+//! and [`deletion`] are the two effects, each held by a test against a real
+//! directory or repository. The child modules, and what each is for:
 //!
+//! - [`names`] keeps the two names `remove` passes around as text, the
+//!   wearing's key and the manifest as a message shows it, from being swapped;
+//! - [`non_empty`] holds a list that cannot be empty, for the refusals whose
+//!   words are wrong for an empty one;
 //! - [`resolve`] reads the name the wearer typed as a key or a crate, and
 //!   finds the one wearing it means;
-//! - [`files`] decides from the typed flags and the survey which files go, are
+//! - [`files`] decides from the typed flag and the survey which files go, are
 //!   kept or are left, and which cannot be known at all;
 //! - [`manifest`] edits the manifest's text and checks the edit against an
 //!   independent parse;
@@ -35,6 +39,8 @@ mod files;
 mod give_back;
 mod manifest;
 mod message;
+mod names;
+mod non_empty;
 mod refusal;
 mod resolve;
 
@@ -55,8 +61,9 @@ use crate::work_tree::abort::WorkTreeAbort;
 use crate::work_tree::writing_command::WritingCommand;
 use crate::workspace::{self, Prospect, ReadWorkspaceError};
 use deletion::Staged;
-use files::{Claimed, Mode};
+use files::{Claimed, FilesFlag, Settlement};
 use message::{Lockfile, Removed};
+use names::{ManifestShown, WearingKey};
 use refusal::{Asked, RemoveRefusal};
 use resolve::Candidate;
 
@@ -96,12 +103,12 @@ struct RemoveArguments {
 }
 
 impl RemoveArguments {
-    /// What the wearer typed about the files.
-    fn mode(&self) -> Mode {
+    /// Which flag the wearer typed about the files.
+    fn files_flag(&self) -> FilesFlag {
         match (self.delete_files, self.keep_files) {
-            (false, false) => Mode::Bare,
-            (true, false) => Mode::DeleteFiles,
-            (false, true) => Mode::KeepFiles,
+            (false, false) => FilesFlag::Bare,
+            (true, false) => FilesFlag::DeleteFiles,
+            (false, true) => FilesFlag::KeepFiles,
             (true, true) => unreachable!("clap refuses --delete-files together with --keep-files"),
         }
     }
@@ -116,12 +123,12 @@ pub(crate) fn task() -> Task {
 }
 
 fn run(command_line: &CommandLine, arguments: &RemoveArguments) -> Outcome {
-    let prepared = prepare(command_line, &arguments.name, arguments.mode())?;
+    let prepared = prepare(command_line, &arguments.name, arguments.files_flag())?;
     let wording = Wording::project(&prepared.workspace_root, RETRY);
     let done = rollback::attempt(wording, |changes| write(changes, &prepared))?;
     let removed = Removed {
         wearing: &prepared.wearing,
-        manifest: &prepared.command_line_crate.manifest_shown,
+        manifest: &prepared.manifest(),
         files: &prepared.files,
         lockfile: done.lockfile,
     };
@@ -138,13 +145,20 @@ fn run(command_line: &CommandLine, arguments: &RemoveArguments) -> Outcome {
 /// what becomes of its files, where it runs, and the crate it writes into.
 struct Prepared {
     wearing: Candidate,
-    files: files::Outcome,
+    files: Settlement,
     directory: PathBuf,
     workspace_root: PathBuf,
     command_line_crate: CommandLineCrate,
     /// Whether git tracks `Cargo.lock`, which the success message needs to
     /// say whether to commit it.
     lockfile: Tracking,
+}
+
+impl Prepared {
+    /// The command line's own manifest, as a message shows it.
+    fn manifest(&self) -> ManifestShown {
+        ManifestShown::new(&self.command_line_crate.manifest_shown)
+    }
 }
 
 /// Everything `remove` can refuse before it writes anything.
@@ -154,17 +168,21 @@ struct Prepared {
 /// more of it than the skeleton, and so that no read or check made here
 /// rewrites the lockfile: a refusal leaves it as it was. What that read holds
 /// answers every refusal that is about the name and the manifest as they stand,
-/// and finds the crate `remove` writes into. The files are surveyed next, in
-/// every mode, because whether `check` refuses the wearing decides how the
-/// first success line names it, and then planned: `--keep-files` plans to touch
-/// none, so a wearing whose files cannot be known stops nothing there and every
-/// other mode refuses it. The work tree is asked after those,
+/// and finds the crate `remove` writes into. The files are surveyed next, under
+/// whatever flag was typed, because whether `check` refuses the wearing decides
+/// how the first success line names it, and then planned: `--keep-files` plans
+/// to touch none, so a wearing whose files cannot be known stops nothing there
+/// and every other flag refuses it. The work tree is asked after those,
 /// so a request that is wrong is refused as wrong whether or not the tree is
 /// clean, and then the manifest and lockfile are proven ones git can hand back
 /// ([`hand_back::check`]) and can be written in place ([`writable::check`]),
 /// each file to be deleted is asked of git ([`give_back::fate`]), and the
 /// holding path is shown to be free when any file is to be deleted.
-fn prepare(command_line: &CommandLine, name: &str, mode: Mode) -> Result<Prepared, Failure> {
+fn prepare(
+    command_line: &CommandLine,
+    name: &str,
+    files_flag: FilesFlag,
+) -> Result<Prepared, Failure> {
     let directory = current_directory::read()?;
     let package = command_line.identity().package_name();
     let prospect =
@@ -172,45 +190,47 @@ fn prepare(command_line: &CommandLine, name: &str, mode: Mode) -> Result<Prepare
     let Some(member) = &prospect.member else {
         return Err(RemoveRefusal::OutsideItsProject {
             package: package.to_owned(),
-            root: prospect.workspace.root.display().to_string(),
+            root: prospect.workspace.root,
         }
         .into_failure());
     };
-    let candidates =
-        resolve::candidates_in(&prospect.workspace, &member.manifest, &member.declared);
+    let manifest = ManifestShown::new(&member.manifest);
+    let candidates = resolve::candidates_in(&prospect.workspace, &manifest, &member.declared);
     let wearing = match resolve::pick(name, &candidates) {
         Ok(picked) => picked.clone(),
         Err(refusal) => {
+            let elsewhere = resolve::worn_elsewhere(&prospect.workspace, &manifest, name);
             let asked = Asked {
-                name,
-                manifest: &member.manifest,
-                command: &command_line.cargo_command(),
-                mode,
+                name: name.to_owned(),
+                manifest,
+                command: command_line.cargo_command(),
+                files_flag,
             };
-            let elsewhere = resolve::worn_elsewhere(&prospect.workspace, &member.manifest, name);
-            return Err(RemoveRefusal::from_pick(refusal, &asked, elsewhere).into_failure());
+            return Err(RemoveRefusal::from_pick(refusal, asked, elsewhere).into_failure());
         }
     };
-    // The survey is run whatever the mode: the files are its to say only when a
-    // mode would delete some, but whether `check` refuses the wearing decides
-    // how the first line names it.
+    // The survey is run whatever flag was typed: the files are its to say only
+    // when the flag would delete some, but whether `check` refuses the wearing
+    // decides how the first line names it.
     let claimed = Claimed::of(
         &survey::survey(&prospect.workspace),
-        &member.manifest,
+        &manifest,
         wearing.key(),
     );
     let wearing = wearing.according_to(&claimed);
-    let plan = files::plan(mode, || claimed).map_err(|unknowable| {
+    let plan = files::plan(files_flag, claimed).map_err(|unknowable| {
         RemoveRefusal::FilesUnknowable {
-            key: wearing.key().to_owned(),
+            key: wearing.key().clone(),
             unknowable,
         }
         .into_failure()
     })?;
     let command_line_crate = CommandLineCrate::new(package, member, &prospect.workspace.root);
     // `remove` changes the manifest and `Cargo.lock` in place and deletes
-    // files, so git is the only undo for anything `rollback` could not take
-    // back; whole-tree dirt counts, as it does for `sync` and `wear`, because
+    // files, so git is the only way back for what `rollback` could not take
+    // back, and only for what was committed: an edit made by something else
+    // after the proof, before the move, was never committed and goes with the
+    // file. Whole-tree dirt counts, as it does for `sync` and `wear`, because
     // the person's own uncommitted edits would otherwise be mixed into what
     // `remove` wrote or deleted. A clean tree says nothing about a file git is
     // told not to read, so the two files are then asked of git's index, and
@@ -282,28 +302,30 @@ fn write(changes: &mut Changes, prepared: &Prepared) -> Result<Done, Failure> {
 /// Every failure the wearer can cause or act on is an `Err`, so that
 /// `rollback` puts the project back: it does that when the run returns a
 /// failure and does not when it panics. A violated invariant is a defect, and
-/// a defect panics; the assertions in the process runner and in the proof
-/// of a held file can be reached from here, and the project is not put back
-/// after one. Nothing here writes a file except through `changes`.
+/// a defect panics; the assertions in the process runner that the relock and
+/// the read back go through, and the one in [`deletion::stage`] that the
+/// workspace root is absolute, can be reached from here, and the project is not
+/// put back after one. The proof that git holds each file runs in [`prepare`],
+/// before the attempt begins. Nothing here writes a file except through
+/// `changes`.
 fn write_with(
     changes: &mut Changes,
     prepared: &Prepared,
     relock: impl FnOnce() -> Result<(), ReadWorkspaceError>,
     read_back: impl FnOnce() -> Result<Prospect, ReadWorkspaceError>,
 ) -> Result<Done, Failure> {
-    let command_line_crate = &prepared.command_line_crate;
-    let (manifest, key) = (&command_line_crate.manifest_shown, prepared.wearing.key());
-    take_out_wearing(changes, command_line_crate, key)?;
+    let (manifest, key) = (prepared.manifest(), prepared.wearing.key());
+    take_out_wearing(changes, &prepared.command_line_crate, &manifest, key)?;
     let lockfile = relock_lockfile(changes, prepared, relock)?;
     let read = read_back().map_err(|error| aborted(&error))?;
     let Some(member) = &read.member else {
         return Err(RemoveRefusal::PackageVanished {
-            manifest: manifest.clone(),
-            key: key.to_owned(),
+            manifest,
+            key: key.clone(),
         }
         .into_failure());
     };
-    confirm::confirm(&read.workspace, &member.declared, manifest, key)
+    confirm::confirm(&read.workspace, &member.declared, &manifest, key)
         .map_err(RemoveRefusal::into_failure)?;
     let staged = deletion::stage(
         changes,
@@ -318,13 +340,13 @@ fn write_with(
 fn take_out_wearing(
     changes: &mut Changes,
     command_line_crate: &CommandLineCrate,
-    key: &str,
+    manifest: &ManifestShown,
+    key: &WearingKey,
 ) -> Result<(), Failure> {
-    let shown = &command_line_crate.manifest_shown;
     let before = std::fs::read_to_string(&command_line_crate.manifest_path).map_err(|error| {
         RemoveRefusal::ManifestUnreadable {
-            manifest: shown.clone(),
-            key: key.to_owned(),
+            manifest: manifest.clone(),
+            key: key.clone(),
             detail: error.to_string(),
         }
         .into_failure()
@@ -332,13 +354,13 @@ fn take_out_wearing(
     let after = manifest::without_wearing(&before, key).map_err(|refusal| {
         match refusal {
             manifest::ManifestRefusal::Unreadable { detail } => RemoveRefusal::ManifestUnreadable {
-                manifest: shown.clone(),
-                key: key.to_owned(),
+                manifest: manifest.clone(),
+                key: key.clone(),
                 detail,
             },
             manifest::ManifestRefusal::Defect { detail } => RemoveRefusal::ManifestDefect {
-                manifest: shown.clone(),
-                key: key.to_owned(),
+                manifest: manifest.clone(),
+                key: key.clone(),
                 detail,
             },
         }
@@ -360,7 +382,7 @@ fn relock_lockfile(
     relock: impl FnOnce() -> Result<(), ReadWorkspaceError>,
 ) -> Result<Lockfile, Failure> {
     let command_line_crate = &prepared.command_line_crate;
-    let (manifest, key) = (&command_line_crate.manifest_shown, prepared.wearing.key());
+    let (manifest, key) = (prepared.manifest(), prepared.wearing.key());
     let lockfile = &command_line_crate.lockfile_path;
     let unreadable = |error: std::io::Error| {
         RemoveRefusal::LockfileUnreadable {
@@ -374,7 +396,7 @@ fn relock_lockfile(
         relock().map_err(|error| match error {
             ReadWorkspaceError::CargoMetadataFailed { stderr } => RemoveRefusal::CargoRefused {
                 manifest: manifest.clone(),
-                key: key.to_owned(),
+                key: key.clone(),
                 stderr,
             }
             .into_failure(),
@@ -398,10 +420,11 @@ mod tests {
     use rituals::{Failure, clap};
     use rituals_compose::rollback::{self, Wording};
 
-    use super::files::{Disposition, Fate, Outcome};
+    use super::files::{Disposition, Fate, FilesFlag, Settlement};
     use super::message::Lockfile;
+    use super::names::WearingKey;
     use super::resolve::{Candidate, Standing};
-    use super::{Done, Mode, Prepared, RemoveArguments, deletion, write_with};
+    use super::{Done, Prepared, RemoveArguments, deletion, write_with};
     use crate::claim::ClaimPath;
     use crate::command_line_crate::CommandLineCrate;
     use crate::command_line_crate::hand_back::Tracking;
@@ -427,7 +450,7 @@ mod tests {
     }
 
     impl Project {
-        fn new(manifest: &str, files: Outcome) -> Self {
+        fn new(manifest: &str, files: Settlement) -> Self {
             let directory = tempfile::tempdir().expect("a temporary directory");
             let manifest_path = directory.path().join("Cargo.toml");
             let lockfile_path = directory.path().join("Cargo.lock");
@@ -435,7 +458,7 @@ mod tests {
             std::fs::write(&lockfile_path, LOCKFILE).expect("write the lockfile");
             let prepared = Prepared {
                 wearing: Candidate::new(
-                    "tidy",
+                    WearingKey::new("tidy"),
                     Standing::Worn {
                         crate_name: "tidy".to_owned(),
                         version: semver::Version::new(0, 1, 0),
@@ -460,7 +483,7 @@ mod tests {
         }
 
         fn worn() -> Self {
-            Self::new(WORN, Outcome::LeftAll)
+            Self::new(WORN, Settlement::LeftAll)
         }
 
         fn path(&self, name: &str) -> PathBuf {
@@ -544,8 +567,8 @@ mod tests {
         || Ok(read_back(Vec::new(), Vec::new()))
     }
 
-    fn deleting(paths: &[&str]) -> Outcome {
-        Outcome::Deleting(
+    fn deleting(paths: &[&str]) -> Settlement {
+        Settlement::Deleting(
             paths
                 .iter()
                 .map(|path| Disposition {
@@ -757,7 +780,7 @@ mod tests {
         // The manifest has no table to take out, which is a defect in
         // `skeletons`. Nothing was written, so there is nothing to put back
         // and the line makes no claim that anything was.
-        let project = Project::new(UNWORN, Outcome::LeftAll);
+        let project = Project::new(UNWORN, Settlement::LeftAll);
 
         let failure = project
             .run(
@@ -777,7 +800,7 @@ mod tests {
 
     #[test]
     fn a_manifest_that_is_not_toml_is_refused_before_anything_is_written() {
-        let project = Project::new("[package\n", Outcome::LeftAll);
+        let project = Project::new("[package\n", Settlement::LeftAll);
 
         let failure = project
             .run(
@@ -823,7 +846,8 @@ mod tests {
             "two\n"
         );
 
-        deletion::purge(done.staged, "tidy").expect("the holding directory is deleted");
+        deletion::purge(done.staged, &WearingKey::new("tidy"))
+            .expect("the holding directory is deleted");
 
         assert!(!holding.exists());
     }
@@ -858,23 +882,26 @@ mod tests {
         <RemoveArguments as clap::Args>::augment_args(clap::Command::new("remove"))
     }
 
-    fn mode_of(arguments: &[&str]) -> Mode {
+    fn files_flag_of(arguments: &[&str]) -> FilesFlag {
         let matches = command()
             .try_get_matches_from(arguments)
             .unwrap_or_else(|error| panic!("{arguments:?} must parse: {error}"));
         <RemoveArguments as clap::FromArgMatches>::from_arg_matches(&matches)
             .expect("matches clap accepted are read back as the arguments")
-            .mode()
+            .files_flag()
     }
 
     #[test]
-    fn clap_accepts_neither_flag_and_each_alone_and_reads_each_as_its_mode() {
-        assert_eq!(mode_of(&["remove", "ci"]), Mode::Bare);
+    fn clap_accepts_neither_flag_and_each_alone_and_reads_each_as_itself() {
+        assert_eq!(files_flag_of(&["remove", "ci"]), FilesFlag::Bare);
         assert_eq!(
-            mode_of(&["remove", "ci", "--delete-files"]),
-            Mode::DeleteFiles
+            files_flag_of(&["remove", "ci", "--delete-files"]),
+            FilesFlag::DeleteFiles
         );
-        assert_eq!(mode_of(&["remove", "ci", "--keep-files"]), Mode::KeepFiles);
+        assert_eq!(
+            files_flag_of(&["remove", "ci", "--keep-files"]),
+            FilesFlag::KeepFiles
+        );
     }
 
     #[test]

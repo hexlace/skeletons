@@ -92,8 +92,9 @@ writes `tools = { package = "skeletons", … }` and `tasks = ["ritual", "tools"]
 and the commands run as `cargo ritual tools check`. The tool's own messages
 name only the `check`, `sync`, `wear` and `remove` tasks, so they read the same
 either way. The one exception is `remove`'s refusal of a crate worn under
-several keys, which has to show a command with a key in it, and shows the
-command as the command line was reached.
+several keys, which has to show a command with a key in it, and shows `cargo`,
+the binary's name and the subcommands that were typed, which is how a project
+made by `ritual new` reaches its command line.
 
 This version of `skeletons` is built on ritual 0.2, and mounts in a command
 line built on ritual 0.2, such as the one ritual 0.2's `new` makes. `import`
@@ -332,14 +333,14 @@ deleted .github/dependabot.yml
 commit ritual/Cargo.toml, Cargo.lock and the 1 deleted file to record it
 ```
 
-The manifest is back as it was before `wear`. The files depend on what you
-asked, and `remove` never guesses. With neither flag, it deletes the
+A manifest `wear` wrote is back as it was before `wear`. The files depend on
+what you asked, and `remove` never guesses. With neither flag, it deletes the
 skeleton's files when every one still holds what the skeleton renders, as above,
 because they are the skeleton's, unchanged. If any has changed, it deletes none
 of them: it stops wearing the skeleton, says which files have changed, and lists
 all of them, so you can keep them as your own or clear them out. `--delete-files`
 deletes every file, changed ones included, and `--keep-files` leaves every file
-where it is. The two flags exclude each other.
+where it is. `--delete-files` and `--keep-files` exclude each other.
 
 A file is deleted only if git could give it back, by the same proof `sync`
 requires before it overwrites one. A file git ignores, hides or would not check

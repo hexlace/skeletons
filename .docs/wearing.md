@@ -11,8 +11,9 @@ that depends on `skeletons` under another key runs them under that key
 (`cargo ritual tools check`), and the tool's own messages name only the
 `check`, `sync`, `wear` and `remove` tasks, so they read the same either way.
 The one exception is `remove`'s refusal of a crate worn under several keys,
-which has to show a command with a key in it, and shows the command as the
-command line was reached.
+which has to show a command with a key in it, and shows `cargo`, the binary's
+name and the subcommands that were typed, which is how a project made by
+`ritual new` reaches its command line.
 
 ## The wearing table
 
@@ -1193,8 +1194,8 @@ A claimed file that is missing is nothing to delete. It is no reason to refuse
 and no reason to keep the others, and no line names it. When none of the files
 is in the work tree, the output says so.
 
-Whatever mode deletes a file, it deletes it only if git could give it back. A clean
-work tree does not say that: an untracked file git ignores, a file git is told
+Whatever flag deletes a file, it deletes it only if git could give it back. A
+clean work tree does not say that: an untracked file git ignores, a file git is told
 not to read from the work tree, and a file under a content filter that does not
 write back what it was handed all read clean while holding bytes no commit has.
 So each file about to be deleted is put to the proof `sync` requires before it
@@ -1263,7 +1264,7 @@ took the dependency `tidy` and [package.metadata.skeletons.tidy] out of ritual/C
 took [package.metadata.skeletons.ghost] out of ritual/Cargo.toml; no dependency was declared under `ghost`
 ```
 
-Those are the three forms of the first line: a worn skeleton, a refused wearing
+Those are the forms of the first line: a worn skeleton, a refused wearing
 that has a dependency, and a refused wearing that has none. The last line says
 what to commit: the manifest always, `Cargo.lock` when this run changed it and
 git tracks it (`git add` refuses a lockfile git ignores, and a lockfile Cargo
@@ -1381,14 +1382,17 @@ is the argument parser's and exits with status 2 before any of these.)
 - the name is a crate that several keys wear and the key of none. The line
   shows the full command, with the first of the keys and the flag that was
   typed. It is the one line that does, because it has to show a command with a
-  key in it, and the command is spelled as the command line was reached:
+  key in it, and the command is `cargo`, the binary's name and the subcommands
+  that were typed, which is how a project made by `ritual new` reaches its
+  command line, and holds wherever the project's cargo alias is the binary's
+  name:
 
   ```text
   `passthrough-plain` is worn under more than one key in ritual/Cargo.toml, `ci` and `ci-next`, so remove wrote nothing; remove one by its key, such as `cargo ritual skeletons remove ci`
   ```
 
   With `--keep-files` typed, the command ends `remove ci --keep-files`.
-- the files the wearing claims cannot be known, and the mode would delete them
+- the files the wearing claims cannot be known, and the flag would delete them
   (neither flag, or `--delete-files`). `check` refuses the wearing, whether for
   its own defect or because one of its bones overlaps another's, so the survey
   has dropped some of its files, and deleting from what is left would be a
@@ -1507,11 +1511,13 @@ remove stopped wearing `dependabot` and moved its files into .skeletons-remove, 
 - **The holding directory has a name.** `.skeletons-remove` at the workspace
   root is reserved while files are being deleted, and a project that has
   something there has to move it first.
-- **It proves each file once, before it writes anything.** Between that proof
-  and the move, which waits on Cargo bringing `Cargo.lock` current, an edit
-  made by something else to a file `remove` is about to delete is moved and
-  deleted with it. Git is the undo, which is why the work tree has to be clean
-  first.
+- **It proves each file once, before it writes anything.** The proof is taken
+  once, and the move waits on Cargo bringing `Cargo.lock` current. An edit made
+  by something else to a file `remove` is about to delete, after the proof and
+  before the move, goes with the file, and no commit holds it, since the edit
+  was never committed: git can give back what the proof showed it holds, and
+  nothing newer. It is the kind of limit `sync` states for the instant between
+  its last look and its write, and `remove` looks less often than `sync` does.
 - **The undo does not give back what rollback cannot.** A panic, and a change
   made around the run, are the two things named under [Wear](#wear), and they
   hold here.

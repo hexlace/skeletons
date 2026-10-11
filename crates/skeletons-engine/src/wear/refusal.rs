@@ -5,6 +5,8 @@
 //! Every message ends by saying what to do, or says that nothing is left to
 //! do because the defect is in `skeletons`.
 
+use std::path::PathBuf;
+
 use rituals::Failure;
 
 use super::WRITING;
@@ -55,7 +57,7 @@ pub(crate) enum WearRefusal {
     KeyShadowsCompiler { key: String },
     /// The package the command line was built from is not a member of the
     /// workspace `wear` ran in.
-    OutsideItsProject { package: String, root: String },
+    OutsideItsProject { package: String, root: PathBuf },
     /// A workspace member already wears this skeleton.
     AlreadyWorn {
         package: String,
@@ -354,6 +356,8 @@ fn not_reported_message(manifest: &str, key: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::{Parent, WearRefusal};
     use crate::survey::poison::{
         POISON, assert_escaped_once, assert_every_kind, assert_one_line, poison,
@@ -400,7 +404,7 @@ mod tests {
             WearRefusal::KeyShadowsCompiler { key: poison() },
             WearRefusal::OutsideItsProject {
                 package: poison(),
-                root: poison(),
+                root: PathBuf::from(poison()),
             },
             WearRefusal::AlreadyWorn {
                 package: poison(),
@@ -578,7 +582,7 @@ mod tests {
         assert_eq!(
             only(&WearRefusal::OutsideItsProject {
                 package: "tool".to_owned(),
-                root: "/work/other".to_owned(),
+                root: PathBuf::from("/work/other"),
             }),
             "this command line is built from the package `tool`, which is not a member of the \
              workspace at /work/other, so wear wrote nothing: run the `wear` task from inside \

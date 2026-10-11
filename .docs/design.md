@@ -1681,11 +1681,12 @@ the table come out even then, which is the case that matters most: a
 half-written wearing is exactly what a person wants gone
 (`ritual/tests/remove_files.rs` →
 `a_wearing_whose_files_cannot_be_known_proceeds_with_keep_files`). The survey
-still runs in that mode. Whether `check` refuses the wearing decides how the
+still runs under that flag. Whether `check` refuses the wearing decides how the
 first line names it, since a refused wearing is not a skeleton to name with a
-version, while the files themselves are never asked about
+version, while the files themselves are left where they are whatever the survey
+made of them
 (`crates/skeletons-engine/src/remove/files.rs` →
-`keep_files_leaves_everything_and_never_asks_for_the_files`).
+`keep_files_leaves_everything_whether_the_files_are_known_or_not`).
 
 **A file is deleted only on the proof `sync` asks before it overwrites one.** A
 clean work tree does not say that git could give a file back. An untracked file
@@ -1702,8 +1703,9 @@ the person asked to stop wearing and a file git could not give back is no reason
 to keep wearing. It is not counted as changed either, since a file the project
 has not edited should not make a bare `remove` keep the others
 (`crates/skeletons-engine/src/remove/give_back.rs` →
-`an_ignored_untracked_file_is_left_as_not_tracked`, and →
-`a_file_under_a_clean_filter_that_drops_bytes_is_left_as_not_what_git_checks_out`;
+`an_ignored_untracked_file_is_left_as_not_tracked`, and
+`crates/skeletons-engine/src/sync/proof.rs` →
+`a_line_a_lossy_clean_filter_strips_is_not_what_git_checks_out`;
 `ritual/tests/remove_files.rs` →
 `a_claimed_file_git_ignores_is_left_and_named_while_the_others_are_deleted`, and
 → `a_claimed_file_marked_skip_worktree_is_left_and_named`). Every way the proof
@@ -1809,8 +1811,8 @@ anything is written.** The workspace is read `--locked` and only `--locked`
 first, so a lockfile that is stale or missing is refused before bringing it
 current could rewrite more of it than the skeleton, and no read made before the
 write rewrites it. What that read holds answers the refusals that are about the
-name and the manifest as they stand. The files are surveyed and planned next, in
-every mode. The work tree is asked after those, so a request that is wrong is
+name and the manifest as they stand. The files are surveyed and planned next,
+whatever flag was typed. The work tree is asked after those, so a request that is wrong is
 refused as wrong whether or not the tree is clean, and it is the whole-tree
 question `sync` asks, counting every uncommitted path, because the person's own
 edits would otherwise be mixed into what `remove` wrote or deleted
@@ -1821,7 +1823,7 @@ whether git can hand them back and whether they can be written in place, then
 each file to be deleted is put to the proof, and last the holding path is shown
 to be free.
 
-**Three things the code settled.** The first is a directory the deletion leaves
+**What the code settled.** The first is a directory the deletion leaves
 empty. It is removed, deepest first, and so is each directory above it that this
 empties in turn, because git tracks no directory and the tree should then equal
 a checkout of the commit the person makes. A directory that still holds anything
@@ -1832,7 +1834,7 @@ and → `a_directory_that_still_holds_something_stays_and_so_does_everything_abo
 `ritual/tests/remove_files.rs` → `a_directory_that_still_holds_something_stays`).
 
 The second is a file git cannot give back, which a clean work tree says nothing
-about. It is left in place and named in every mode that would delete it, as
+about. It is left in place and named under every flag that would delete it, as
 above, and the wearing is still removed. This matches `sync`, which refuses to
 create a file git ignores and to overwrite one git hides.
 
@@ -1855,8 +1857,9 @@ binary's name, while the task name reads the same however the command line is
 reached. Every line worded for `remove` says `remove`, and names no other
 command (`crates/skeletons-engine/src/remove/refusal.rs` →
 `no_refusal_names_sync_or_wear`). The several-keys refusal is the exception: it
-has to show a command with a key in it, so it shows the command as the command
-line was reached
+has to show a command with a key in it, so it shows `cargo`, the binary's name
+and the subcommands that were typed, which is how a project made by `ritual new`
+reaches its command line and holds wherever the cargo alias is the binary's name
 (`crates/skeletons-engine/src/remove/refusal.rs` →
 `a_crate_worn_under_several_keys_shows_the_command_with_the_first_key`).
 
@@ -2068,8 +2071,10 @@ is surveyed, then proved against git, then moved after Cargo has brought
 before it moves the file, as `sync` does before each write. An edit that lands in
 that interval is moved and deleted with the file, and a directory above the file
 swapped for a symbolic link in it is followed. The interval is the time the
-relock and the read back take. Git is the undo, which is why the work tree has
-to be clean first.
+relock and the read back take. Git is not the undo for such an edit: it was
+never committed, so no commit holds it, and it is lost with the file. The clean
+work tree makes sure that what the proof showed git can give back is all that
+was there when the interval began, and nothing more.
 
 ## Beyond this release
 

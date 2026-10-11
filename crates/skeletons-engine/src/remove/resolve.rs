@@ -9,6 +9,8 @@
 //! candidates.
 
 use super::files::Claimed;
+use super::names::{ManifestShown, WearingKey};
+use super::non_empty::NonEmpty;
 use crate::workspace::{Declared, Wearing, WearingRefusal, Workspace};
 
 /// What `check` makes of a wearing, as far as the success message needs it.
@@ -31,21 +33,24 @@ pub(crate) enum Standing {
 /// makes of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Candidate {
-    key: String,
+    key: WearingKey,
     standing: Standing,
 }
 
 impl Candidate {
-    pub(crate) fn new(key: &str, standing: Standing) -> Self {
-        assert!(!key.is_empty(), "a wearing sits under a key");
-        Self {
-            key: key.to_owned(),
-            standing,
-        }
+    /// The wearing under `key`, which `check` makes of it what `standing` says.
+    ///
+    /// Nothing about the key is checked: it is read from the wearer's own
+    /// manifest, where any key a table can have, the empty one included, names
+    /// a wearing a person may want gone. What the constructor cannot check is
+    /// that `standing` is true of the key; [`candidates_in`] is what reads it
+    /// from the workspace, and the one place the command makes a candidate.
+    pub(crate) const fn new(key: WearingKey, standing: Standing) -> Self {
+        Self { key, standing }
     }
 
     /// The key the wearing's table sits under.
-    pub(crate) fn key(&self) -> &str {
+    pub(crate) const fn key(&self) -> &WearingKey {
         &self.key
     }
 
@@ -90,10 +95,10 @@ impl Candidate {
 pub(crate) enum PickRefusal {
     /// The name is neither a candidate's key nor a candidate's crate. `keys`
     /// are the candidates' keys, in key order.
-    Neither { keys: Vec<String> },
+    Neither { keys: Vec<WearingKey> },
     /// The name is the crate of several candidates and the key of none.
     /// `keys` are theirs, in key order.
-    SeveralKeys { keys: Vec<String> },
+    SeveralKeys { keys: NonEmpty<WearingKey> },
 }
 
 /// A wearing in a manifest other than the command line's own.
@@ -112,7 +117,7 @@ pub(crate) struct Elsewhere {
 /// crate it is on.
 pub(crate) fn candidates_in(
     workspace: &Workspace,
-    manifest: &str,
+    manifest: &ManifestShown,
     declared: &[Declared],
 ) -> Vec<Candidate> {
     let dependency_of = |key: &str| declared.iter().find(|entry| entry.key == key);
@@ -120,8 +125,8 @@ pub(crate) fn candidates_in(
         .wearing
         .iter()
         .filter_map(|wearing| match wearing {
-            Wearing::Worn(worn) if worn.manifest == manifest => Some(Candidate::new(
-                &worn.key,
+            Wearing::Worn(worn) if worn.manifest == manifest.as_str() => Some(Candidate::new(
+                WearingKey::new(&worn.key),
                 Standing::Worn {
                     crate_name: worn.package.clone(),
                     version: worn.version.clone(),
@@ -130,7 +135,7 @@ pub(crate) fn candidates_in(
             Wearing::Worn(_) => None,
             Wearing::Refused(refusal) => {
                 let (refused_manifest, key) = refused_key(refusal)?;
-                if refused_manifest != manifest {
+                if refused_manifest != manifest.as_str() {
                     return None;
                 }
                 let standing =
@@ -139,11 +144,15 @@ pub(crate) fn candidates_in(
                             crate_name: entry.crate_name.clone(),
                         }
                     });
-                Some(Candidate::new(key, standing))
+                Some(Candidate::new(WearingKey::new(key), standing))
             }
         })
         .collect();
     candidates.sort_by(|left, right| left.key.cmp(&right.key));
+    assert!(
+        candidates.windows(2).all(|pair| pair[0].key <= pair[1].key),
+        "`pick` names keys in key order, so the candidates are sorted by key"
+    );
     candidates
 }
 
@@ -163,7 +172,10 @@ pub(crate) fn pick<'candidates>(
     name: &str,
     candidates: &'candidates [Candidate],
 ) -> Result<&'candidates Candidate, PickRefusal> {
-    if let Some(keyed) = candidates.iter().find(|candidate| candidate.key == name) {
+    if let Some(keyed) = candidates
+        .iter()
+        .find(|candidate| candidate.key.as_str() == name)
+    {
         return Ok(keyed);
     }
     let on_the_crate: Vec<&Candidate> = candidates
@@ -178,11 +190,11 @@ pub(crate) fn pick<'candidates>(
                 .map(|candidate| candidate.key.clone())
                 .collect(),
         }),
-        several => Err(PickRefusal::SeveralKeys {
-            keys: several
-                .iter()
-                .map(|candidate| candidate.key.clone())
-                .collect(),
+        [first, rest @ ..] => Err(PickRefusal::SeveralKeys {
+            keys: NonEmpty::new(
+                first.key.clone(),
+                rest.iter().map(|candidate| candidate.key.clone()).collect(),
+            ),
         }),
     }
 }
@@ -193,7 +205,11 @@ pub(crate) fn pick<'candidates>(
 /// A wearing's crate is known only where `check` reads it from the lock: a
 /// worn skeleton's, and a dependency that is no skeleton. A wearing `check`
 /// refuses for another reason is found by its key alone.
-pub(crate) fn worn_elsewhere(workspace: &Workspace, manifest: &str, name: &str) -> Vec<Elsewhere> {
+pub(crate) fn worn_elsewhere(
+    workspace: &Workspace,
+    manifest: &ManifestShown,
+    name: &str,
+) -> Vec<Elsewhere> {
     let mut found: Vec<Elsewhere> = workspace
         .wearing
         .iter()
@@ -206,13 +222,17 @@ pub(crate) fn worn_elsewhere(workspace: &Workspace, manifest: &str, name: &str) 
                 }
             };
             let means_it = key == name || crate_name == Some(name);
-            (wearing_manifest != manifest && means_it).then(|| Elsewhere {
+            (wearing_manifest != manifest.as_str() && means_it).then(|| Elsewhere {
                 manifest: wearing_manifest.to_owned(),
                 key: key.to_owned(),
             })
         })
         .collect();
     found.sort();
+    assert!(
+        found.windows(2).all(|pair| pair[0] <= pair[1]),
+        "the refusal groups a manifest's wearings by looking at neighbours, so they are sorted"
+    );
     found
 }
 
@@ -265,12 +285,30 @@ mod tests {
 
     use super::{Candidate, Elsewhere, PickRefusal, Standing, candidates_in, pick, worn_elsewhere};
     use crate::remove::files::{Claimed, Unknowable};
+    use crate::remove::names::{ManifestShown, WearingKey};
+    use crate::remove::non_empty::NonEmpty;
     use crate::skeleton::Choices;
     use crate::workspace::{Declared, Pin, Wearing, WearingRefusal, Workspace, WornDependency};
 
-    fn worn(key: &str, crate_name: &str) -> Candidate {
+    fn key(text: &str) -> WearingKey {
+        WearingKey::new(text)
+    }
+
+    fn keys_of(texts: &[&str]) -> Vec<WearingKey> {
+        texts.iter().map(|text| key(text)).collect()
+    }
+
+    fn several_keys(first: &str, rest: &[&str]) -> NonEmpty<WearingKey> {
+        NonEmpty::new(key(first), keys_of(rest))
+    }
+
+    fn manifest(text: &str) -> ManifestShown {
+        ManifestShown::new(text)
+    }
+
+    fn worn(name: &str, crate_name: &str) -> Candidate {
         Candidate::new(
-            key,
+            key(name),
             Standing::Worn {
                 crate_name: crate_name.to_owned(),
                 version: semver::Version::new(0, 1, 0),
@@ -278,12 +316,12 @@ mod tests {
         )
     }
 
-    fn dangling(key: &str) -> Candidate {
-        Candidate::new(key, Standing::RefusedWithoutDependency)
+    fn dangling(name: &str) -> Candidate {
+        Candidate::new(key(name), Standing::RefusedWithoutDependency)
     }
 
     fn keys(picked: Result<&Candidate, PickRefusal>) -> Result<&str, PickRefusal> {
-        picked.map(Candidate::key)
+        picked.map(|candidate| candidate.key().as_str())
     }
 
     #[test]
@@ -292,7 +330,7 @@ mod tests {
         // the survey is what refuses it for an option it does not declare. The
         // crate stays, since the dependency is still there to be taken out.
         let refused = Claimed::Unknown(Unknowable {
-            reasons: vec!["an option it does not declare".to_owned()],
+            reasons: NonEmpty::new("an option it does not declare".to_owned(), Vec::new()),
         });
 
         assert_eq!(
@@ -317,7 +355,7 @@ mod tests {
     #[test]
     fn a_wearing_with_no_dependency_stays_so_whatever_the_survey_says() {
         let refused = Claimed::Unknown(Unknowable {
-            reasons: vec!["the table names no dependency".to_owned()],
+            reasons: NonEmpty::new("the table names no dependency".to_owned(), Vec::new()),
         });
 
         assert_eq!(dangling("ghost").according_to(&refused), dangling("ghost"));
@@ -357,7 +395,7 @@ mod tests {
         assert_eq!(
             pick("a_skeleton", &candidates),
             Err(PickRefusal::Neither {
-                keys: vec!["ci".to_owned()]
+                keys: keys_of(&["ci"])
             })
         );
     }
@@ -380,7 +418,7 @@ mod tests {
         assert_eq!(
             pick("a-skeleton", &candidates),
             Err(PickRefusal::SeveralKeys {
-                keys: vec!["ci".to_owned(), "ci-next".to_owned()]
+                keys: several_keys("ci", &["ci-next"])
             })
         );
     }
@@ -392,7 +430,7 @@ mod tests {
         assert_eq!(
             pick("nope", &candidates),
             Err(PickRefusal::Neither {
-                keys: vec!["ci".to_owned(), "lint".to_owned()]
+                keys: keys_of(&["ci", "lint"])
             })
         );
     }
@@ -411,7 +449,7 @@ mod tests {
         assert_eq!(worn("ci", "a-skeleton").crate_name(), Some("a-skeleton"));
         assert_eq!(
             Candidate::new(
-                "ci",
+                key("ci"),
                 Standing::RefusedWithDependency {
                     crate_name: "not-a-skeleton".to_owned()
                 }
@@ -500,11 +538,11 @@ mod tests {
         let declared = [declared("ci", "a-skeleton"), declared("lint", "b-skeleton")];
 
         assert_eq!(
-            candidates_in(&workspace(), "ritual/Cargo.toml", &declared),
+            candidates_in(&workspace(), &manifest("ritual/Cargo.toml"), &declared),
             [
-                Candidate::new("bad", Standing::RefusedWithoutDependency),
+                Candidate::new(key("bad"), Standing::RefusedWithoutDependency),
                 Candidate::new(
-                    "ci",
+                    key("ci"),
                     Standing::RefusedWithDependency {
                         crate_name: "a-skeleton".to_owned()
                     }
@@ -516,8 +554,27 @@ mod tests {
     }
 
     #[test]
+    fn a_wearing_under_an_empty_key_is_a_candidate_like_any_other() {
+        let workspace = Workspace {
+            root: PathBuf::from("/workspace"),
+            wearing: vec![refused(WearingRefusal::NamesNoDependency {
+                manifest: "ritual/Cargo.toml".to_owned(),
+                dependency: String::new(),
+            })],
+        };
+
+        let candidates = candidates_in(&workspace, &manifest("ritual/Cargo.toml"), &[]);
+
+        assert_eq!(candidates, [dangling("")]);
+        assert_eq!(keys(pick("", &candidates)), Ok(""));
+    }
+
+    #[test]
     fn a_manifest_that_wears_nothing_has_no_candidates() {
-        assert_eq!(candidates_in(&workspace(), "none/Cargo.toml", &[]), []);
+        assert_eq!(
+            candidates_in(&workspace(), &manifest("none/Cargo.toml"), &[]),
+            []
+        );
     }
 
     #[test]
@@ -530,7 +587,7 @@ mod tests {
             )
         });
 
-        assert_eq!(candidates_in(&only, "tools/Cargo.toml", &[]), []);
+        assert_eq!(candidates_in(&only, &manifest("tools/Cargo.toml"), &[]), []);
     }
 
     #[test]
@@ -541,11 +598,11 @@ mod tests {
         }];
 
         assert_eq!(
-            worn_elsewhere(&workspace(), "ritual/Cargo.toml", "ci"),
+            worn_elsewhere(&workspace(), &manifest("ritual/Cargo.toml"), "ci"),
             expected
         );
         assert_eq!(
-            worn_elsewhere(&workspace(), "ritual/Cargo.toml", "a-skeleton"),
+            worn_elsewhere(&workspace(), &manifest("ritual/Cargo.toml"), "a-skeleton"),
             expected
         );
     }
@@ -553,7 +610,7 @@ mod tests {
     #[test]
     fn a_dependency_that_is_no_skeleton_is_found_elsewhere_by_its_crate() {
         assert_eq!(
-            worn_elsewhere(&workspace(), "ritual/Cargo.toml", "plain-crate"),
+            worn_elsewhere(&workspace(), &manifest("ritual/Cargo.toml"), "plain-crate"),
             [Elsewhere {
                 manifest: "tools/Cargo.toml".to_owned(),
                 key: "plain".to_owned()
@@ -577,11 +634,11 @@ mod tests {
     #[test]
     fn a_wearing_in_the_manifest_itself_is_not_elsewhere() {
         assert_eq!(
-            worn_elsewhere(&workspace(), "ritual/Cargo.toml", "lint"),
+            worn_elsewhere(&workspace(), &manifest("ritual/Cargo.toml"), "lint"),
             []
         );
         assert_eq!(
-            worn_elsewhere(&workspace(), "ritual/Cargo.toml", "b-skeleton"),
+            worn_elsewhere(&workspace(), &manifest("ritual/Cargo.toml"), "b-skeleton"),
             []
         );
     }
@@ -589,7 +646,7 @@ mod tests {
     #[test]
     fn a_reserved_key_and_a_whole_table_that_is_not_a_table_are_never_elsewhere() {
         assert_eq!(
-            worn_elsewhere(&workspace(), "tools/Cargo.toml", "options"),
+            worn_elsewhere(&workspace(), &manifest("tools/Cargo.toml"), "options"),
             []
         );
     }
@@ -608,7 +665,7 @@ mod tests {
             "a-skeleton",
         )));
 
-        let found = worn_elsewhere(&several, "ritual/Cargo.toml", "a-skeleton");
+        let found = worn_elsewhere(&several, &manifest("ritual/Cargo.toml"), "a-skeleton");
 
         let order: Vec<(&str, &str)> = found
             .iter()

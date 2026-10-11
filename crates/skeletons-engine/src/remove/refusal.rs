@@ -11,10 +11,14 @@
 //! message ends by saying what to do, or says that nothing is left to do
 //! because the defect is in `skeletons`.
 
+use std::path::PathBuf;
+
 use rituals::Failure;
 
 use super::HOLDING_DIRECTORY;
-use super::files::{Mode, Unknowable};
+use super::files::{FilesFlag, Unknowable};
+use super::names::{ManifestShown, WearingKey};
+use super::non_empty::NonEmpty;
 use super::resolve::{Elsewhere, PickRefusal};
 use crate::command_line_crate::outside_its_project_message;
 use crate::skeleton::Escaped;
@@ -23,17 +27,17 @@ use crate::work_tree::writing_command::WritingCommand;
 
 /// What the wearer asked for, as the refusals that depend on the request word
 /// it.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Asked<'request> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Asked {
     /// The name typed: a key or a crate.
-    pub(crate) name: &'request str,
+    pub(crate) name: String,
     /// The command line's own manifest, as a message shows it.
-    pub(crate) manifest: &'request str,
+    pub(crate) manifest: ManifestShown,
     /// The command a person types to run `remove`, as the command line gives
     /// it, which a message shows with a key after it.
-    pub(crate) command: &'request str,
-    /// Which flag was typed, if one was.
-    pub(crate) mode: Mode,
+    pub(crate) command: String,
+    /// Which flag about the files was typed, if one was.
+    pub(crate) files_flag: FilesFlag,
 }
 
 /// Why `remove` refused or failed, with what its message names.
@@ -41,41 +45,43 @@ pub(crate) struct Asked<'request> {
 pub(crate) enum RemoveRefusal {
     /// The package the command line was built from is not a member of the
     /// workspace `remove` ran in.
-    OutsideItsProject { package: String, root: String },
+    OutsideItsProject { package: String, root: PathBuf },
     /// The name is neither a key of the manifest's wearings nor the crate of
     /// one. `keys` are the wearings' keys, in key order.
     NotWorn {
         name: String,
-        manifest: String,
-        keys: Vec<String>,
+        manifest: ManifestShown,
+        keys: Vec<WearingKey>,
     },
     /// The name is a key or a crate of wearings in other manifests, and of none
     /// in the command line's own.
     WornElsewhere {
         name: String,
-        manifest: String,
-        elsewhere: Vec<Elsewhere>,
+        manifest: ManifestShown,
+        elsewhere: NonEmpty<Elsewhere>,
     },
     /// The name is the crate of several wearings in the manifest and the key of
-    /// none. `keys` are theirs, in key order, and `command` and `mode` are how
-    /// the refusal shows the remedy.
+    /// none. `keys` are theirs, in key order, and `asked` carries the command
+    /// and the flag the refusal shows the remedy with. `asked` is boxed so that
+    /// the largest refusal, which every function returning one pays for on each
+    /// move, is not this one.
     SeveralKeys {
-        name: String,
-        manifest: String,
-        keys: Vec<String>,
-        command: String,
-        mode: Mode,
+        asked: Box<Asked>,
+        keys: NonEmpty<WearingKey>,
     },
-    /// The files the wearing claims cannot be known, and the mode would delete
+    /// The files the wearing claims cannot be known, and the flag would delete
     /// them.
-    FilesUnknowable { key: String, unknowable: Unknowable },
+    FilesUnknowable {
+        key: WearingKey,
+        unknowable: Unknowable,
+    },
     /// Something is at the path the files are moved into while they are
     /// deleted.
     HoldingPathInTheWay,
     /// The manifest could not be read to take the wearing out of it.
     ManifestUnreadable {
-        manifest: String,
-        key: String,
+        manifest: ManifestShown,
+        key: WearingKey,
         detail: String,
     },
     /// The manifest could not be edited into the original less the wearing, for
@@ -87,8 +93,8 @@ pub(crate) enum RemoveRefusal {
     // to write may have changed both, so a panic could leave the project
     // half-written.
     ManifestDefect {
-        manifest: String,
-        key: String,
+        manifest: ManifestShown,
+        key: WearingKey,
         detail: String,
     },
     /// `Cargo.lock` could not be read to see whether bringing it current changed
@@ -96,8 +102,8 @@ pub(crate) enum RemoveRefusal {
     LockfileUnreadable { lockfile: String, detail: String },
     /// Cargo refused the workspace with the wearing's dependency taken out.
     CargoRefused {
-        manifest: String,
-        key: String,
+        manifest: ManifestShown,
+        key: WearingKey,
         stderr: String,
     },
     /// Reading the workspace back still finds the wearing.
@@ -105,7 +111,10 @@ pub(crate) enum RemoveRefusal {
     // A defect in `skeletons` as well, and an `Err` for the reason
     // `ManifestDefect` is one: it is found after the manifest was written, so
     // only a returned failure makes `rollback` undo it.
-    StillWorn { manifest: String, key: String },
+    StillWorn {
+        manifest: ManifestShown,
+        key: WearingKey,
+    },
     /// Reading the workspace back no longer finds the package the command line
     /// is built from.
     //
@@ -113,10 +122,16 @@ pub(crate) enum RemoveRefusal {
     // for the same one: the member was found before the manifest was written,
     // so a read back that cannot find it shows the edit did something it was
     // not meant to, after the project was changed.
-    PackageVanished { manifest: String, key: String },
+    PackageVanished {
+        manifest: ManifestShown,
+        key: WearingKey,
+    },
     /// Cargo still reports a dependency under the key, declared somewhere
     /// `remove` does not edit.
-    DependencyRemains { manifest: String, key: String },
+    DependencyRemains {
+        manifest: ManifestShown,
+        key: WearingKey,
+    },
     /// The directory the files are moved into could not be created.
     HoldingNotCreated { detail: String },
     /// A file could not be moved out of the work tree.
@@ -125,34 +140,29 @@ pub(crate) enum RemoveRefusal {
     DirectoryNotRemoved { directory: String, detail: String },
     /// The wearing is removed and its files are out of the tree, and the
     /// directory they were moved into could not be deleted.
-    HoldingNotDeleted { key: String, detail: String },
+    HoldingNotDeleted { key: WearingKey, detail: String },
 }
 
 impl RemoveRefusal {
     /// The refusal for a name that picked no one wearing, with the wearings
     /// that exist in other manifests under that name.
-    pub(crate) fn from_pick(
-        refusal: PickRefusal,
-        asked: &Asked<'_>,
-        elsewhere: Vec<Elsewhere>,
-    ) -> Self {
-        let (name, manifest) = (asked.name.to_owned(), asked.manifest.to_owned());
-        match refusal {
-            PickRefusal::SeveralKeys { keys } => Self::SeveralKeys {
-                name,
-                manifest,
+    ///
+    /// A pick that found the crate under several keys is refused as that
+    /// whatever is elsewhere: its remedy is to name one of them.
+    pub(crate) fn from_pick(refusal: PickRefusal, asked: Asked, elsewhere: Vec<Elsewhere>) -> Self {
+        match (refusal, NonEmpty::from_vec(elsewhere)) {
+            (PickRefusal::SeveralKeys { keys }, _) => Self::SeveralKeys {
+                asked: Box::new(asked),
                 keys,
-                command: asked.command.to_owned(),
-                mode: asked.mode,
             },
-            PickRefusal::Neither { .. } if !elsewhere.is_empty() => Self::WornElsewhere {
-                name,
-                manifest,
+            (PickRefusal::Neither { .. }, Some(elsewhere)) => Self::WornElsewhere {
+                name: asked.name,
+                manifest: asked.manifest,
                 elsewhere,
             },
-            PickRefusal::Neither { keys } => Self::NotWorn {
-                name,
-                manifest,
+            (PickRefusal::Neither { keys }, None) => Self::NotWorn {
+                name: asked.name,
+                manifest: asked.manifest,
                 keys,
             },
         }
@@ -174,74 +184,36 @@ impl RemoveRefusal {
                 manifest,
                 elsewhere,
             } => worn_elsewhere_message(name, manifest, elsewhere),
-            Self::SeveralKeys {
-                name,
-                manifest,
-                keys,
-                command,
-                mode,
-            } => several_keys_message(name, manifest, keys, command, *mode),
+            Self::SeveralKeys { asked, keys } => several_keys_message(asked, keys),
             Self::FilesUnknowable { key, unknowable } => files_unknowable_message(key, unknowable),
             Self::HoldingPathInTheWay => holding_path_in_the_way_message(),
             Self::ManifestUnreadable {
                 manifest,
                 key,
                 detail,
-            } => format!(
-                "remove could not read {} to take `{}` out of it: {}",
-                Escaped(manifest),
-                Escaped(key),
-                Escaped(detail)
-            ),
+            } => manifest_unreadable_message(manifest, key, detail),
             Self::ManifestDefect {
                 manifest,
                 key,
                 detail,
-            } => format!(
-                "remove could not take `{}` out of {} without changing anything else in it \
-                 ({}); this is a defect in skeletons",
-                Escaped(key),
-                Escaped(manifest),
-                Escaped(detail)
-            ),
-            Self::LockfileUnreadable { lockfile, detail } => format!(
-                "remove could not read {} to see whether bringing it current changed it: {}",
-                Escaped(lockfile),
-                Escaped(detail)
-            ),
+            } => manifest_defect_message(manifest, key, detail),
+            Self::LockfileUnreadable { lockfile, detail } => {
+                lockfile_unreadable_message(lockfile, detail)
+            }
             Self::CargoRefused {
                 manifest,
                 key,
                 stderr,
-            } => format!(
-                "remove took `{}` out of {}, and Cargo refused what was left: {}",
-                Escaped(key),
-                Escaped(manifest),
-                Escaped(stderr)
-            ),
+            } => cargo_refused_message(manifest, key, stderr),
             Self::StillWorn { manifest, key } => still_worn_message(manifest, key),
             Self::PackageVanished { manifest, key } => package_vanished_message(manifest, key),
             Self::DependencyRemains { manifest, key } => dependency_remains_message(manifest, key),
-            Self::HoldingNotCreated { detail } => format!(
-                "remove could not create {HOLDING_DIRECTORY} to move the files it deletes into: {}",
-                Escaped(detail)
-            ),
-            Self::MoveFailed { path, detail } => format!(
-                "remove could not move {} out of the work tree: {}",
-                Escaped(path),
-                Escaped(detail)
-            ),
-            Self::DirectoryNotRemoved { directory, detail } => format!(
-                "remove could not remove {}, which deleting its files left empty: {}",
-                Escaped(directory),
-                Escaped(detail)
-            ),
-            Self::HoldingNotDeleted { key, detail } => format!(
-                "remove stopped wearing `{}` and moved its files into {HOLDING_DIRECTORY}, which \
-                 it could not then delete: {}; delete {HOLDING_DIRECTORY} by hand",
-                Escaped(key),
-                Escaped(detail)
-            ),
+            Self::HoldingNotCreated { detail } => holding_not_created_message(detail),
+            Self::MoveFailed { path, detail } => move_failed_message(path, detail),
+            Self::DirectoryNotRemoved { directory, detail } => {
+                directory_not_removed_message(directory, detail)
+            }
+            Self::HoldingNotDeleted { key, detail } => holding_not_deleted_message(key, detail),
         }
     }
 
@@ -253,17 +225,17 @@ impl RemoveRefusal {
 
 /// `` `{name}` is neither a key {manifest} wears a skeleton under nor the crate
 /// of one, so remove wrote nothing; {what there is to name instead} ``.
-fn not_worn_message(name: &str, manifest: &str, keys: &[String]) -> String {
-    let (name, manifest) = (Escaped(name), Escaped(manifest));
+fn not_worn_message(name: &str, manifest: &ManifestShown, keys: &[WearingKey]) -> String {
+    let (name, manifest) = (Escaped(name), Escaped(manifest.as_str()));
     let instead = match keys {
         [] => format!("{manifest} wears no skeleton"),
         [only] => format!(
             "its key is `{}`, so give the `remove` task that one",
-            Escaped(only)
+            Escaped(only.as_str())
         ),
         several => format!(
             "its keys are {}, so give the `remove` task one of them",
-            backticked(several)
+            backticked(several.iter())
         ),
     };
     format!(
@@ -277,11 +249,11 @@ fn not_worn_message(name: &str, manifest: &str, keys: &[String]) -> String {
 /// built from, so remove wrote nothing; take the dependency and the
 /// [package.metadata.skeletons.<key>] table out of {that manifest|those
 /// manifests} by hand ``.
-fn worn_elsewhere_message(name: &str, manifest: &str, elsewhere: &[Elsewhere]) -> String {
-    assert!(
-        !elsewhere.is_empty(),
-        "a name is worn elsewhere only if some wearing is there"
-    );
+fn worn_elsewhere_message(
+    name: &str,
+    manifest: &ManifestShown,
+    elsewhere: &NonEmpty<Elsewhere>,
+) -> String {
     let places: Vec<String> = elsewhere
         .iter()
         .map(|place| format!("{} as `{}`", Escaped(&place.manifest), Escaped(&place.key)))
@@ -302,33 +274,25 @@ fn worn_elsewhere_message(name: &str, manifest: &str, elsewhere: &[Elsewhere]) -
          [package.metadata.skeletons.<key>] table out of {those} by hand",
         Escaped(name),
         join_and(&places),
-        Escaped(manifest),
+        Escaped(manifest.as_str()),
     )
 }
 
 /// `` `{name}` is worn under more than one key in {manifest}, {keys}, so remove
 /// wrote nothing; remove one by its key, such as `{command} {first key}{ flag}` ``.
-fn several_keys_message(
-    name: &str,
-    manifest: &str,
-    keys: &[String],
-    command: &str,
-    mode: Mode,
-) -> String {
-    let [first, _second, ..] = keys else {
-        unreachable!("a crate is refused as worn under several keys only when it is");
-    };
-    let flag = mode
-        .flag()
+fn several_keys_message(asked: &Asked, keys: &NonEmpty<WearingKey>) -> String {
+    let flag = asked
+        .files_flag
+        .typed()
         .map_or_else(String::new, |flag| format!(" {flag}"));
     format!(
         "`{}` is worn under more than one key in {}, {}, so remove wrote nothing; remove one by \
          its key, such as `{} {}{flag}`",
-        Escaped(name),
-        Escaped(manifest),
-        backticked(keys),
-        Escaped(command),
-        Escaped(first),
+        Escaped(&asked.name),
+        Escaped(asked.manifest.as_str()),
+        backticked(keys.iter()),
+        Escaped(&asked.command),
+        Escaped(keys.first().as_str()),
     )
 }
 
@@ -338,17 +302,14 @@ fn several_keys_message(
 ///
 /// Each reason is a refusal's own message, which is already one escaped line,
 /// so it is quoted as it stands.
-fn files_unknowable_message(key: &str, unknowable: &Unknowable) -> String {
-    assert!(
-        !unknowable.reasons.is_empty(),
-        "files are unknowable only for a reason"
-    );
-    let key = Escaped(key);
+fn files_unknowable_message(key: &WearingKey, unknowable: &Unknowable) -> String {
+    let key = Escaped(key.as_str());
+    let reasons: Vec<&str> = unknowable.reasons.iter().map(String::as_str).collect();
     format!(
         "remove cannot tell which files `{key}` claims, so it wrote nothing: {}; fix that and \
          run the `remove` task again, or give it --keep-files to stop wearing `{key}` and leave \
          every file in place",
-        unknowable.reasons.join("; ")
+        reasons.join("; ")
     )
 }
 
@@ -364,10 +325,53 @@ fn holding_path_in_the_way_message() -> String {
     )
 }
 
+/// `` remove could not read {manifest} to take `{key}` out of it: {detail} ``.
+fn manifest_unreadable_message(manifest: &ManifestShown, key: &WearingKey, detail: &str) -> String {
+    format!(
+        "remove could not read {} to take `{}` out of it: {}",
+        Escaped(manifest.as_str()),
+        Escaped(key.as_str()),
+        Escaped(detail)
+    )
+}
+
+/// `` remove could not take `{key}` out of {manifest} without changing anything
+/// else in it ({detail}); this is a defect in skeletons ``.
+fn manifest_defect_message(manifest: &ManifestShown, key: &WearingKey, detail: &str) -> String {
+    format!(
+        "remove could not take `{}` out of {} without changing anything else in it ({}); this is \
+         a defect in skeletons",
+        Escaped(key.as_str()),
+        Escaped(manifest.as_str()),
+        Escaped(detail)
+    )
+}
+
+/// `` remove could not read {lockfile} to see whether bringing it current
+/// changed it: {detail} ``.
+fn lockfile_unreadable_message(lockfile: &str, detail: &str) -> String {
+    format!(
+        "remove could not read {} to see whether bringing it current changed it: {}",
+        Escaped(lockfile),
+        Escaped(detail)
+    )
+}
+
+/// `` remove took `{key}` out of {manifest}, and Cargo refused what was left:
+/// {stderr} ``.
+fn cargo_refused_message(manifest: &ManifestShown, key: &WearingKey, stderr: &str) -> String {
+    format!(
+        "remove took `{}` out of {}, and Cargo refused what was left: {}",
+        Escaped(key.as_str()),
+        Escaped(manifest.as_str()),
+        Escaped(stderr)
+    )
+}
+
 /// `` remove took `{key}` out of {manifest}, and reading it back still finds
 /// [package.metadata.skeletons.{key}]; this is a defect in skeletons ``.
-fn still_worn_message(manifest: &str, key: &str) -> String {
-    let (manifest, key) = (Escaped(manifest), Escaped(key));
+fn still_worn_message(manifest: &ManifestShown, key: &WearingKey) -> String {
+    let (manifest, key) = (Escaped(manifest.as_str()), Escaped(key.as_str()));
     format!(
         "remove took `{key}` out of {manifest}, and reading it back still finds \
          [package.metadata.skeletons.{key}]; this is a defect in skeletons"
@@ -377,20 +381,20 @@ fn still_worn_message(manifest: &str, key: &str) -> String {
 /// `` remove took `{key}` out of {manifest}, and reading the workspace back no
 /// longer finds the package this command line is built from; this is a defect
 /// in skeletons ``.
-fn package_vanished_message(manifest: &str, key: &str) -> String {
+fn package_vanished_message(manifest: &ManifestShown, key: &WearingKey) -> String {
     format!(
         "remove took `{}` out of {}, and reading the workspace back no longer finds the package \
          this command line is built from; this is a defect in skeletons",
-        Escaped(key),
-        Escaped(manifest)
+        Escaped(key.as_str()),
+        Escaped(manifest.as_str())
     )
 }
 
 /// `` remove took `{key}` out of {manifest}, and Cargo still reports a
 /// dependency under `{key}`: it is declared somewhere remove does not edit;
 /// take it out by hand, then run the `remove` task again ``.
-fn dependency_remains_message(manifest: &str, key: &str) -> String {
-    let (manifest, key) = (Escaped(manifest), Escaped(key));
+fn dependency_remains_message(manifest: &ManifestShown, key: &WearingKey) -> String {
+    let (manifest, key) = (Escaped(manifest.as_str()), Escaped(key.as_str()));
     format!(
         "remove took `{key}` out of {manifest}, and Cargo still reports a dependency under \
          `{key}`: it is declared somewhere remove does not edit; take it out by hand, then {}",
@@ -398,27 +402,89 @@ fn dependency_remains_message(manifest: &str, key: &str) -> String {
     )
 }
 
+/// `` remove could not create {holding directory} to move the files it deletes
+/// into: {detail} ``.
+fn holding_not_created_message(detail: &str) -> String {
+    format!(
+        "remove could not create {HOLDING_DIRECTORY} to move the files it deletes into: {}",
+        Escaped(detail)
+    )
+}
+
+/// `` remove could not move {path} out of the work tree: {detail} ``.
+fn move_failed_message(path: &str, detail: &str) -> String {
+    format!(
+        "remove could not move {} out of the work tree: {}",
+        Escaped(path),
+        Escaped(detail)
+    )
+}
+
+/// `` remove could not remove {directory}, which deleting its files left empty:
+/// {detail} ``.
+fn directory_not_removed_message(directory: &str, detail: &str) -> String {
+    format!(
+        "remove could not remove {}, which deleting its files left empty: {}",
+        Escaped(directory),
+        Escaped(detail)
+    )
+}
+
+/// `` remove stopped wearing `{key}` and moved its files into {holding
+/// directory}, which it could not then delete: {detail}; delete {holding
+/// directory} by hand ``.
+fn holding_not_deleted_message(key: &WearingKey, detail: &str) -> String {
+    format!(
+        "remove stopped wearing `{}` and moved its files into {HOLDING_DIRECTORY}, which it \
+         could not then delete: {}; delete {HOLDING_DIRECTORY} by hand",
+        Escaped(key.as_str()),
+        Escaped(detail)
+    )
+}
+
 /// `items` escaped, each in backticks, joined as this crate's one list grammar
 /// does.
-fn backticked(items: &[String]) -> String {
+fn backticked<'key>(items: impl Iterator<Item = &'key WearingKey>) -> String {
     let quoted: Vec<String> = items
-        .iter()
-        .map(|item| format!("`{}`", Escaped(item)))
+        .map(|item| format!("`{}`", Escaped(item.as_str())))
         .collect();
     join_and(&quoted)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::{Asked, RemoveRefusal};
-    use crate::remove::files::{Mode, Unknowable};
+    use crate::remove::files::{FilesFlag, Unknowable};
+    use crate::remove::names::{ManifestShown, WearingKey};
+    use crate::remove::non_empty::NonEmpty;
     use crate::remove::resolve::{Elsewhere, PickRefusal};
     use crate::survey::poison::{
         POISON_ESCAPED, assert_escaped_once, assert_every_kind, assert_one_line, poison,
     };
 
-    fn strings(items: &[&str]) -> Vec<String> {
-        items.iter().map(|item| (*item).to_owned()).collect()
+    fn key(text: &str) -> WearingKey {
+        WearingKey::new(text)
+    }
+
+    fn keys_of(texts: &[&str]) -> Vec<WearingKey> {
+        texts.iter().map(|text| key(text)).collect()
+    }
+
+    fn several_keys(first: &str, rest: &[&str]) -> NonEmpty<WearingKey> {
+        NonEmpty::new(key(first), keys_of(rest))
+    }
+
+    fn manifest(text: &str) -> ManifestShown {
+        ManifestShown::new(text)
+    }
+
+    fn reasons(first: &str, rest: &[&str]) -> NonEmpty<String> {
+        NonEmpty::new(
+            first.to_owned(),
+            rest.iter().map(|reason| (*reason).to_owned()).collect(),
+        )
     }
 
     fn elsewhere(manifest: &str, key: &str) -> Elsewhere {
@@ -428,12 +494,12 @@ mod tests {
         }
     }
 
-    fn asked(mode: Mode) -> Asked<'static> {
+    fn asked(files_flag: FilesFlag) -> Asked {
         Asked {
-            name: "a-skeleton",
-            manifest: "ritual/Cargo.toml",
-            command: "cargo ritual skeletons remove",
-            mode,
+            name: "a-skeleton".to_owned(),
+            manifest: manifest("ritual/Cargo.toml"),
+            command: "cargo ritual skeletons remove".to_owned(),
+            files_flag,
         }
     }
 
@@ -441,7 +507,7 @@ mod tests {
     fn a_command_line_outside_its_project_is_worded_for_remove() {
         let refusal = RemoveRefusal::OutsideItsProject {
             package: "skeletons-ritual".to_owned(),
-            root: "/path/to/workspace".to_owned(),
+            root: PathBuf::from("/path/to/workspace"),
         };
 
         assert_eq!(
@@ -456,8 +522,8 @@ mod tests {
     fn a_name_that_is_neither_lists_the_keys_there_are() {
         let refusal = RemoveRefusal::NotWorn {
             name: "nope".to_owned(),
-            manifest: "ritual/Cargo.toml".to_owned(),
-            keys: strings(&["ci", "dependabot"]),
+            manifest: manifest("ritual/Cargo.toml"),
+            keys: keys_of(&["ci", "dependabot"]),
         };
 
         assert_eq!(
@@ -472,8 +538,8 @@ mod tests {
     fn a_name_that_is_neither_names_three_keys_with_commas() {
         let refusal = RemoveRefusal::NotWorn {
             name: "nope".to_owned(),
-            manifest: "Cargo.toml".to_owned(),
-            keys: strings(&["a", "b", "c"]),
+            manifest: manifest("Cargo.toml"),
+            keys: keys_of(&["a", "b", "c"]),
         };
 
         assert!(
@@ -489,8 +555,8 @@ mod tests {
     fn a_name_that_is_neither_names_the_one_key_there_is_in_the_singular() {
         let refusal = RemoveRefusal::NotWorn {
             name: "nope".to_owned(),
-            manifest: "ritual/Cargo.toml".to_owned(),
-            keys: strings(&["ci"]),
+            manifest: manifest("ritual/Cargo.toml"),
+            keys: keys_of(&["ci"]),
         };
 
         assert_eq!(
@@ -504,7 +570,7 @@ mod tests {
     fn a_name_that_is_neither_says_so_plainly_when_the_manifest_wears_nothing() {
         let refusal = RemoveRefusal::NotWorn {
             name: "nope".to_owned(),
-            manifest: "ritual/Cargo.toml".to_owned(),
+            manifest: manifest("ritual/Cargo.toml"),
             keys: Vec::new(),
         };
 
@@ -519,8 +585,8 @@ mod tests {
     fn a_wearing_in_another_manifest_is_named_with_the_hand_remedy() {
         let refusal = RemoveRefusal::WornElsewhere {
             name: "ci".to_owned(),
-            manifest: "ritual/Cargo.toml".to_owned(),
-            elsewhere: vec![elsewhere("tools/Cargo.toml", "ci")],
+            manifest: manifest("ritual/Cargo.toml"),
+            elsewhere: NonEmpty::new(elsewhere("tools/Cargo.toml", "ci"), Vec::new()),
         };
 
         assert_eq!(
@@ -536,11 +602,11 @@ mod tests {
     fn wearings_in_several_manifests_are_each_named_and_the_remedy_is_plural() {
         let refusal = RemoveRefusal::WornElsewhere {
             name: "a-skeleton".to_owned(),
-            manifest: "ritual/Cargo.toml".to_owned(),
-            elsewhere: vec![
+            manifest: manifest("ritual/Cargo.toml"),
+            elsewhere: NonEmpty::new(
                 elsewhere("a/Cargo.toml", "x"),
-                elsewhere("b/Cargo.toml", "y"),
-            ],
+                vec![elsewhere("b/Cargo.toml", "y")],
+            ),
         };
 
         assert_eq!(
@@ -556,11 +622,11 @@ mod tests {
     fn two_wearings_in_one_manifest_are_still_one_manifest_to_edit() {
         let refusal = RemoveRefusal::WornElsewhere {
             name: "a-skeleton".to_owned(),
-            manifest: "ritual/Cargo.toml".to_owned(),
-            elsewhere: vec![
+            manifest: manifest("ritual/Cargo.toml"),
+            elsewhere: NonEmpty::new(
                 elsewhere("a/Cargo.toml", "x"),
-                elsewhere("a/Cargo.toml", "y"),
-            ],
+                vec![elsewhere("a/Cargo.toml", "y")],
+            ),
         };
 
         let message = refusal.message();
@@ -578,11 +644,8 @@ mod tests {
     #[test]
     fn a_crate_worn_under_several_keys_shows_the_command_with_the_first_key() {
         let refusal = RemoveRefusal::SeveralKeys {
-            name: "a-skeleton".to_owned(),
-            manifest: "ritual/Cargo.toml".to_owned(),
-            keys: strings(&["ci", "ci-next"]),
-            command: "cargo ritual skeletons remove".to_owned(),
-            mode: Mode::Bare,
+            asked: Box::new(asked(FilesFlag::Bare)),
+            keys: several_keys("ci", &["ci-next"]),
         };
 
         assert_eq!(
@@ -595,16 +658,13 @@ mod tests {
 
     #[test]
     fn the_flag_that_was_typed_is_carried_into_the_command_shown() {
-        for (mode, flag) in [
-            (Mode::DeleteFiles, " --delete-files"),
-            (Mode::KeepFiles, " --keep-files"),
+        for (files_flag, flag) in [
+            (FilesFlag::DeleteFiles, " --delete-files"),
+            (FilesFlag::KeepFiles, " --keep-files"),
         ] {
             let refusal = RemoveRefusal::SeveralKeys {
-                name: "a-skeleton".to_owned(),
-                manifest: "ritual/Cargo.toml".to_owned(),
-                keys: strings(&["ci", "ci-next"]),
-                command: "cargo ritual skeletons remove".to_owned(),
-                mode,
+                asked: Box::new(asked(files_flag)),
+                keys: several_keys("ci", &["ci-next"]),
             };
 
             assert!(
@@ -621,20 +681,17 @@ mod tests {
     fn a_pick_that_found_several_keys_becomes_the_several_keys_refusal_whatever_is_elsewhere() {
         let refusal = RemoveRefusal::from_pick(
             PickRefusal::SeveralKeys {
-                keys: strings(&["ci", "ci-next"]),
+                keys: several_keys("ci", &["ci-next"]),
             },
-            &asked(Mode::KeepFiles),
+            asked(FilesFlag::KeepFiles),
             vec![elsewhere("tools/Cargo.toml", "x")],
         );
 
         assert_eq!(
             refusal,
             RemoveRefusal::SeveralKeys {
-                name: "a-skeleton".to_owned(),
-                manifest: "ritual/Cargo.toml".to_owned(),
-                keys: strings(&["ci", "ci-next"]),
-                command: "cargo ritual skeletons remove".to_owned(),
-                mode: Mode::KeepFiles,
+                asked: Box::new(asked(FilesFlag::KeepFiles)),
+                keys: several_keys("ci", &["ci-next"]),
             }
         );
     }
@@ -643,9 +700,9 @@ mod tests {
     fn a_pick_that_found_nothing_is_worn_elsewhere_when_some_manifest_wears_the_name() {
         let refusal = RemoveRefusal::from_pick(
             PickRefusal::Neither {
-                keys: strings(&["lint"]),
+                keys: keys_of(&["lint"]),
             },
-            &asked(Mode::Bare),
+            asked(FilesFlag::Bare),
             vec![elsewhere("tools/Cargo.toml", "ci")],
         );
 
@@ -653,8 +710,8 @@ mod tests {
             refusal,
             RemoveRefusal::WornElsewhere {
                 name: "a-skeleton".to_owned(),
-                manifest: "ritual/Cargo.toml".to_owned(),
-                elsewhere: vec![elsewhere("tools/Cargo.toml", "ci")],
+                manifest: manifest("ritual/Cargo.toml"),
+                elsewhere: NonEmpty::new(elsewhere("tools/Cargo.toml", "ci"), Vec::new()),
             }
         );
     }
@@ -663,9 +720,9 @@ mod tests {
     fn a_pick_that_found_nothing_anywhere_lists_the_manifests_keys() {
         let refusal = RemoveRefusal::from_pick(
             PickRefusal::Neither {
-                keys: strings(&["lint"]),
+                keys: keys_of(&["lint"]),
             },
-            &asked(Mode::Bare),
+            asked(FilesFlag::Bare),
             Vec::new(),
         );
 
@@ -673,8 +730,8 @@ mod tests {
             refusal,
             RemoveRefusal::NotWorn {
                 name: "a-skeleton".to_owned(),
-                manifest: "ritual/Cargo.toml".to_owned(),
-                keys: strings(&["lint"]),
+                manifest: manifest("ritual/Cargo.toml"),
+                keys: keys_of(&["lint"]),
             }
         );
     }
@@ -682,9 +739,9 @@ mod tests {
     #[test]
     fn files_that_cannot_be_known_give_each_reason_as_it_stands_and_both_remedies() {
         let refusal = RemoveRefusal::FilesUnknowable {
-            key: "ci".to_owned(),
+            key: key("ci"),
             unknowable: Unknowable {
-                reasons: strings(&["first reason", "second reason"]),
+                reasons: reasons("first reason", &["second reason"]),
             },
         };
 
@@ -714,23 +771,22 @@ mod tests {
         );
     }
 
-    /// Every failure that can come after the first write, with the fixed text it
-    /// is held to.
-    fn failures() -> Vec<(RemoveRefusal, &'static str)> {
-        let (manifest, key) = ("ritual/Cargo.toml".to_owned(), "ci".to_owned());
+    /// The failures of editing the manifest and bringing the lockfile current,
+    /// each with the fixed text it is held to.
+    fn manifest_and_lockfile_failures() -> Vec<(RemoveRefusal, &'static str)> {
         vec![
             (
                 RemoveRefusal::ManifestUnreadable {
-                    manifest: manifest.clone(),
-                    key: key.clone(),
+                    manifest: manifest("ritual/Cargo.toml"),
+                    key: key("ci"),
                     detail: "permission denied".to_owned(),
                 },
                 "remove could not read ritual/Cargo.toml to take `ci` out of it: permission denied",
             ),
             (
                 RemoveRefusal::ManifestDefect {
-                    manifest: manifest.clone(),
-                    key: key.clone(),
+                    manifest: manifest("ritual/Cargo.toml"),
+                    key: key("ci"),
                     detail: "it differs".to_owned(),
                 },
                 "remove could not take `ci` out of ritual/Cargo.toml without changing anything \
@@ -738,8 +794,8 @@ mod tests {
             ),
             (
                 RemoveRefusal::CargoRefused {
-                    manifest: manifest.clone(),
-                    key: key.clone(),
+                    manifest: manifest("ritual/Cargo.toml"),
+                    key: key("ci"),
                     stderr: "error: feature `x` includes `ci`".to_owned(),
                 },
                 "remove took `ci` out of ritual/Cargo.toml, and Cargo refused what was left: \
@@ -753,29 +809,46 @@ mod tests {
                 "remove could not read Cargo.lock to see whether bringing it current changed it: \
                  permission denied",
             ),
+        ]
+    }
+
+    /// The failures of reading the workspace back, each with the fixed text it
+    /// is held to.
+    fn read_back_failures() -> Vec<(RemoveRefusal, &'static str)> {
+        vec![
             (
                 RemoveRefusal::StillWorn {
-                    manifest: manifest.clone(),
-                    key: key.clone(),
+                    manifest: manifest("ritual/Cargo.toml"),
+                    key: key("ci"),
                 },
                 "remove took `ci` out of ritual/Cargo.toml, and reading it back still finds \
                  [package.metadata.skeletons.ci]; this is a defect in skeletons",
             ),
             (
                 RemoveRefusal::PackageVanished {
-                    manifest: manifest.clone(),
-                    key: key.clone(),
+                    manifest: manifest("ritual/Cargo.toml"),
+                    key: key("ci"),
                 },
                 "remove took `ci` out of ritual/Cargo.toml, and reading the workspace back no \
                  longer finds the package this command line is built from; this is a defect in \
                  skeletons",
             ),
             (
-                RemoveRefusal::DependencyRemains { manifest, key },
+                RemoveRefusal::DependencyRemains {
+                    manifest: manifest("ritual/Cargo.toml"),
+                    key: key("ci"),
+                },
                 "remove took `ci` out of ritual/Cargo.toml, and Cargo still reports a dependency \
                  under `ci`: it is declared somewhere remove does not edit; take it out by hand, \
                  then run the `remove` task again",
             ),
+        ]
+    }
+
+    /// The failures of moving the files out of the work tree and deleting what
+    /// holds them, each with the fixed text it is held to.
+    fn file_failures() -> Vec<(RemoveRefusal, &'static str)> {
+        vec![
             (
                 RemoveRefusal::HoldingNotCreated {
                     detail: "permission denied".to_owned(),
@@ -801,13 +874,22 @@ mod tests {
             ),
             (
                 RemoveRefusal::HoldingNotDeleted {
-                    key: "ci".to_owned(),
+                    key: key("ci"),
                     detail: "permission denied".to_owned(),
                 },
                 "remove stopped wearing `ci` and moved its files into .skeletons-remove, which \
                  it could not then delete: permission denied; delete .skeletons-remove by hand",
             ),
         ]
+    }
+
+    /// Every failure that can come after the first write, with the fixed text
+    /// it is held to.
+    fn failures() -> Vec<(RemoveRefusal, &'static str)> {
+        let mut all = manifest_and_lockfile_failures();
+        all.extend(read_back_failures());
+        all.extend(file_failures());
+        all
     }
 
     #[test]
@@ -844,101 +926,221 @@ mod tests {
         }
     }
 
-    #[test]
-    fn every_refusal_prints_text_from_outside_on_one_line_escaped_once() {
-        // The poison is a name with a line break in it. It goes into every
-        // field of every kind that holds text from outside, and each message
-        // must be one line that shows the name as the two characters `\n`,
-        // never raw and never escaped a second time. The reasons of a refusal
-        // about files are other refusals' messages, already escaped, so they
-        // are given escaped and must not be escaped again.
-        let text = poison;
-        let samples = [
+    /// The poison as a field that holds a [`WearingKey`].
+    fn poisoned_key() -> WearingKey {
+        key(&poison())
+    }
+
+    /// The poison as a field that holds a [`ManifestShown`].
+    fn poisoned_manifest() -> ManifestShown {
+        manifest(&poison())
+    }
+
+    /// One of each refusal about the request that holds text from outside, with
+    /// that text in every field that holds any. The reasons of a refusal about
+    /// files are other refusals' messages, already escaped, so they are given
+    /// escaped and must not be escaped again.
+    fn request_samples() -> Vec<RemoveRefusal> {
+        vec![
             RemoveRefusal::OutsideItsProject {
-                package: text(),
-                root: text(),
+                package: poison(),
+                root: PathBuf::from(poison()),
             },
             RemoveRefusal::NotWorn {
-                name: text(),
-                manifest: text(),
-                keys: vec![text(), text()],
+                name: poison(),
+                manifest: poisoned_manifest(),
+                keys: vec![poisoned_key(), poisoned_key()],
             },
             RemoveRefusal::WornElsewhere {
-                name: text(),
-                manifest: text(),
-                elsewhere: vec![elsewhere(&text(), &text())],
+                name: poison(),
+                manifest: poisoned_manifest(),
+                elsewhere: NonEmpty::new(elsewhere(&poison(), &poison()), Vec::new()),
             },
             RemoveRefusal::SeveralKeys {
-                name: text(),
-                manifest: text(),
-                keys: vec![text(), text()],
-                command: text(),
-                mode: Mode::Bare,
+                asked: Box::new(Asked {
+                    name: poison(),
+                    manifest: poisoned_manifest(),
+                    command: poison(),
+                    files_flag: FilesFlag::Bare,
+                }),
+                keys: NonEmpty::new(poisoned_key(), vec![poisoned_key()]),
             },
             RemoveRefusal::FilesUnknowable {
-                key: text(),
+                key: poisoned_key(),
                 unknowable: Unknowable {
-                    reasons: vec![POISON_ESCAPED.to_owned()],
+                    reasons: NonEmpty::new(POISON_ESCAPED.to_owned(), Vec::new()),
                 },
             },
+        ]
+    }
+
+    /// One of each failure of the run that holds text from outside, with that
+    /// text in every field that holds any.
+    fn run_samples() -> Vec<RemoveRefusal> {
+        vec![
             RemoveRefusal::ManifestUnreadable {
-                manifest: text(),
-                key: text(),
-                detail: text(),
+                manifest: poisoned_manifest(),
+                key: poisoned_key(),
+                detail: poison(),
             },
             RemoveRefusal::ManifestDefect {
-                manifest: text(),
-                key: text(),
-                detail: text(),
+                manifest: poisoned_manifest(),
+                key: poisoned_key(),
+                detail: poison(),
             },
             RemoveRefusal::CargoRefused {
-                manifest: text(),
-                key: text(),
-                stderr: text(),
+                manifest: poisoned_manifest(),
+                key: poisoned_key(),
+                stderr: poison(),
             },
             RemoveRefusal::LockfileUnreadable {
-                lockfile: text(),
-                detail: text(),
+                lockfile: poison(),
+                detail: poison(),
             },
             RemoveRefusal::StillWorn {
-                manifest: text(),
-                key: text(),
+                manifest: poisoned_manifest(),
+                key: poisoned_key(),
             },
             RemoveRefusal::PackageVanished {
-                manifest: text(),
-                key: text(),
+                manifest: poisoned_manifest(),
+                key: poisoned_key(),
             },
             RemoveRefusal::DependencyRemains {
-                manifest: text(),
-                key: text(),
+                manifest: poisoned_manifest(),
+                key: poisoned_key(),
             },
-            RemoveRefusal::HoldingNotCreated { detail: text() },
+            RemoveRefusal::HoldingNotCreated { detail: poison() },
             RemoveRefusal::MoveFailed {
-                path: text(),
-                detail: text(),
+                path: poison(),
+                detail: poison(),
             },
             RemoveRefusal::DirectoryNotRemoved {
-                directory: text(),
-                detail: text(),
+                directory: poison(),
+                detail: poison(),
             },
             RemoveRefusal::HoldingNotDeleted {
-                key: text(),
-                detail: text(),
+                key: poisoned_key(),
+                detail: poison(),
             },
-        ];
+        ]
+    }
+
+    #[test]
+    fn every_refusal_about_the_request_prints_text_from_outside_on_one_line_escaped_once() {
+        // The poison is a name with a line break in it. It goes into every
+        // field of every refusal about the request that holds text from
+        // outside, and each message must be one line that shows the name as
+        // the two characters `\n`, never raw and never escaped a second time.
         // The one kind with no text from outside is only asked to stay on one
-        // line, and is counted with the rest.
+        // line.
+        for refusal in &request_samples() {
+            assert_escaped_once(&refusal.message(), &format!("{refusal:?}"));
+        }
+
+        assert_one_line(
+            &RemoveRefusal::HoldingPathInTheWay.message(),
+            "the holding path refusal",
+        );
+    }
+
+    #[test]
+    fn every_failure_of_the_run_prints_text_from_outside_on_one_line_escaped_once() {
+        // The same poison, in every field of every failure that can come after
+        // the first write.
+        for failure in &run_samples() {
+            assert_escaped_once(&failure.message(), &format!("{failure:?}"));
+        }
+    }
+
+    #[test]
+    fn the_samples_of_text_from_outside_cover_every_kind_of_refusal() {
+        // The kind with no text from outside is counted with the rest, so a
+        // kind added without a sample is found here.
         let holding = RemoveRefusal::HoldingPathInTheWay;
+        let (request, run) = (request_samples(), run_samples());
+
         assert_every_kind(
-            samples.iter().chain([&holding]).map(kind_index),
+            request.iter().chain(&run).chain([&holding]).map(kind_index),
             KINDS,
             "RemoveRefusal",
         );
+    }
 
-        for refusal in &samples {
-            assert_escaped_once(&refusal.message(), &format!("{refusal:?}"));
+    #[test]
+    fn an_empty_key_is_a_key_like_any_other_in_every_message_that_prints_one() {
+        // A wearing under the empty key is valid in a manifest, so every
+        // message that prints a key prints it as two backticks with nothing
+        // between them, and stays one line.
+        let by_key: Vec<RemoveRefusal> = vec![
+            RemoveRefusal::FilesUnknowable {
+                key: key(""),
+                unknowable: Unknowable {
+                    reasons: reasons("a reason", &[]),
+                },
+            },
+            RemoveRefusal::ManifestUnreadable {
+                manifest: manifest("Cargo.toml"),
+                key: key(""),
+                detail: "denied".to_owned(),
+            },
+            RemoveRefusal::ManifestDefect {
+                manifest: manifest("Cargo.toml"),
+                key: key(""),
+                detail: "it differs".to_owned(),
+            },
+            RemoveRefusal::CargoRefused {
+                manifest: manifest("Cargo.toml"),
+                key: key(""),
+                stderr: "no".to_owned(),
+            },
+            RemoveRefusal::StillWorn {
+                manifest: manifest("Cargo.toml"),
+                key: key(""),
+            },
+            RemoveRefusal::PackageVanished {
+                manifest: manifest("Cargo.toml"),
+                key: key(""),
+            },
+            RemoveRefusal::DependencyRemains {
+                manifest: manifest("Cargo.toml"),
+                key: key(""),
+            },
+            RemoveRefusal::HoldingNotDeleted {
+                key: key(""),
+                detail: "denied".to_owned(),
+            },
+        ];
+
+        for refusal in &by_key {
+            let message = refusal.message();
+            assert_one_line(&message, &format!("{refusal:?}"));
+            assert!(message.contains("``"), "{message}");
         }
-        assert_one_line(&holding.message(), "the holding path refusal");
+    }
+
+    #[test]
+    fn asking_to_remove_the_empty_name_when_nothing_is_worn_under_it_says_so_plainly() {
+        // `remove ""` where no wearing sits under the empty key and no crate
+        // has the empty name: the name is shown as two backticks and the
+        // message lists the keys there are.
+        let refusal = RemoveRefusal::from_pick(
+            PickRefusal::Neither {
+                keys: keys_of(&["ci"]),
+            },
+            Asked {
+                name: String::new(),
+                manifest: manifest("ritual/Cargo.toml"),
+                command: "cargo ritual skeletons remove".to_owned(),
+                files_flag: FilesFlag::Bare,
+            },
+            Vec::new(),
+        );
+
+        assert_eq!(
+            refusal.message(),
+            "`` is neither a key ritual/Cargo.toml wears a skeleton under nor the crate of one, \
+             so remove wrote nothing; its key is `ci`, so give the `remove` task that one"
+        );
     }
 
     #[test]
@@ -951,22 +1153,22 @@ mod tests {
             RemoveRefusal::HoldingPathInTheWay,
             RemoveRefusal::OutsideItsProject {
                 package: "p".to_owned(),
-                root: "/r".to_owned(),
+                root: PathBuf::from("/r"),
             },
             RemoveRefusal::NotWorn {
                 name: "n".to_owned(),
-                manifest: "Cargo.toml".to_owned(),
-                keys: strings(&["a", "b"]),
+                manifest: manifest("Cargo.toml"),
+                keys: keys_of(&["a", "b"]),
             },
             RemoveRefusal::WornElsewhere {
                 name: "n".to_owned(),
-                manifest: "Cargo.toml".to_owned(),
-                elsewhere: vec![elsewhere("t/Cargo.toml", "k")],
+                manifest: manifest("Cargo.toml"),
+                elsewhere: NonEmpty::new(elsewhere("t/Cargo.toml", "k"), Vec::new()),
             },
             RemoveRefusal::FilesUnknowable {
-                key: "k".to_owned(),
+                key: key("k"),
                 unknowable: Unknowable {
-                    reasons: strings(&["a reason"]),
+                    reasons: reasons("a reason", &[]),
                 },
             },
         ]);

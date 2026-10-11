@@ -22,6 +22,8 @@
 
 use toml_edit::{DocumentMut, Item, TableLike};
 
+use super::names::WearingKey;
+
 /// The names a dependency table has in a manifest: the three Cargo documents
 /// and the two underscore spellings it still reads.
 const DEPENDENCY_TABLES: [&str; 5] = [
@@ -46,8 +48,18 @@ pub(crate) enum ManifestRefusal {
     Defect { detail: String },
 }
 
+/// A manifest's text before an edit and after it.
+#[derive(Debug, Clone, Copy)]
+struct Edit<'text> {
+    original: &'text str,
+    rewritten: &'text str,
+}
+
 /// `manifest` with the dependency under `key` and the table
 /// `[package.metadata.skeletons.<key>]` taken out.
+///
+/// The key is whatever the manifest holds, the empty key included: it is the
+/// wearer's own, and an empty one is taken out like any other.
 ///
 /// The dependency is taken out of every dependency table that declares the key,
 /// and a table that leaves empty is taken out with its header, as is a
@@ -59,8 +71,8 @@ pub(crate) enum ManifestRefusal {
 /// Returns [`ManifestRefusal`] when the manifest cannot be read, when it has
 /// no wearing table under `key`, or when what was written is not the manifest
 /// as it was less the wearing.
-pub(crate) fn without_wearing(manifest: &str, key: &str) -> Result<String, ManifestRefusal> {
-    assert!(!key.is_empty(), "a wearing sits under a key");
+pub(crate) fn without_wearing(manifest: &str, key: &WearingKey) -> Result<String, ManifestRefusal> {
+    let key = key.as_str();
     let mut document: DocumentMut =
         manifest
             .parse()
@@ -70,7 +82,13 @@ pub(crate) fn without_wearing(manifest: &str, key: &str) -> Result<String, Manif
     take_out_wearing_table(&mut document, key)?;
     take_out_dependencies(document.as_table_mut(), key);
     let rewritten = document.to_string();
-    verify(manifest, &rewritten, key)?;
+    verify(
+        &Edit {
+            original: manifest,
+            rewritten: &rewritten,
+        },
+        key,
+    )?;
     Ok(rewritten)
 }
 
@@ -134,13 +152,13 @@ fn take_out_of_dependency_tables(parent: &mut dyn TableLike, key: &str) {
     }
 }
 
-/// Checks `rewritten` against `original`, parsed by `toml` rather than by the
-/// library that wrote it: equal in value to the original less the dependency
-/// under `key` and the wearing table, once the tables the removal emptied are
-/// taken out of both.
-fn verify(original: &str, rewritten: &str, key: &str) -> Result<(), ManifestRefusal> {
+/// Checks the edit's `rewritten` against its `original`, parsed by `toml`
+/// rather than by the library that wrote it: equal in value to the original
+/// less the dependency under `key` and the wearing table, once the tables the
+/// removal emptied are taken out of both.
+fn verify(edit: &Edit<'_>, key: &str) -> Result<(), ManifestRefusal> {
     let mut expected: toml::Table =
-        original
+        edit.original
             .parse()
             .map_err(|error: toml::de::Error| ManifestRefusal::Unreadable {
                 detail: error.to_string(),
@@ -149,7 +167,7 @@ fn verify(original: &str, rewritten: &str, key: &str) -> Result<(), ManifestRefu
         detail: "the manifest has no wearing table to take out".to_owned(),
     })?;
     let mut actual: toml::Table =
-        rewritten
+        edit.rewritten
             .parse()
             .map_err(|error: toml::de::Error| ManifestRefusal::Defect {
                 detail: format!("the edited manifest is not TOML: {error}"),
@@ -255,13 +273,26 @@ fn prune_empty_dependency_values(table: &mut toml::Table) {
 mod tests {
     use proptest::prelude::*;
 
-    use super::{ManifestRefusal, verify, without_wearing};
+    use super::{Edit, ManifestRefusal, verify, without_wearing};
+    use crate::remove::names::WearingKey;
     use crate::wear::{Key, with_empty_wearing_table};
 
     const PACKAGE: &str = "[package]\nname = \"cli\"\nversion = \"0.1.0\"\n";
 
+    /// [`verify`] over an edit of `original` into `rewritten`, for the key
+    /// `tidy`.
+    fn verified(original: &str, rewritten: &str) -> Result<(), ManifestRefusal> {
+        verify(
+            &Edit {
+                original,
+                rewritten,
+            },
+            "tidy",
+        )
+    }
+
     fn removed(manifest: &str) -> Result<String, ManifestRefusal> {
-        without_wearing(manifest, "tidy")
+        without_wearing(manifest, &WearingKey::new("tidy"))
     }
 
     /// `manifest` as `wear` leaves it once it has added the wearing table for
@@ -505,6 +536,17 @@ mod tests {
     }
 
     #[test]
+    fn a_wearing_under_an_empty_key_is_taken_out_like_any_other() {
+        let manifest = "[package]\nname = \"c\"\n\n[package.metadata.skeletons.\"\"]\n\n\
+                        [dev-dependencies]\n\"\" = \"1\"\n";
+
+        assert_eq!(
+            without_wearing(manifest, &WearingKey::new("")).as_deref(),
+            Ok("[package]\nname = \"c\"\n")
+        );
+    }
+
+    #[test]
     fn a_manifest_that_is_not_toml_is_unreadable() {
         let Err(ManifestRefusal::Unreadable { detail }) = removed("[package\nname =") else {
             panic!("a manifest that is not TOML must be refused as unreadable");
@@ -519,10 +561,9 @@ mod tests {
                         [dev-dependencies]\ntidy = \"1\"\nother = \"1\"\n";
 
         assert_eq!(
-            verify(
+            verified(
                 original,
-                "[package]\nname = \"c\"\n[dev-dependencies]\nother = \"1\"\n",
-                "tidy"
+                "[package]\nname = \"c\"\n[dev-dependencies]\nother = \"1\"\n"
             ),
             Ok(())
         );
@@ -559,13 +600,13 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    verify(original, rewritten, "tidy"),
+                    verified(original, rewritten),
                     Err(ManifestRefusal::Defect { .. })
                 ),
                 "{what}"
             );
         }
-        assert_eq!(verify(original, right, "tidy"), Ok(()));
+        assert_eq!(verified(original, right), Ok(()));
     }
 
     /// The text `cargo add` leaves a manifest in, for the dependency `key`
@@ -635,8 +676,9 @@ mod tests {
         // gives a manifest that parses, mentions the key nowhere, and equals
         // the manifest before the dependency was declared in value, apart from
         // tables that exist only to hold the dependency or the wearing. The
-        // input space is keys across the whole grammar up to its 64-byte
-        // limit, with `other` left out because the bases already use it.
+        // input space is keys across the whole grammar `wear` holds a key to,
+        // up to the longest it accepts, with `other` left out because the
+        // bases already use it.
         #[test]
         fn wearing_a_key_and_removing_it_changes_nothing_but_those_entries(
             text in "[a-zA-Z_][a-zA-Z0-9_-]{0,63}",
@@ -653,7 +695,7 @@ mod tests {
                 .map_err(|error| TestCaseError::fail(format!("{error}")))?;
             prop_assert!(mentions(&present, &text), "the key is not in {wearing}");
 
-            let rewritten = without_wearing(&wearing, &text)
+            let rewritten = without_wearing(&wearing, &WearingKey::new(&text))
                 .map_err(|refusal| TestCaseError::fail(format!("{refusal:?}")))?;
 
             let mut after: toml::Table = rewritten

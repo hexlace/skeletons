@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use rituals_compose::rollback::Changes;
 
 use super::HOLDING_DIRECTORY;
+use super::names::WearingKey;
 use super::refusal::RemoveRefusal;
 use crate::claim::ClaimPath;
 
@@ -147,10 +148,10 @@ fn remove_emptied_directories(
 /// # Errors
 ///
 /// Returns [`RemoveRefusal::HoldingNotDeleted`] when it could not be deleted.
-pub(crate) fn purge(staged: Staged, key: &str) -> Result<(), RemoveRefusal> {
+pub(crate) fn purge(staged: Staged, key: &WearingKey) -> Result<(), RemoveRefusal> {
     staged.holding.map_or(Ok(()), |holding| {
         std::fs::remove_dir_all(&holding).map_err(|error| RemoveRefusal::HoldingNotDeleted {
-            key: key.to_owned(),
+            key: key.clone(),
             detail: error.to_string(),
         })
     })
@@ -166,7 +167,12 @@ mod tests {
 
     use super::{HOLDING_DIRECTORY, Staged, holding_path_is_free, purge, stage};
     use crate::claim::ClaimPath;
+    use crate::remove::names::WearingKey;
     use crate::remove::refusal::RemoveRefusal;
+
+    fn ci() -> WearingKey {
+        WearingKey::new("ci")
+    }
 
     fn claim_path(path: &str) -> ClaimPath {
         ClaimPath::from_rendering_path(path).expect("a well-formed test path")
@@ -288,7 +294,7 @@ mod tests {
             assert_eq!(std::fs::read(holding.join(name)).expect(name), bytes);
         }
 
-        purge(staged, "ci").expect("the holding directory is deleted");
+        purge(staged, &ci()).expect("the holding directory is deleted");
 
         assert!(holding.symlink_metadata().is_err());
         assert_eq!(names_in(root), ["docs"]);
@@ -416,7 +422,7 @@ mod tests {
         fill(root, ".skeletons-remove/theirs.txt", b"theirs\n", 0o644);
 
         let staged = staged(root, &[]).expect("the run succeeds");
-        purge(staged, "ci").expect("nothing to purge");
+        purge(staged, &ci()).expect("nothing to purge");
 
         assert_eq!(
             std::fs::read(root.join(".skeletons-remove/theirs.txt")).expect("still there"),
@@ -500,7 +506,7 @@ mod tests {
         let staged = staged(root, &["a.yml"]).expect("the run succeeds");
         assert_eq!(names_in(root), [".skeletons-remove"]);
 
-        purge(staged, "ci").expect("purged");
+        purge(staged, &ci()).expect("purged");
 
         assert!(names_in(root).is_empty());
     }
@@ -515,12 +521,12 @@ mod tests {
         // delete and the operating system's own answer.
         std::fs::remove_dir_all(root.join(HOLDING_DIRECTORY)).expect("remove it");
 
-        let refusal = purge(staged, "ci").expect_err("there is nothing to delete");
+        let refusal = purge(staged, &ci()).expect_err("there is nothing to delete");
 
         let RemoveRefusal::HoldingNotDeleted { key, detail } = refusal else {
             panic!("expected HoldingNotDeleted, got {refusal:?}");
         };
-        assert_eq!(key, "ci");
+        assert_eq!(key, ci());
         assert!(!detail.is_empty());
     }
 }

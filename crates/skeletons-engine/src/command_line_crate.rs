@@ -64,15 +64,16 @@ impl CommandLineCrate {
 /// the command line belongs to.
 pub(crate) fn outside_its_project_message(
     package: &str,
-    root: &str,
+    root: &Path,
     command: WritingCommand,
 ) -> String {
+    let root = root.display().to_string();
     format!(
         "this command line is built from the package `{}`, which is not a member of the \
          workspace at {}, so {} wrote nothing: run the `{}` task from inside the project \
          this command line belongs to",
         Escaped(package),
-        Escaped(root),
+        Escaped(&root),
         command.name(),
         command.name(),
     )
@@ -80,19 +81,21 @@ pub(crate) fn outside_its_project_message(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::outside_its_project_message;
     use crate::work_tree::writing_command::WritingCommand;
 
     #[test]
     fn the_refusal_names_the_package_the_root_and_the_command_that_wrote_nothing() {
         assert_eq!(
-            outside_its_project_message("tool", "/work/other", WritingCommand::Wear),
+            outside_its_project_message("tool", Path::new("/work/other"), WritingCommand::Wear),
             "this command line is built from the package `tool`, which is not a member of the \
              workspace at /work/other, so wear wrote nothing: run the `wear` task from inside \
              the project this command line belongs to"
         );
         assert_eq!(
-            outside_its_project_message("tool", "/work/other", WritingCommand::Sync),
+            outside_its_project_message("tool", Path::new("/work/other"), WritingCommand::Sync),
             "this command line is built from the package `tool`, which is not a member of the \
              workspace at /work/other, so sync wrote nothing: run the `sync` task from inside \
              the project this command line belongs to"
@@ -101,7 +104,7 @@ mod tests {
 
     #[test]
     fn text_from_outside_is_escaped_once_and_the_line_stays_one_line() {
-        let message = outside_its_project_message("a\nb", "/c\nd", WritingCommand::Wear);
+        let message = outside_its_project_message("a\nb", Path::new("/c\nd"), WritingCommand::Wear);
 
         assert!(!message.contains('\n'), "{message:?}");
     }

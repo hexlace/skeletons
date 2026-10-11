@@ -47,7 +47,7 @@ pub(crate) fn check<'prospect>(
     let Some(member) = &prospect.member else {
         return Err(WearRefusal::OutsideItsProject {
             package: package.to_owned(),
-            root: prospect.workspace.root.display().to_string(),
+            root: prospect.workspace.root.clone(),
         });
     };
     refuse_worn(request, &prospect.workspace)?;
@@ -198,6 +198,8 @@ fn refuse_table_without_dependency(request: &Request, member: &Member) -> Result
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::check;
     use crate::wear::refusal::{Parent, WearRefusal};
     use crate::wear::request::Request;
@@ -282,7 +284,7 @@ mod tests {
             checked(&request("tidy", None), &prospect, "cli"),
             Err(WearRefusal::OutsideItsProject {
                 package: "cli".to_owned(),
-                root: "/workspace".to_owned(),
+                root: PathBuf::from("/workspace"),
             })
         );
     }

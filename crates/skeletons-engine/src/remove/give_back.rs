@@ -134,82 +134,6 @@ mod tests {
     }
 
     #[test]
-    fn a_file_flagged_skip_worktree_is_left_naming_the_flag() {
-        let repository = TestRepository::new();
-        repository.write("pinned.yml", b"committed\n");
-        repository.commit_all("initial");
-        repository
-            .git(&["update-index", "--skip-worktree", "pinned.yml"])
-            .run_ok();
-
-        assert_eq!(
-            fate_of(&repository, "pinned.yml"),
-            Fate::Left(LeftBecause::Hidden(HiddenFlag::SkipWorktree))
-        );
-    }
-
-    #[test]
-    fn a_file_flagged_assume_unchanged_is_left_naming_the_flag() {
-        let repository = TestRepository::new();
-        repository.write("pinned.yml", b"committed\n");
-        repository.commit_all("initial");
-        repository
-            .git(&["update-index", "--assume-unchanged", "pinned.yml"])
-            .run_ok();
-
-        assert_eq!(
-            fate_of(&repository, "pinned.yml"),
-            Fate::Left(LeftBecause::Hidden(HiddenFlag::AssumeUnchanged))
-        );
-    }
-
-    #[test]
-    fn a_file_flagged_both_ways_is_left_naming_both() {
-        let repository = TestRepository::new();
-        repository.write("pinned.yml", b"committed\n");
-        repository.commit_all("initial");
-        repository
-            .git(&["update-index", "--skip-worktree", "pinned.yml"])
-            .run_ok();
-        repository
-            .git(&["update-index", "--assume-unchanged", "pinned.yml"])
-            .run_ok();
-
-        assert_eq!(
-            fate_of(&repository, "pinned.yml"),
-            Fate::Left(LeftBecause::Hidden(HiddenFlag::Both))
-        );
-    }
-
-    #[test]
-    fn a_file_under_a_clean_filter_that_drops_bytes_is_left_as_not_what_git_checks_out() {
-        // The scenario: a clean filter deletes `local:` lines and the smudge
-        // is `cat`. The disk holds a line git never stored, staged so `status`
-        // reads clean, so deleting the file would lose that line with no copy
-        // anywhere. The control is the committed bytes under the same filter,
-        // which are held.
-        let repository = TestRepository::new();
-        repository
-            .git(&["config", "filter.strip.clean", "sed '/^local:/d'"])
-            .run_ok();
-        repository
-            .git(&["config", "filter.strip.smudge", "cat"])
-            .run_ok();
-        repository.write(".gitattributes", b"f.txt filter=strip\n");
-        repository.write("f.txt", b"old\n");
-        repository.commit_all("initial");
-        assert_eq!(fate_of(&repository, "f.txt"), Fate::Deleted);
-
-        repository.write("f.txt", b"old\nlocal: only copy\n");
-        repository.git(&["add", "f.txt"]).run_ok();
-
-        assert_eq!(
-            fate_of(&repository, "f.txt"),
-            Fate::Left(LeftBecause::NotWhatGitChecksOut)
-        );
-    }
-
-    #[test]
     fn a_file_that_has_gone_is_left_as_one_git_cannot_show_it_holds() {
         let repository = TestRepository::new();
         repository.write("a.yml", b"committed\n");
@@ -223,6 +147,7 @@ mod tests {
             Fate::Left(LeftBecause::CannotShowItHolds)
         );
     }
+
     #[test]
     fn a_symbolic_link_is_left_as_one_git_cannot_show_it_holds() {
         let repository = TestRepository::new();

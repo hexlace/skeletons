@@ -82,11 +82,6 @@ pub(crate) fn delete(
     for (position, file) in files.iter().enumerate() {
         if let Err(error) = delete_file(&file.to_path(root)) {
             let (deleted, undeleted) = files.split_at(position);
-            assert_eq!(
-                deleted.len() + undeleted.len(),
-                files.len(),
-                "every file is either deleted or not"
-            );
             return Err(Box::new(DeletionFailed {
                 refusal: RemoveRefusal::DeleteFailed {
                     path: file.as_str().to_owned(),

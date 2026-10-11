@@ -1601,13 +1601,7 @@ remove could not remove .github, which deleting its files left empty: <the opera
   its last look and its write, and `remove` looks less often than `sync` does.
 - **The undo does not give back what rollback cannot.** A panic, and a change
   made around the run, are the two things named under [Wear](#wear), and they
-  hold here. Ending the process partway is in the same class: rollback runs when
-  the run returns a failure, and a process that is ended returns nothing, so the
-  manifest and `Cargo.lock` stay as far as it had changed them and the files it
-  had already deleted stay deleted. The next run refuses, because the work tree
-  is no longer clean, and `git checkout -- <path>` gives each deleted file back
-  as it was, since each had passed the proof that git holds exactly what it
-  held.
+  hold here.
 
 ## `--json`
 

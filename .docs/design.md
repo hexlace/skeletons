@@ -1819,13 +1819,13 @@ the attempt and appends them is the one the command and its tests run through
 → `the_first_delete_failing_reports_none_deleted`, and →
 `a_directory_that_cannot_be_removed_for_another_reason_reports_every_file_deleted`;
 `crates/skeletons-engine/src/remove.rs` →
-`a_delete_that_fails_after_an_earlier_one_puts_the_manifest_and_lockfile_back_and_names_both_lists`,
+`a_failed_delete_puts_the_manifest_and_lockfile_back_and_names_both_lists`,
 and →
 `a_directory_that_cannot_be_removed_names_every_file_deleted_and_none_not_deleted`;
 `crates/skeletons-engine/src/remove/refusal.rs` →
 `some_files_deleted_and_some_not_are_each_named_after_what_rollback_said`;
 `ritual/tests/remove_refusals.rs` →
-`a_delete_failing_partway_puts_the_manifest_and_the_lockfile_back_and_names_the_files_deleted_and_not`).
+`a_failed_delete_puts_back_the_manifest_and_lockfile_and_names_both_lists`).
 The files go last, so the manifest is already changed when a delete fails, and
 nothing is read after the first file is gone: the read back is taken as a
 closure that can be called once, and the deletes come after it.

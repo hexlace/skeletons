@@ -987,8 +987,7 @@ mod tests {
     }
 
     #[test]
-    fn a_delete_that_fails_after_an_earlier_one_puts_the_manifest_and_lockfile_back_and_names_both_lists()
-     {
+    fn a_failed_delete_puts_the_manifest_and_lockfile_back_and_names_both_lists() {
         // The first file is really deleted and the second is refused, after
         // the manifest was written, the lockfile relocked and the workspace
         // read back. The manifest and the lockfile come back byte for byte,

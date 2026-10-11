@@ -339,8 +339,7 @@ fn a_work_tree_with_an_uncommitted_change_is_refused_and_nothing_is_written() ->
 }
 
 #[test]
-fn a_delete_failing_partway_puts_the_manifest_and_the_lockfile_back_and_names_the_files_deleted_and_not()
--> TestOutcome {
+fn a_failed_delete_puts_back_the_manifest_and_lockfile_and_names_both_lists() -> TestOutcome {
     // `nested-dotfiles` claims `.github/dependabot.yml`, `a/b/deep.yml` and
     // `root.yml`, all matching. `a/b` is made unwritable, so deleting
     // `deep.yml` fails after `remove` has written the manifest and the

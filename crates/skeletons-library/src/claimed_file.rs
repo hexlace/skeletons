@@ -91,6 +91,13 @@ impl ClaimedFile {
 
     /// The bytes the skeleton renders for this path: writing them to the path
     /// makes the file match, whatever it held before.
+    ///
+    /// The bytes are present whatever the [`state`](Self::state) is, for a
+    /// [`Missing`](FileState::Missing) file too. A caller that decides to write
+    /// them to [`path`](Self::path) under the report's
+    /// [`root`](crate::Report::root) finds that a second
+    /// [`check`](crate::check) answers [`Matches`](FileState::Matches). The
+    /// crate documentation shows the round trip.
     #[must_use]
     pub fn rendered(&self) -> &[u8] {
         &self.rendered

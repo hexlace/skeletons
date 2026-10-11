@@ -70,10 +70,17 @@ const _: () = {
 ///
 /// Cargo walks up from `directory` to the workspace root, and a relative
 /// `directory` is taken from the process's current directory. The call needs
-/// `cargo` on `PATH` or named by `$CARGO`, a `Cargo.lock` that is up to date,
-/// and every locked source already fetched. It writes nothing, runs no build
-/// script, needs no git, and makes no network request: a source that was never
-/// fetched is an error, never a download.
+/// `cargo`, a `Cargo.lock` that is up to date, and every locked source already
+/// fetched. The program `$CARGO` names is run whenever that variable is set,
+/// exactly as given and an empty value included; `cargo` from `PATH` is run only
+/// when it is not set, and a value that is not valid Unicode counts as not set.
+///
+/// Nothing else is needed. The workspace need not have been built, and
+/// `directory` need not be a git repository. For a workspace whose skeletons
+/// are all `path` dependencies, `cargo generate-lockfile --offline` is enough
+/// to make the lockfile. The call writes nothing, runs no build script, needs
+/// no git, and makes no network request: a source that was never fetched is an
+/// error, never a download.
 ///
 /// A wearing that cannot be read is not an error. It is a [`Refusal`] in the
 /// [`Report`], and every other wearing is still reported.

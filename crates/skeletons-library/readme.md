@@ -82,12 +82,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+The bytes a skeleton renders for a file are in the report whatever the file's
+state, a `Missing` one included, so a caller can write them to the file's
+`path()` under the report's `root()`, and a second `check` then answers
+`Matches`. The library writes nothing, so whether to write, and over a file
+that someone changed, is the caller's to decide; this example brings in only
+the files that are missing:
+
+```rust,no_run
+use skeletons_library::{FileState, Files};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let report = skeletons_library::check(".")?;
+    for skeleton in report.skeletons() {
+        // A refused skeleton is left as it is: its files were not all compared.
+        let Files::Checked(files) = skeleton.files() else {
+            continue;
+        };
+        for file in files.iter().filter(|file| file.state() == FileState::Missing) {
+            let path = report.root().join(file.path());
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&path, file.rendered())?;
+        }
+    }
+    Ok(())
+}
+```
+
 ## What it needs
 
-`check` needs `cargo` on `PATH` (or named by `$CARGO`), a `Cargo.lock` that is
-up to date, and every locked source already fetched. A source that was never
-fetched is an error, because `check` never downloads one. The library depends
-on no network client and no command-line framework.
+`check` needs `cargo`, a `Cargo.lock` that is up to date, and every locked
+source already fetched. It runs the program `$CARGO` names whenever that
+variable is set, exactly as given and an empty value included, and runs `cargo`
+from `PATH` only when it is not set; a value that is not valid Unicode counts
+as not set. A source that was never fetched is an error, because `check` never
+downloads one.
+
+It needs nothing else. The workspace need not have been built, and its
+directory need not be a git repository. When every skeleton a workspace wears is
+a `path` dependency, `cargo generate-lockfile --offline` is enough to make the
+lockfile. The library depends on no network client and no command-line
+framework.
 
 ## Support
 

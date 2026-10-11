@@ -350,7 +350,9 @@ out as it is stays where it is, with the reason, and the wearing still goes. It
 counts as neither deleted nor changed, so it never makes the others stay. A
 `Cargo.lock` that a skeleton claims is left the same way under every flag,
 because `remove` has just rewritten it and the project needs it. The files are
-deleted last. If a run fails after it has begun to write, the manifest and
+deleted last, and a directory their deletion emptied that cannot be removed is
+named as left, with the system's reason, without failing the run. If a run fails
+after it has begun to write, the manifest and
 `Cargo.lock` are put back and it says so; a delete that fails stops the
 deleting, the files already deleted stay deleted, and the failure names the
 files deleted and the files not. The full reading, every refusal and the limits are

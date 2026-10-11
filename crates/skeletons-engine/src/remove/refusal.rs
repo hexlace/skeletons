@@ -130,8 +130,6 @@ pub(crate) enum RemoveRefusal {
     },
     /// A file could not be deleted.
     DeleteFailed { path: String, detail: String },
-    /// A directory the deletion left empty could not be removed.
-    DirectoryNotRemoved { directory: String, detail: String },
 }
 
 impl RemoveRefusal {
@@ -199,9 +197,6 @@ impl RemoveRefusal {
             Self::PackageVanished { manifest, key } => package_vanished_message(manifest, key),
             Self::DependencyRemains { manifest, key } => dependency_remains_message(manifest, key),
             Self::DeleteFailed { path, detail } => delete_failed_message(path, detail),
-            Self::DirectoryNotRemoved { directory, detail } => {
-                directory_not_removed_message(directory, detail)
-            }
         }
     }
 
@@ -387,16 +382,6 @@ fn delete_failed_message(path: &str, detail: &str) -> String {
     )
 }
 
-/// `` remove could not remove {directory}, which deleting its files left empty:
-/// {detail} ``.
-fn directory_not_removed_message(directory: &str, detail: &str) -> String {
-    format!(
-        "remove could not remove {}, which deleting its files left empty: {}",
-        Escaped(directory),
-        Escaped(detail)
-    )
-}
-
 /// `line`, a failure of the deletion as `rollback` has worded it, followed by
 /// what became of the files: the clause for those deleted, then the clause for
 /// those not.
@@ -405,11 +390,18 @@ fn directory_not_removed_message(directory: &str, detail: &str) -> String {
 /// `Cargo.lock`, and says nothing about the files, which it cannot put back.
 /// The clauses come after its words, so the whole line is true whichever it
 /// said.
+///
+/// A failed deletion is a file that could not be deleted, and that file is among
+/// those not deleted, so `undeleted` is never empty.
 pub(crate) fn with_the_files_deleted(
     line: &str,
     deleted: &[String],
     undeleted: &[String],
 ) -> String {
+    assert!(
+        !undeleted.is_empty(),
+        "the file that failed to delete is among those not deleted"
+    );
     format!(
         "{line}{}{}",
         deleted_clause(deleted),
@@ -433,13 +425,9 @@ fn deleted_clause(deleted: &[String]) -> String {
     }
 }
 
-/// `` ; not deleted: {files} ``, and nothing when every file was deleted.
+/// `` ; not deleted: {files} ``.
 fn undeleted_clause(undeleted: &[String]) -> String {
-    if undeleted.is_empty() {
-        String::new()
-    } else {
-        format!("; not deleted: {}", escaped_list(undeleted))
-    }
+    format!("; not deleted: {}", escaped_list(undeleted))
 }
 
 /// `paths` escaped, joined as this crate's one list grammar does.
@@ -847,26 +835,16 @@ mod tests {
         ]
     }
 
-    /// The failures of deleting the files and removing the directories they
-    /// leave empty, each with the fixed text it is held to.
+    /// The failures of deleting the files, each with the fixed text it is held
+    /// to.
     fn file_failures() -> Vec<(RemoveRefusal, &'static str)> {
-        vec![
-            (
-                RemoveRefusal::DeleteFailed {
-                    path: ".github/workflows/ci.yml".to_owned(),
-                    detail: "permission denied".to_owned(),
-                },
-                "remove could not delete .github/workflows/ci.yml: permission denied",
-            ),
-            (
-                RemoveRefusal::DirectoryNotRemoved {
-                    directory: ".github/workflows".to_owned(),
-                    detail: "directory not empty".to_owned(),
-                },
-                "remove could not remove .github/workflows, which deleting its files left empty: \
-                 directory not empty",
-            ),
-        ]
+        vec![(
+            RemoveRefusal::DeleteFailed {
+                path: ".github/workflows/ci.yml".to_owned(),
+                detail: "permission denied".to_owned(),
+            },
+            "remove could not delete .github/workflows/ci.yml: permission denied",
+        )]
     }
 
     /// Every failure that can come after the first write, with the fixed text
@@ -888,7 +866,7 @@ mod tests {
     /// How many kinds of [`RemoveRefusal`] there are. The match in
     /// [`kind_index`] has no wildcard, so a kind added without an arm does not
     /// compile, and the samples must then cover it.
-    const KINDS: usize = 14;
+    const KINDS: usize = 13;
 
     const fn kind_index(refusal: &RemoveRefusal) -> usize {
         match refusal {
@@ -903,9 +881,8 @@ mod tests {
             RemoveRefusal::StillWorn { .. } => 8,
             RemoveRefusal::DependencyRemains { .. } => 9,
             RemoveRefusal::DeleteFailed { .. } => 10,
-            RemoveRefusal::DirectoryNotRemoved { .. } => 11,
-            RemoveRefusal::LockfileUnreadable { .. } => 12,
-            RemoveRefusal::PackageVanished { .. } => 13,
+            RemoveRefusal::LockfileUnreadable { .. } => 11,
+            RemoveRefusal::PackageVanished { .. } => 12,
         }
     }
 
@@ -994,10 +971,6 @@ mod tests {
             },
             RemoveRefusal::DeleteFailed {
                 path: poison(),
-                detail: poison(),
-            },
-            RemoveRefusal::DirectoryNotRemoved {
-                directory: poison(),
                 detail: poison(),
             },
         ]
@@ -1148,14 +1121,11 @@ mod tests {
     }
 
     #[test]
-    fn every_file_deleted_has_no_clause_about_files_not_deleted() {
-        // What fails after the last file is a directory, so no file is left
-        // undeleted and the line does not say "not deleted" of nothing.
-        assert_eq!(
-            with_the_files_deleted("it failed", &paths(&["a.yml", "b.yml"]), &[]),
-            "it failed; the files remove had already deleted are not put back, and git has \
-             them: a.yml and b.yml"
-        );
+    #[should_panic(expected = "the file that failed to delete is among those not deleted")]
+    fn a_failed_deletion_with_no_file_not_deleted_is_a_defect() {
+        // A failure of the deletion is a file that could not be deleted, so a
+        // list of files not deleted that is empty is a defect in the caller.
+        let _ = with_the_files_deleted("it failed", &paths(&["a.yml"]), &[]);
     }
 
     #[test]
@@ -1170,7 +1140,6 @@ mod tests {
             "; the files remove had already deleted are not put back, and git has them: a, b \
              and c"
         );
-        assert_eq!(undeleted_clause(&[]), "");
         assert_eq!(undeleted_clause(&paths(&["a"])), "; not deleted: a");
     }
 

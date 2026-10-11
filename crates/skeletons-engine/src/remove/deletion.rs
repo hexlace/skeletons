@@ -7,7 +7,10 @@
 //! git is what holds them: the preparation has already shown that git can give
 //! back each file that is deleted. A delete that fails stops the deleting, and
 //! the failure carries which files were deleted and which were not, so that the
-//! line the wearer reads names both.
+//! line the wearer reads names both. A directory that cannot be removed does
+//! not fail the deletion: every file is already gone, an empty directory is
+//! nothing git sees, and putting the manifest back would leave the project
+//! wearing a skeleton whose files are all deleted. It is handed back as left.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -18,9 +21,7 @@ use crate::claim::ClaimPath;
 /// Which of the files to delete a failed deletion had deleted, and which it had
 /// not, both in path order.
 ///
-/// A file that failed to delete is among those not deleted. A failure to
-/// remove an emptied directory comes after every file is deleted, so it has
-/// none of the second.
+/// A file that failed to delete is among those not deleted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Deletion {
     pub(crate) deleted: Vec<String>,
@@ -33,6 +34,18 @@ pub(crate) struct Deletion {
 pub(crate) struct DeletionFailed {
     pub(crate) refusal: RemoveRefusal,
     pub(crate) deletion: Deletion,
+}
+
+/// A directory the deletes emptied and that could not be removed, with the
+/// operating system's words for why.
+///
+/// Only a refusal for a reason other than the directory holding something is
+/// one: a directory that still holds something is the project's, and stays
+/// without a word.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DirectoryLeft {
+    pub(crate) directory: String,
+    pub(crate) detail: String,
 }
 
 /// Deletes the file at `path` from the disk, which is what the command passes
@@ -51,14 +64,16 @@ pub(crate) fn delete_from_disk(path: &Path) -> std::io::Result<()> {
 }
 
 /// Deletes every file in `files` under `root` with `delete_file`, then removes
-/// the directories the deletes left empty.
+/// the directories the deletes left empty, and returns the ones it could not.
 ///
 /// The files go in the order given, and the first delete that fails stops the
 /// deleting: nothing after it is tried, and no directory is removed. Then each
 /// directory above a deleted file is removed with [`std::fs::remove_dir`],
 /// deepest first. A directory that still holds something stays, and so does
-/// every directory above it; the workspace root is never reached. With no
-/// files, nothing is done.
+/// every directory above it; the workspace root is never reached. A directory
+/// that cannot be removed for any other reason is returned in path order and
+/// stays, and so does every directory above it, which holds it; the removal of
+/// the rest goes on. With no files, nothing is done.
 ///
 /// `root` is absolute and every file in `files` is at its claimed path under
 /// it, which the survey has already shown. `delete_file` is
@@ -68,16 +83,14 @@ pub(crate) fn delete_from_disk(path: &Path) -> std::io::Result<()> {
 ///
 /// Returns [`RemoveRefusal::DeleteFailed`] for the first file that cannot be
 /// deleted, with the files before it as deleted and it and the files after it
-/// as not, and [`RemoveRefusal::DirectoryNotRemoved`] for the first emptied
-/// directory that cannot be removed for a reason other than holding something,
-/// with every file as deleted. Neither is undone here: the files stay deleted,
-/// and the caller's [`rollback::attempt`](rituals_compose::rollback::attempt)
-/// puts back only what it recorded.
+/// as not. The files stay deleted: the caller's
+/// [`rollback::attempt`](rituals_compose::rollback::attempt) puts back only
+/// what it recorded.
 pub(crate) fn delete(
     root: &Path,
     files: &[&ClaimPath],
     mut delete_file: impl FnMut(&Path) -> std::io::Result<()>,
-) -> Result<(), Box<DeletionFailed>> {
+) -> Result<Vec<DirectoryLeft>, Box<DeletionFailed>> {
     assert!(root.is_absolute(), "the workspace root is an absolute path");
     for (position, file) in files.iter().enumerate() {
         if let Err(error) = delete_file(&file.to_path(root)) {
@@ -94,15 +107,7 @@ pub(crate) fn delete(
             }));
         }
     }
-    remove_emptied_directories(root, files).map_err(|refusal| {
-        Box::new(DeletionFailed {
-            refusal,
-            deletion: Deletion {
-                deleted: names(files),
-                undeleted: Vec::new(),
-            },
-        })
-    })
+    Ok(remove_emptied_directories(root, files))
 }
 
 /// The claimed paths of `files`, as the messages show them.
@@ -111,8 +116,8 @@ fn names(files: &[&ClaimPath]) -> Vec<String> {
 }
 
 /// Removes, deepest first, each directory above a file in `files` that the
-/// deletes left empty.
-fn remove_emptied_directories(root: &Path, files: &[&ClaimPath]) -> Result<(), RemoveRefusal> {
+/// deletes left empty, and returns those it could not remove, in path order.
+fn remove_emptied_directories(root: &Path, files: &[&ClaimPath]) -> Vec<DirectoryLeft> {
     let mut directories: Vec<ClaimPath> = files
         .iter()
         .flat_map(|file| file.ancestors())
@@ -127,9 +132,11 @@ fn remove_emptied_directories(root: &Path, files: &[&ClaimPath]) -> Result<(), R
     });
 
     let mut staying: Vec<ClaimPath> = Vec::new();
+    let mut left: Vec<DirectoryLeft> = Vec::new();
     for directory in directories {
         // A directory above one that stays holds it, so asking would only be
-        // told as much.
+        // told as much, and only the directory the removal was refused for is
+        // reported.
         if staying
             .iter()
             .any(|stays| Path::new(stays.as_str()).starts_with(directory.as_str()))
@@ -142,21 +149,23 @@ fn remove_emptied_directories(root: &Path, files: &[&ClaimPath]) -> Result<(), R
                 staying.push(directory);
             }
             Err(error) => {
-                return Err(RemoveRefusal::DirectoryNotRemoved {
+                left.push(DirectoryLeft {
                     directory: directory.as_str().to_owned(),
                     detail: error.to_string(),
                 });
+                staying.push(directory);
             }
         }
     }
-    Ok(())
+    left.sort_by(|first, second| first.directory.cmp(&second.directory));
+    left
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use super::{Deletion, DeletionFailed, delete, delete_from_disk};
+    use super::{Deletion, DeletionFailed, DirectoryLeft, delete, delete_from_disk};
     use crate::claim::ClaimPath;
     use crate::remove::refusal::RemoveRefusal;
 
@@ -178,7 +187,7 @@ mod tests {
         root: &Path,
         files: &[&str],
         delete_file: impl FnMut(&Path) -> std::io::Result<()>,
-    ) -> Result<(), Box<DeletionFailed>> {
+    ) -> Result<Vec<DirectoryLeft>, Box<DeletionFailed>> {
         let claims: Vec<ClaimPath> = files.iter().map(|file| claim_path(file)).collect();
         let references: Vec<&ClaimPath> = claims.iter().collect();
         delete(root, &references, delete_file)
@@ -388,32 +397,62 @@ mod tests {
     }
 
     #[test]
-    fn a_directory_that_cannot_be_removed_for_another_reason_reports_every_file_deleted() {
+    fn a_directory_that_cannot_be_removed_for_another_reason_is_left_and_the_run_succeeds() {
         // `link` is a link to a directory, so removing it as a directory is
         // refused for a reason that is not that it holds something, and
         // whoever runs the test is refused alike. The file was deleted before
-        // the removal was tried, and stays deleted.
+        // the removal was tried. The deletion still succeeds, and hands back
+        // the directory it could not remove with the system's words.
         let directory = tempfile::tempdir().expect("a temporary directory");
         let root = directory.path();
         fill(root, "real/f.txt", b"f\n");
         std::os::unix::fs::symlink("real", root.join("link")).expect("create the link");
 
-        let failed = deleting(root, &["link/f.txt"], delete_from_disk)
-            .expect_err("a link is not a directory to remove");
+        let left = deleting(root, &["link/f.txt"], delete_from_disk)
+            .expect("a directory that cannot be removed does not fail the deletion");
 
-        let RemoveRefusal::DirectoryNotRemoved { directory, detail } = &failed.refusal else {
-            panic!("expected DirectoryNotRemoved, got {:?}", failed.refusal);
-        };
-        assert_eq!(directory, "link");
-        assert!(!detail.is_empty());
-        assert_eq!(
-            failed.deletion,
-            Deletion {
-                deleted: strings(&["link/f.txt"]),
-                undeleted: Vec::new(),
-            }
-        );
+        assert_eq!(left.len(), 1, "{left:?}");
+        assert_eq!(left[0].directory, "link");
+        assert!(!left[0].detail.is_empty());
         assert!(!root.join("real/f.txt").exists());
         assert_eq!(names_in(root), ["link", "real"]);
+    }
+
+    #[test]
+    fn an_unrelated_emptied_directory_is_still_removed_after_another_was_refused() {
+        // `outer/link` is a link to a directory, so removing it is refused,
+        // while `other/x` and `other` are emptied by the delete of `other/x/g`
+        // and are removed. Only the directory the removal was refused for is
+        // reported: `outer`, which holds the link, stays and says nothing.
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let root = directory.path();
+        fill(root, "real/f.txt", b"f\n");
+        std::fs::create_dir(root.join("outer")).expect("create outer");
+        std::os::unix::fs::symlink("../real", root.join("outer/link")).expect("create the link");
+        fill(root, "other/x/g.txt", b"g\n");
+
+        let left = deleting(
+            root,
+            &["outer/link/f.txt", "other/x/g.txt"],
+            delete_from_disk,
+        )
+        .expect("a directory that cannot be removed does not fail the deletion");
+
+        assert_eq!(left.len(), 1, "{left:?}");
+        assert_eq!(left[0].directory, "outer/link");
+        assert!(!root.join("other").exists(), "the unrelated chain goes");
+        assert_eq!(names_in(&root.join("outer")), ["link"]);
+        assert_eq!(names_in(root), ["outer", "real"]);
+    }
+
+    #[test]
+    fn a_run_where_every_directory_goes_leaves_none() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let root = directory.path();
+        fill(root, "a/b/c.txt", b"c\n");
+
+        let left = deleting(root, &["a/b/c.txt"], delete_from_disk).expect("deleted");
+
+        assert_eq!(left, Vec::<DirectoryLeft>::new());
     }
 }

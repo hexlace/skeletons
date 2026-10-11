@@ -1816,12 +1816,9 @@ with. Each piece is worded by a pure function, and the one function that makes
 the attempt and appends them is the one the command and its tests run through
 (`crates/skeletons-engine/src/remove/deletion.rs` →
 `a_delete_failing_after_an_earlier_one_reports_which_were_deleted_and_which_were_not`,
-→ `the_first_delete_failing_reports_none_deleted`, and →
-`a_directory_that_cannot_be_removed_for_another_reason_reports_every_file_deleted`;
+and → `the_first_delete_failing_reports_none_deleted`;
 `crates/skeletons-engine/src/remove.rs` →
-`a_failed_delete_puts_the_manifest_and_lockfile_back_and_names_both_lists`,
-and →
-`a_directory_that_cannot_be_removed_names_every_file_deleted_and_none_not_deleted`;
+`a_failed_delete_puts_the_manifest_and_lockfile_back_and_names_both_lists`;
 `crates/skeletons-engine/src/remove/refusal.rs` →
 `some_files_deleted_and_some_not_are_each_named_after_what_rollback_said`;
 `ritual/tests/remove_refusals.rs` →
@@ -1946,6 +1943,23 @@ stays, and so does everything above it, and the workspace root is never reached
 `every_file_is_deleted_and_emptied_directories_are_gone`,
 and → `a_directory_that_still_holds_something_stays_and_so_does_everything_above_it`;
 `ritual/tests/remove_files.rs` → `a_directory_that_still_holds_something_stays`).
+
+A directory that cannot be removed for another reason, such as a parent that is
+not writable, is not a failure of the run. By then every file is deleted and the
+manifest and `Cargo.lock` are written and read back, so the whole of what the
+command exists to do has happened, and an empty directory is nothing git sees.
+Failing the run would put the manifest and `Cargo.lock` back and leave the
+project wearing a skeleton whose files were all gone. So the run succeeds and
+the directory is named in a line of its own, with the operating system's words.
+Only the directory the removal was refused for is named: the directories above
+it hold it and stay without a line, and the other emptied directories are still
+removed (`crates/skeletons-engine/src/remove/deletion.rs` →
+`a_directory_that_cannot_be_removed_for_another_reason_is_left_and_the_run_succeeds`,
+and → `an_unrelated_emptied_directory_is_still_removed_after_another_was_refused`;
+`crates/skeletons-engine/src/remove.rs` →
+`a_directory_that_cannot_be_removed_leaves_the_run_succeeding_and_names_it`;
+`crates/skeletons-engine/src/remove/message.rs` →
+`a_directory_left_has_its_line_after_the_files_and_before_what_to_commit`).
 
 The second is a file git cannot give back, which a clean work tree says nothing
 about. It is left in place and named under every flag that would delete it, as

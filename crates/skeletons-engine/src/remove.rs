@@ -66,7 +66,7 @@ use crate::work_tree;
 use crate::work_tree::abort::WorkTreeAbort;
 use crate::work_tree::writing_command::WritingCommand;
 use crate::workspace::{self, Prospect, ReadWorkspaceError};
-use deletion::Deletion;
+use deletion::{Deletion, DirectoryLeft};
 use files::{Claimed, FilesFlag, Settlement};
 use message::{Lockfile, Removed};
 use names::{ManifestShown, WearingKey};
@@ -138,6 +138,7 @@ fn run(command_line: &CommandLine, arguments: &RemoveArguments) -> Outcome {
         wearing: &prepared.wearing,
         manifest: &prepared.manifest(),
         files: &prepared.files,
+        directories_left: &done.directories_left,
         lockfile: done.lockfile,
     };
     for line in message::removed_lines(&removed) {
@@ -315,6 +316,8 @@ fn git_could_not_be_asked(abort: &WorkTreeAbort, prospect: &Prospect) -> Failure
 #[derive(Debug)]
 struct Done {
     lockfile: Lockfile,
+    /// The directories the deletes emptied that could not be removed.
+    directories_left: Vec<DirectoryLeft>,
 }
 
 /// The whole of what `remove` changes, inside [`rollback::attempt`], and the
@@ -368,7 +371,9 @@ fn attempt_removal(
 /// a delete fails, and nothing reads the workspace after the first file is
 /// gone. None of them is the manifest or the lockfile just written;
 /// [`prepare`] has checked that. When a delete fails, what it had done is put
-/// in `failed_deletion` for [`attempt_removal`] to word.
+/// in `failed_deletion` for [`attempt_removal`] to word. A directory the
+/// deletes emptied that cannot be removed does not fail the run, since every
+/// file is gone by then: it is in the [`Done`] returned.
 ///
 /// Every failure the wearer can cause or act on is an `Err`, so that
 /// `rollback` puts the manifest and `Cargo.lock` back: it does that when the
@@ -403,7 +408,7 @@ fn write_with(
     // `read_back` is `FnOnce` and spent above, which is what keeps any read of
     // the workspace from coming after the deletes: the files are not put back,
     // so nothing is checked about what they leave.
-    deletion::delete(
+    let directories_left = deletion::delete(
         &prepared.workspace_root,
         &prepared.files.to_delete(),
         delete_file,
@@ -412,7 +417,10 @@ fn write_with(
         *failed_deletion = Some(failed.deletion);
         failed.refusal.into_failure()
     })?;
-    Ok(Done { lockfile })
+    Ok(Done {
+        lockfile,
+        directories_left,
+    })
 }
 
 /// Writes the manifest with the wearing taken out of it, through `changes`.
@@ -1036,34 +1044,32 @@ mod tests {
     }
 
     #[test]
-    fn a_directory_that_cannot_be_removed_names_every_file_deleted_and_none_not_deleted() {
+    fn a_directory_that_cannot_be_removed_leaves_the_run_succeeding_and_names_it() {
         // `link` is a link to a directory, so removing it as a directory is
-        // refused for a reason of the operating system's. Every file was
-        // deleted by then, so the line says so and has no clause about files
-        // not deleted, and the manifest and the lockfile are back.
+        // refused for a reason of the operating system's, after the only file
+        // was deleted. Everything the command exists to do has happened, so the
+        // run succeeds: the manifest is the edited one, the lockfile the
+        // relocked one, the file is gone, and what the run hands to the message
+        // carries the directory with the system's words.
         let project = Project::new(WORN, deleting(&["link/f.yml"]));
         project.write_file("real/f.yml", "f\n");
         std::os::unix::fs::symlink("real", project.path("link")).expect("create the link");
 
-        let failure = project
+        let done = project
             .run(relocking(project.directory.path()), nothing_left())
-            .expect_err("a directory that cannot be removed must fail the run");
+            .expect("a directory that cannot be removed must not fail the run");
 
-        let message = failure.to_string();
-        assert!(
-            message
-                .starts_with("remove could not remove link, which deleting its files left empty: "),
-            "{message}"
-        );
-        assert!(
-            message.ends_with(&format!(
-                "{PUT_BACK}; the file remove had already deleted is not put back, and git has \
-                 it: link/f.yml"
-            )),
-            "{message}"
-        );
-        assert_put_back(&project);
+        assert_eq!(project.read("Cargo.toml"), UNWORN);
+        assert_eq!(project.read("Cargo.lock"), RELOCKED);
         assert!(!project.path("real/f.yml").exists());
+        assert_eq!(
+            done.directories_left.len(),
+            1,
+            "{:?}",
+            done.directories_left
+        );
+        assert_eq!(done.directories_left[0].directory, "link");
+        assert!(!done.directories_left[0].detail.is_empty());
     }
 
     /// The command `remove`'s arguments are read through, as the task builds

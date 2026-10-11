@@ -1292,7 +1292,8 @@ directory above it. The workspace root is never removed.
    `remove` keeps what it wrote only if the reader finds no wearing table at
    the key, worn or refused, and Cargo reports no dependency declared under it.
 4. The files. Each file to be deleted is deleted, in path order, and then each
-   emptied directory is removed.
+   emptied directory is removed. A directory that cannot be removed does not fail
+   the run, since every file is already deleted: it is reported as left.
 
 The files go last, after the read back has shown the wearing gone, so the
 manifest and `Cargo.lock` are already changed when a delete fails, and nothing
@@ -1319,7 +1320,9 @@ what to commit: the manifest always, `Cargo.lock` when this run changed it and
 git tracks it (`git add` refuses a lockfile git ignores, and a lockfile Cargo
 left alone has nothing to commit), and the deleted files when there are any. The
 lines between them depend on the flag, on which files git could give back and
-on whether a skeleton claims `Cargo.lock`.
+on whether a skeleton claims `Cargo.lock`. After the lines about the files comes
+one line for each directory the deletes emptied and that could not be removed,
+below.
 
 A bare `remove` with every file matching, for a skeleton worn as `toolchain`
 that claims `rust-toolchain.toml` and `rustfmt.toml`:
@@ -1341,6 +1344,23 @@ kept rust-toolchain.toml, which matches the skeleton
 kept rustfmt.toml, which has changed
 kept all 2 of its files, because 1 has changed from what the skeleton renders: they are the project's own now, to keep or to delete by hand
 commit ritual/Cargo.toml and Cargo.lock to record it
+```
+
+A directory the deletes emptied that cannot be removed, because its parent is
+not writable for one, does not fail the run: every file is deleted, the manifest
+and `Cargo.lock` are kept, and an empty directory is nothing git sees. The run
+succeeds and names the directory, with the operating system's words, in a line of
+its own after the lines about the files and before the last line. Each directory
+the removal was refused for has one, in path order, and the directories above it,
+which hold it, have none. A directory that still holds something stays without a
+line, and the other emptied directories are still removed:
+
+```text
+stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
+deleted config/tidy.toml
+deleted rustfmt.toml
+left config, which deleting its files emptied: <the operating system's words>
+commit ritual/Cargo.toml, Cargo.lock and the 2 deleted files to record it
 ```
 
 The summary counts the files that changed (`2 have changed` for two), and
@@ -1544,8 +1564,8 @@ message names every path that was not put back and says to check it before
 `` running the `remove` task again``, as `wear`'s does.
 
 These are the failures that come after the first write, each of which ends with
-that clause when something had been changed. The last two are the failures of
-deleting, which are followed by more, below:
+that clause when something had been changed. The last is the failure of
+deleting, which is followed by more, below:
 
 ```text
 remove could not read ritual/Cargo.toml to take `dependabot` out of it: <the operating system's words>
@@ -1556,7 +1576,6 @@ remove took `dependabot` out of ritual/Cargo.toml, and reading it back still fin
 remove took `dependabot` out of ritual/Cargo.toml, and reading the workspace back no longer finds the package this command line is built from; this is a defect in skeletons
 remove took `dependabot` out of ritual/Cargo.toml, and Cargo still reports a dependency under `dependabot`: it is declared somewhere remove does not edit; take it out by hand, then run the `remove` task again
 remove could not delete rustfmt.toml: <the operating system's words>
-remove could not remove .github, which deleting its files left empty: <the operating system's words>
 ```
 
 Cargo's words are escaped onto one line. The relock and the read back can also
@@ -1582,13 +1601,6 @@ not put back, and git has it: <the file>`. When the first delete fails:
 
 ```text
 remove could not delete rust-toolchain.toml: <the operating system's words>; ritual put the project back as it found it; remove had deleted no file; not deleted: rust-toolchain.toml and rustfmt.toml
-```
-
-A directory the deletes left empty that cannot be removed comes after every file
-is deleted, so there is no clause about files not deleted:
-
-```text
-remove could not remove .github, which deleting its files left empty: <the operating system's words>; ritual put the project back as it found it; the files remove had already deleted are not put back, and git has them: .github/dependabot.yml
 ```
 
 **The limits.**

@@ -1,10 +1,11 @@
 //! What `remove` tells the wearer when it has stopped wearing a skeleton.
 //!
 //! The lines come in the order the wearer reads them: what was taken out of the
-//! manifest, what became of each file, and what to commit. A line names a file
-//! or a key from outside only through [`Escaped`], so each is one line however
-//! its words came.
+//! manifest, what became of each file, which emptied directory could not be
+//! removed, and what to commit. A line names a file or a key from outside only
+//! through [`Escaped`], so each is one line however its words came.
 
+use super::deletion::DirectoryLeft;
 use super::files::{Fate, LeftBecause, Presence, Present, Remaining, Settlement};
 use super::names::ManifestShown;
 use super::resolve::{Candidate, Standing};
@@ -31,15 +32,19 @@ pub(crate) struct Removed<'run> {
     pub(crate) manifest: &'run ManifestShown,
     /// What became of the files.
     pub(crate) files: &'run Settlement,
+    /// The directories the deleted files emptied that could not be removed.
+    pub(crate) directories_left: &'run [DirectoryLeft],
     /// What happened to `Cargo.lock`.
     pub(crate) lockfile: Lockfile,
 }
 
 /// The lines `remove` prints when it succeeds: what was taken out, then a line
-/// for each file or one for all of them, then what to commit.
+/// for each file or one for all of them, then a line for each directory that
+/// could not be removed, then what to commit.
 pub(crate) fn removed_lines(removed: &Removed<'_>) -> Vec<String> {
     let mut lines = vec![taken_out_line(removed.wearing, removed.manifest)];
     lines.extend(file_lines(removed.files));
+    lines.extend(removed.directories_left.iter().map(directory_left_line));
     lines.push(commit_line(
         removed.manifest,
         removed.lockfile,
@@ -189,6 +194,17 @@ fn left_line(path: &str, because: LeftBecause) -> String {
     )
 }
 
+/// `` left {directory}, which deleting its files emptied: {detail} ``, where
+/// the detail is the operating system's reason the directory could not be
+/// removed.
+fn directory_left_line(left: &DirectoryLeft) -> String {
+    format!(
+        "left {}, which deleting its files emptied: {}",
+        Escaped(&left.directory),
+        Escaped(&left.detail)
+    )
+}
+
 /// How many files the run deleted.
 fn deleted_count(files: &Settlement) -> usize {
     files.to_delete().len()
@@ -215,7 +231,7 @@ fn commit_line(manifest: &ManifestShown, lockfile: Lockfile, deleted: usize) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{Lockfile, Removed, removed_lines};
+    use super::{DirectoryLeft, Lockfile, Removed, directory_left_line, removed_lines};
     use crate::command_line_crate::hand_back::Tracking;
     use crate::remove::files::{
         Disposition, Fate, LeftBecause, Presence, Present, Remaining, Settlement,
@@ -276,8 +292,16 @@ mod tests {
             wearing,
             manifest: &manifest("ritual/Cargo.toml"),
             files,
+            directories_left: &[],
             lockfile,
         })
+    }
+
+    fn directory_left(directory: &str, detail: &str) -> DirectoryLeft {
+        DirectoryLeft {
+            directory: directory.to_owned(),
+            detail: detail.to_owned(),
+        }
     }
 
     const TRACKED: Lockfile = Lockfile::Changed(Tracking::Tracked);
@@ -654,6 +678,7 @@ mod tests {
                     wearing,
                     manifest: &manifest(&poison()),
                     files: outcome,
+                    directories_left: &[directory_left(&poison(), &poison())],
                     lockfile: TRACKED,
                 }) {
                     assert_one_line(&line, &format!("{wearing:?} with {outcome:?}"));
@@ -665,9 +690,57 @@ mod tests {
             wearing: &wearings[0],
             manifest: &manifest(&poison()),
             files: &outcomes[0],
+            directories_left: &[],
             lockfile: TRACKED,
         })[0];
         assert_escaped_once(first, "the line that says what was taken out");
+    }
+
+    #[test]
+    fn a_directory_left_is_worded_with_the_systems_reason() {
+        assert_eq!(
+            directory_left_line(&directory_left("a/b", "Permission denied (os error 13)")),
+            "left a/b, which deleting its files emptied: Permission denied (os error 13)"
+        );
+    }
+
+    #[test]
+    fn a_directory_left_has_its_line_after_the_files_and_before_what_to_commit() {
+        // Two files are deleted and one is left in place, and two directories
+        // could not be removed. The lines are the one for what was taken out,
+        // one for each file, one for each directory in the order given, and
+        // the commit line last, which counts files only.
+        let files = Settlement::Deleting(vec![
+            deleted("a/b/c.yml"),
+            deleted("x/y.yml"),
+            left("z.yml", LeftBecause::NotTracked),
+        ]);
+
+        let printed = removed_lines(&Removed {
+            wearing: &worn("ci", "a-skeleton"),
+            manifest: &manifest("ritual/Cargo.toml"),
+            files: &files,
+            directories_left: &[
+                directory_left("a/b", "Permission denied (os error 13)"),
+                directory_left("x", "Operation not permitted (os error 1)"),
+            ],
+            lockfile: TRACKED,
+        });
+
+        assert_eq!(
+            printed,
+            [
+                "stopped wearing a-skeleton 0.1.0: took the dependency `ci` and \
+                 [package.metadata.skeletons.ci] out of ritual/Cargo.toml",
+                "deleted a/b/c.yml",
+                "deleted x/y.yml",
+                "left z.yml in place: git does not track it, so git could not give it back; \
+                 delete it by hand if it should go",
+                "left a/b, which deleting its files emptied: Permission denied (os error 13)",
+                "left x, which deleting its files emptied: Operation not permitted (os error 1)",
+                "commit ritual/Cargo.toml, Cargo.lock and the 2 deleted files to record it",
+            ]
+        );
     }
 
     #[test]

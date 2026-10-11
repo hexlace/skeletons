@@ -41,14 +41,17 @@ pub struct Row {
 }
 
 /// What surveying a workspace found: every worn dependency (whether or not it
-/// ended up refused), every file the worn skeletons claim, and every refusal.
+/// ended up refused), every claimed file that could be compared, and every
+/// refusal.
 pub struct Survey<'workspace> {
     /// The workspace root, as cargo reports it.
     pub root: PathBuf,
     /// Every worn dependency, refused or not.
     pub worn: Vec<&'workspace WornDependency>,
-    /// One row per file a worn skeleton claims, in path order. A skeleton
-    /// with a refusal of its own has none.
+    /// One row per claimed file that could be compared, in path order. A
+    /// skeleton with a refusal of its own has none, and a path two worn
+    /// skeletons both claim has none either: it is reported as an overlap
+    /// refusal instead.
     pub rows: Vec<Row>,
     pub(crate) refusals: Vec<Refusal>,
 }

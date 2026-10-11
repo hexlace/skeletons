@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 keywords.workspace = true
-description = "The engine behind skeletons and skeletons-library: check, sync, wear and remove."
+description = "The engine behind skeletons and skeletons-library. Published for those two, with no stability promise: depend on one of them instead."
 readme = "readme.md"
 categories = ["development-tools"]
 # Test skeletons are real crates under this one's own directory, each with a
@@ -108,6 +108,12 @@ commands = [
 # `cargo test` unifies it in, and only because `ritual/Cargo.toml` asks for it
 # as a dev-dependency feature (see that manifest's own comment).
 test-util = []
+
+# docs.rs builds with the default features, which would leave `task()`, the
+# item this crate's description is about, off the page. `test-util` stays off:
+# it compiles test seams and adds nothing to a page.
+[package.metadata.docs.rs]
+features = ["commands"]
 
 [lints]
 workspace = true

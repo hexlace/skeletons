@@ -58,17 +58,26 @@ const CARGO_LOCKED_REFUSAL: &str = "--locked was passed to prevent this";
 /// Why the workspace could not be read at all — as opposed to a single worn
 /// dependency being refused, which still leaves every other one reported.
 #[derive(Debug)]
-pub(crate) enum ReadWorkspaceError {
+pub enum ReadWorkspaceError {
     /// `Cargo.lock` is missing or out of date, and `--locked` refused to
     /// write one.
     Lockfile,
     /// `cargo metadata` ran and exited unsuccessfully, for any other reason.
-    CargoMetadataFailed { stderr: String },
+    CargoMetadataFailed {
+        /// What cargo printed on its standard error.
+        stderr: String,
+    },
     /// `cargo` (or whatever `$CARGO` names) could not be run at all.
-    CargoUnavailable { detail: String },
+    CargoUnavailable {
+        /// Why cargo could not be run.
+        detail: String,
+    },
     /// The output was too large, was not valid JSON in the expected shape,
     /// or named a format version this crate does not understand.
-    MetadataUnreadable { detail: String },
+    MetadataUnreadable {
+        /// What was wrong with the output.
+        detail: String,
+    },
 }
 
 /// Runs `$CARGO metadata --format-version 1 --locked --all-features` (with

@@ -7,6 +7,7 @@
 //! nowhere else. That is what lets one assertion count occurrences instead of
 //! only looking for one.
 
+use super::RefusalKind;
 use crate::claim::ClaimPath;
 
 /// The first half of [`POISON`]: a word no message contains.
@@ -34,6 +35,27 @@ pub(crate) fn poison() -> String {
 /// A claimed path holding `text`, which must be a well-formed path.
 pub(crate) fn claim(text: &str) -> ClaimPath {
     ClaimPath::from_rendering_path(text).expect("a well-formed test path")
+}
+
+/// How many kinds of [`RefusalKind`] there are. The match in [`kind_index`]
+/// has no wildcard, so a variant added without an arm does not compile, and
+/// the samples that go through [`assert_every_kind`] must then cover it.
+pub(crate) const REFUSAL_KINDS: usize = 10;
+
+/// The index of a refusal kind, below [`REFUSAL_KINDS`].
+pub(crate) const fn kind_index(kind: RefusalKind) -> usize {
+    match kind {
+        RefusalKind::NotATable => 0,
+        RefusalKind::ReservedKey => 1,
+        RefusalKind::NamesNoDependency => 2,
+        RefusalKind::Unresolved => 3,
+        RefusalKind::Ambiguous => 4,
+        RefusalKind::NotASkeleton => 5,
+        RefusalKind::OptionRefused => 6,
+        RefusalKind::SkeletonInvalid => 7,
+        RefusalKind::Overlap => 8,
+        RefusalKind::UnsafePath => 9,
+    }
 }
 
 /// Asserts `text` is one line that shows the poisoned name escaped exactly

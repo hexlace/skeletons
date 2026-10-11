@@ -733,7 +733,7 @@ fn wearing_refusal_json(
     }
 }
 
-/// [`Refusal::Render`]'s own split (survey/refusal.rs's `Refusal::kind`):
+/// [`Refusal::Render`]'s own split (`Refusal::classify`, in survey/refusal.rs):
 /// `error.file()` some names a defect in the skeleton itself
 /// (`skeleton-invalid`); `error.file()` none is about the wearer's own
 /// recorded choices instead (`option-refused`), the same JSON shape

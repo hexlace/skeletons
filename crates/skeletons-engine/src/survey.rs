@@ -15,34 +15,48 @@ use crate::skeleton;
 use crate::workspace::{Wearing, Workspace, WornDependency, WornId};
 
 pub(crate) use refusal::{Refusal, join_and, option_shape_detail, unsafe_path_change_clause};
+pub use refusal::{RefusalKind, RefusalRecord, RefusedWearing};
 pub(crate) use spelling::told_apart;
 
-/// One bone's own drift fact — the row `check`'s output prints one
-/// line for, and the row `sync` writes from when it is drifted.
-pub(crate) struct Row {
-    pub(crate) path: ClaimPath,
-    pub(crate) claimant: Claimant,
-    pub(crate) drift: Drift,
-    /// The bytes the skeleton renders for this path — carried from the one
-    /// render `survey_one` already did, so `sync` never renders a skeleton a
-    /// second time just to get the bytes it already compared.
-    pub(crate) rendered: Vec<u8>,
+/// One file a worn skeleton claims: where it lives, who claims it, whether it
+/// matches, and the bytes it should hold.
+pub struct Row {
+    /// Where the file lives, relative to the workspace root.
+    pub path: ClaimPath,
+    /// The worn dependency that claims the file.
+    pub claimant: Claimant,
+    /// Whether the file on disk matches the render, and if not, why not.
+    pub drift: Drift,
+    /// The bytes the skeleton renders for this path: writing them to the
+    /// path makes the file match, whatever it held before.
+    pub rendered: Vec<u8>,
 }
 
-/// Everything the render-and-compare phase determined about a workspace:
-/// every worn dependency (whether or not it ended up refused), every row a
-/// claim resolved to, and every refusal.
-pub(crate) struct Survey<'workspace> {
-    pub(crate) root: PathBuf,
-    pub(crate) worn: Vec<&'workspace WornDependency>,
-    pub(crate) rows: Vec<Row>,
+/// What surveying a workspace found: every worn dependency (whether or not it
+/// ended up refused), every file the worn skeletons claim, and every refusal.
+pub struct Survey<'workspace> {
+    /// The workspace root, as cargo reports it.
+    pub root: PathBuf,
+    /// Every worn dependency, refused or not.
+    pub worn: Vec<&'workspace WornDependency>,
+    /// One row per file a worn skeleton claims, in path order. A skeleton
+    /// with a refusal of its own has none.
+    pub rows: Vec<Row>,
     pub(crate) refusals: Vec<Refusal>,
+}
+
+impl Survey<'_> {
+    /// Every refusal as data, in the order the survey found them.
+    #[must_use]
+    pub fn refusal_records(&self) -> Vec<RefusalRecord> {
+        self.refusals.iter().map(Refusal::record).collect()
+    }
 }
 
 /// Renders every worn skeleton `workspace` names, compares each claimed file
 /// against what is really on disk, and collects every refusal along the
 /// way — nothing here writes anything.
-pub(crate) fn survey(workspace: &Workspace) -> Survey<'_> {
+pub fn survey(workspace: &Workspace) -> Survey<'_> {
     let mut worn = Vec::new();
     let mut claims = Vec::new();
     let mut refusals = Vec::new();
@@ -253,4 +267,170 @@ fn resolve_skeleton_claims(
     );
     refusals.sort_by(|left, right| left.unsafe_path().cmp(&right.unsafe_path()));
     (Vec::new(), refusals)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::{RefusalKind, RefusalRecord, RefusedWearing, survey};
+    use crate::skeleton::Choices;
+    use crate::workspace::{
+        OptionShapeRefusal, Pin, ShapeFound, Wearing, Workspace, WornDependency,
+    };
+
+    /// A workspace rooted at `root` that wears the one dependency `worn`.
+    fn workspace_wearing(root: PathBuf, worn: WornDependency) -> Workspace {
+        Workspace {
+            root,
+            wearing: vec![Wearing::Worn(worn)],
+        }
+    }
+
+    /// A worn dependency named `ci` in `member/Cargo.toml`, over the skeleton
+    /// in `directory`, holding `choices`.
+    fn worn_over(
+        directory: PathBuf,
+        choices: Result<Choices, OptionShapeRefusal>,
+    ) -> WornDependency {
+        WornDependency {
+            manifest: "member/Cargo.toml".to_owned(),
+            key: "ci".to_owned(),
+            package: "a-skeleton".to_owned(),
+            version: semver::Version::new(0, 1, 0),
+            pin: Pin::from_source(None, &directory),
+            skeleton_directory: directory,
+            choices,
+        }
+    }
+
+    #[test]
+    fn a_wearing_whose_options_are_refused_is_still_worn_has_no_rows_and_is_named_by_its_record() {
+        // A wearer who records an option value of the wrong shape still wears
+        // the skeleton, so it stays in `worn`; nothing is rendered for it, so
+        // it has no rows; and its refusal, read as data, names that wearing.
+        // The workspace is built by hand over a directory that need not
+        // exist, because the refusal is decided before the skeleton is read.
+        let refused = OptionShapeRefusal {
+            option: "cadence".to_owned(),
+            found: ShapeFound::Number,
+        };
+        let workspace = workspace_wearing(
+            PathBuf::from("/workspace"),
+            worn_over(PathBuf::from("/skeleton"), Err(refused)),
+        );
+
+        let survey = survey(&workspace);
+
+        let [worn] = survey.worn.as_slice() else {
+            panic!(
+                "the refused wearing must still be worn: {}",
+                survey.worn.len()
+            );
+        };
+        assert_eq!(
+            (worn.manifest.as_str(), worn.key.as_str()),
+            ("member/Cargo.toml", "ci")
+        );
+        assert!(survey.rows.is_empty(), "a refused wearing has no rows");
+        assert_eq!(
+            survey.refusal_records(),
+            [RefusalRecord {
+                kind: RefusalKind::OptionRefused,
+                wearings: vec![RefusedWearing {
+                    manifest: "member/Cargo.toml".to_owned(),
+                    dependency: Some("ci".to_owned()),
+                }],
+                paths: Vec::new(),
+            }]
+        );
+    }
+
+    #[cfg(skeletons_checkout)]
+    mod over_the_plain_fixture {
+        use std::fs;
+        use std::path::{Path, PathBuf};
+
+        use tempfile::TempDir;
+
+        use super::{survey, workspace_wearing, worn_over};
+        use crate::acceptance::test_skeleton;
+        use crate::claim::{Drift, DriftReason};
+        use crate::skeleton::Choices;
+        use crate::survey::Row;
+
+        /// The skeleton these tests wear: one file, `plain.yml`, rendered
+        /// exactly as it is written.
+        const FIXTURE: &str = "renders/passthrough-plain";
+
+        /// The one row of surveying `root` while wearing the fixture.
+        fn only_row(root: &Path) -> Row {
+            let workspace = workspace_wearing(
+                root.to_owned(),
+                worn_over(test_skeleton(FIXTURE), Ok(Choices::new())),
+            );
+            let mut rows = survey(&workspace).rows;
+            assert_eq!(rows.len(), 1, "the fixture claims exactly one file");
+            rows.remove(0)
+        }
+
+        fn fixture_bytes() -> Vec<u8> {
+            fs::read(test_skeleton(FIXTURE).join("files/plain.yml"))
+                .expect("the fixture skeleton holds files/plain.yml")
+        }
+
+        fn empty_root() -> TempDir {
+            TempDir::new().expect("a temporary directory")
+        }
+
+        #[test]
+        fn a_missing_claimed_file_is_a_row_that_carries_the_bytes_that_make_it_match() {
+            // Surveying an empty root: the file the skeleton claims is not
+            // there, so its row is `Missing`, and the row carries the bytes
+            // the skeleton renders (the fixture's own file, read here from
+            // disk, since the fixture renders it unchanged). Writing exactly
+            // those bytes where the row says, then surveying again, makes it
+            // `Matches`: the row alone is enough to bring the file in line.
+            let root = empty_root();
+
+            let row = only_row(root.path());
+
+            assert_eq!(row.path.as_str(), "plain.yml");
+            assert_eq!(row.drift, Drift::Drifted(DriftReason::Missing));
+            assert_eq!(row.claimant.dependency, "ci");
+            assert_eq!(row.rendered, fixture_bytes());
+
+            fs::write(root.path().join(row.path.as_str()), &row.rendered)
+                .expect("the temporary root is writable");
+
+            assert_eq!(only_row(root.path()).drift, Drift::Matches);
+        }
+
+        #[test]
+        fn a_claimed_file_with_other_bytes_is_changed() {
+            // The same survey over a root that already holds the file, with
+            // bytes that are not the render: `Changed`, and the row still
+            // carries the render, not what is on disk.
+            let root = empty_root();
+            fs::write(root.path().join("plain.yml"), b"name: edited\n")
+                .expect("the temporary root is writable");
+
+            let row = only_row(root.path());
+
+            assert_eq!(row.drift, Drift::Drifted(DriftReason::Changed));
+            assert_eq!(row.rendered, fixture_bytes());
+        }
+
+        #[test]
+        fn the_survey_names_the_root_it_was_given() {
+            // `root` is the workspace root a caller joins a row's path onto.
+            let root = empty_root();
+            let workspace = workspace_wearing(
+                root.path().to_owned(),
+                worn_over(test_skeleton(FIXTURE), Ok(Choices::new())),
+            );
+
+            assert_eq!(survey(&workspace).root, PathBuf::from(root.path()));
+        }
+    }
 }

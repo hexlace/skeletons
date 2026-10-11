@@ -12,13 +12,16 @@ mod worn;
 
 use std::path::{Path, PathBuf};
 
-pub(crate) use cargo_metadata::ReadWorkspaceError;
+pub use cargo_metadata::ReadWorkspaceError;
 pub(crate) use crate_name::{same_crate, underscored};
 pub(crate) use locate::PackageIdentity;
 pub(crate) use pin::{CRATES_IO_SOURCE, Pin};
 pub(crate) use prospect::{Declared, Member, Prospect, SkeletonsTable, read_prospect};
+#[cfg(test)]
+pub(crate) use wearing_table::ShapeFound;
 pub(crate) use wearing_table::{OptionShapeRefusal, RESERVED_WEARING_KEYS};
-pub(crate) use worn::{WornDependency, WornId};
+pub use worn::WornDependency;
+pub(crate) use worn::WornId;
 
 use locate::LocateRefusal;
 use schema::{Document, Package};
@@ -26,7 +29,7 @@ use wearing_table::{TableEntryRefusal, WholeTableRefusal};
 
 /// What a repository wears: its root, and one outcome per
 /// `[package.metadata.skeletons.<key>]` table found on any member.
-pub(crate) struct Workspace {
+pub struct Workspace {
     pub(crate) root: PathBuf,
     pub(crate) wearing: Vec<Wearing>,
 }
@@ -86,28 +89,26 @@ pub(crate) enum WearingRefusal {
     },
 }
 
-/// Whether `read` may let `cargo metadata` reach the network for a locked
+/// Whether [`read`] may let `cargo metadata` reach the network for a locked
 /// source it does not already have.
 ///
-/// `check` always passes `Allowed`, so a fresh clone whose members were
-/// never built still works: cargo fetches exactly what the lockfile pins,
-/// which is cargo's own normal fetch, not a question `skeletons` asks. `wear`
-/// reads the same way, through `read_prospect` and through its read back,
-/// since `cargo add` may itself be fetching. `sync` always passes `Refused`
-/// (`--offline`), because its own contract is that writing requires nothing
-/// beyond what is already locked — a clone whose sources were never fetched
-/// aborts with cargo's own offline error rather than fetching them. Each
-/// command's own `run` makes that choice and none takes it from a caller —
-/// there is nowhere else in the crate a different choice could come from.
+/// `Allowed` is cargo's own normal fetch of exactly what the lockfile pins, so
+/// a fresh clone whose members were never built still reads. `Refused` runs
+/// cargo with `--offline`: a clone whose sources were never fetched fails with
+/// cargo's own offline error rather than fetching them. `skeletons check` and
+/// `skeletons wear` read with `Allowed`; `skeletons sync` reads with `Refused`,
+/// because writing requires nothing beyond what is already locked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Network {
+pub enum Network {
+    /// Cargo may fetch a locked source it does not already have.
     Allowed,
+    /// Cargo runs offline and fetches nothing.
     Refused,
 }
 
 /// Reads `directory`'s workspace (cargo walks up from it to the workspace
 /// root itself) and turns it into every wearing table any member declares.
-pub(crate) fn read(directory: &Path, network: Network) -> Result<Workspace, ReadWorkspaceError> {
+pub fn read(directory: &Path, network: Network) -> Result<Workspace, ReadWorkspaceError> {
     Ok(from_document(&cargo_metadata::fetch(directory, network)?))
 }
 

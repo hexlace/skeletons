@@ -2,21 +2,31 @@
 //!
 //! ## What this crate provides
 //!
-//! [`task()`] is the whole of this crate's public API: the group of the
-//! three commands `check`, `sync` and `wear`, which `skeletons` hands on as
-//! its own bundle. Everything else in the crate is private.
+//! [`task()`] is the group of the three commands `check`, `sync` and `wear`,
+//! which `skeletons` hands on as its own bundle.
+//!
+//! The rest of the public items read a workspace and report on it as data.
+//! [`read`] reads what a workspace wears, and lets cargo reach the network
+//! only when it is handed [`Network::Allowed`]. [`survey()`] renders every
+//! worn skeleton and compares what it renders with the files on disk, and
+//! writes nothing. The items they take and return carry the answer: each worn
+//! skeleton, each file it claims with its state, and each refusal with the
+//! wearings and paths it concerns.
 
 // Every module in this crate is private, and every item shared between
 // modules is `pub(crate)`: the visibility that is true, and what rustc's
-// `unreachable_pub` (warned in the workspace lints) asks for. Clippy's
-// nursery `redundant_pub_crate` asks for `pub` instead, for every such
-// item, so the two lints disagree crate-wide. `expect` rather than `allow`,
-// so the suppression goes stale loudly if the crate ever stops needing it —
-// one explanation here, rather than one repeated at every module that would
-// otherwise need its own `#[allow]`.
+// `unreachable_pub` (warned in the workspace lints) asks for. The public items
+// are the ones re-exported from this root, so this list is the whole public
+// surface. Clippy's nursery `redundant_pub_crate` asks for `pub` instead, for
+// every `pub(crate)` item in a private module, so the two lints disagree
+// crate-wide. `expect` rather than `allow`, so the suppression goes stale
+// loudly if the crate ever stops needing it — one explanation here, rather
+// than one repeated at every module that would otherwise need its own
+// `#[allow]`.
 #![expect(
     clippy::redundant_pub_crate,
-    reason = "every module is private; pub(crate) is true, unreachable_pub wants it"
+    reason = "every module is private and the public items are re-exported from the root; \
+              pub(crate) is true for the rest, unreachable_pub wants it"
 )]
 
 use rituals::Task;
@@ -34,6 +44,10 @@ mod sync;
 mod wear;
 mod work_tree;
 mod workspace;
+
+pub use claim::{ClaimPath, Claimant, Drift, DriftReason};
+pub use survey::{RefusalKind, RefusalRecord, RefusedWearing, Row, Survey, survey};
+pub use workspace::{Network, ReadWorkspaceError, Workspace, WornDependency, read};
 
 // Tests for `skeleton::render`, read from real skeleton crates under
 // `test-skeletons/`, which `exclude = ["/test-skeletons"]` in this crate's manifest

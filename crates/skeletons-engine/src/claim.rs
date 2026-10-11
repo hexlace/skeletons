@@ -8,7 +8,8 @@ mod untrackable;
 
 use std::path::{Path, PathBuf};
 
-pub(crate) use drift::{Drift, DriftReason, compare};
+pub(crate) use drift::compare;
+pub use drift::{Drift, DriftReason};
 pub(crate) use location::{
     Located, OnDisk, TooLongName, UnsafePathCause, lists_exact_spelling, look_up, read_at_most,
     resolve,
@@ -60,10 +61,10 @@ pub(crate) fn staging_name(file_name: &str) -> String {
 }
 
 /// A validated path relative to the workspace root: built only from a
-/// [`crate::skeleton::Rendering`] path, so its components are always non-empty
+/// path a skeleton's render produced, so its components are always non-empty
 /// real names, `/`-joined, and never `..`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct ClaimPath(String);
+pub struct ClaimPath(String);
 
 impl ClaimPath {
     /// Builds a claim path from one of a rendering's own paths, refusing it
@@ -101,7 +102,9 @@ impl ClaimPath {
         Ok(Self(path.to_owned()))
     }
 
-    pub(crate) fn as_str(&self) -> &str {
+    /// The path as text, `/`-separated.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 
@@ -269,11 +272,15 @@ impl std::fmt::Display for ClaimPath {
 /// Which worn dependency claims a file — everything a message needs to name
 /// it: `<dependency> in <manifest> (<skeleton> <version>)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Claimant {
-    pub(crate) manifest: String,
-    pub(crate) dependency: String,
-    pub(crate) skeleton: String,
-    pub(crate) version: semver::Version,
+pub struct Claimant {
+    /// The wearing member's `Cargo.toml`, relative to the workspace root.
+    pub manifest: String,
+    /// The dependency key the wearing table sits under.
+    pub dependency: String,
+    /// The skeleton's package name.
+    pub skeleton: String,
+    /// The skeleton's locked version.
+    pub version: semver::Version,
 }
 
 /// One claimed file: where it should live, who claims it, and the bytes it

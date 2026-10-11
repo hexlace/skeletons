@@ -5,7 +5,7 @@ use super::location::OnDisk;
 
 /// Why a claimed file is drifted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DriftReason {
+pub enum DriftReason {
     /// The file does not exist at all.
     Missing,
     /// The file exists, but its bytes differ from the render.
@@ -14,8 +14,10 @@ pub(crate) enum DriftReason {
 
 /// Whether a claimed file matches its render.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Drift {
+pub enum Drift {
+    /// The bytes on disk are the bytes the skeleton renders.
     Matches,
+    /// The file differs from the render, for the reason given.
     Drifted(DriftReason),
 }
 

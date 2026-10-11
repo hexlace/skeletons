@@ -22,16 +22,16 @@ pub(crate) struct WornId {
 /// One `[package.metadata.skeletons.<key>]` table that named a real skeleton:
 /// located, pinned, and either holding a valid set of choices or refused on
 /// its own option values.
-pub(crate) struct WornDependency {
+pub struct WornDependency {
     /// The wearing member's own `Cargo.toml`, relative to the workspace
     /// root, `/`-separated — the file a person opens to change anything.
-    pub(crate) manifest: String,
+    pub manifest: String,
     /// The dependency key the wearing table sits under.
-    pub(crate) key: String,
+    pub key: String,
     /// The skeleton's own package name, as locked.
-    pub(crate) package: String,
+    pub package: String,
     /// The skeleton's own locked version.
-    pub(crate) version: semver::Version,
+    pub version: semver::Version,
     /// The skeleton crate's own root directory: `manifest_path.parent()`.
     pub(crate) skeleton_directory: PathBuf,
     pub(crate) pin: Pin,

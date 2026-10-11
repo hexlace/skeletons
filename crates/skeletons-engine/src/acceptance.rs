@@ -60,7 +60,7 @@ mod verbatim;
 /// they are meant to be read the same way `render` will read a real skeleton's
 /// directory.
 #[cfg(skeletons_checkout)]
-fn test_skeleton(relative: &str) -> std::path::PathBuf {
+pub(crate) fn test_skeleton(relative: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("test-skeletons")
         .join(relative)

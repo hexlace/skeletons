@@ -85,10 +85,13 @@ const _: () = {
 /// - [`is_cargo_metadata_failed`](ReadWorkspaceError::is_cargo_metadata_failed)
 ///   when cargo ran and failed, for example on a source that was never fetched.
 /// - [`is_cargo_not_started`](ReadWorkspaceError::is_cargo_not_started) when
-///   cargo could not be started. A `directory` that does not exist, or cannot
-///   be entered, is reported this way too, and
+///   cargo could not be started although `directory` is a directory. A
+///   `directory` that cannot be entered is reported this way too, and
 ///   [`detail`](ReadWorkspaceError::detail) holds the operating system's words,
 ///   which do not say which.
+/// - [`is_directory_not_found`](ReadWorkspaceError::is_directory_not_found)
+///   when cargo could not be started and no directory was found at
+///   `directory`.
 /// - [`is_metadata_unreadable`](ReadWorkspaceError::is_metadata_unreadable)
 ///   when cargo's output could not be used.
 ///
@@ -100,7 +103,8 @@ const _: () = {
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> {
-    let workspace = skeletons_engine::read(directory.as_ref(), Network::Refused)
-        .map_err(ReadWorkspaceError::from_engine)?;
+    let directory = directory.as_ref();
+    let workspace = skeletons_engine::read(directory, Network::Refused)
+        .map_err(|error| ReadWorkspaceError::from_engine(error, directory))?;
     Ok(Report::from_survey(&survey(&workspace)))
 }

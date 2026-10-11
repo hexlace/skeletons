@@ -340,16 +340,20 @@ because they are the skeleton's, unchanged. If any has changed, it deletes none
 of them: it stops wearing the skeleton, says which files have changed, and lists
 all of them, so you can keep them as your own or clear them out. `--delete-files`
 deletes every file, changed ones included, and `--keep-files` leaves every file
-where it is. `--delete-files` and `--keep-files` exclude each other.
+where it is. `--delete-files` and `--keep-files` exclude each other. Removing a
+skeleton deletes the files it claims, including one the project needs to build,
+and git has them.
 
 A file is deleted only if git could give it back, by the same proof `sync`
 requires before it overwrites one. A file git ignores, hides or would not check
 out as it is stays where it is, with the reason, and the wearing still goes. It
 counts as neither deleted nor changed, so it never makes the others stay. A
 `Cargo.lock` that a skeleton claims is left the same way under every flag,
-because `remove` has just rewritten it and the project needs it. If a run
-fails after it has begun to write, the manifest, `Cargo.lock` and every file
-are put back and it says so. The full reading, every refusal and the limits are
+because `remove` has just rewritten it and the project needs it. The files are
+deleted last. If a run fails after it has begun to write, the manifest and
+`Cargo.lock` are put back and it says so; a delete that fails stops the
+deleting, the files already deleted stay deleted, and the failure names the
+files deleted and the files not. The full reading, every refusal and the limits are
 in [`.docs/wearing.md`](.docs/wearing.md#remove).
 
 ## Concepts

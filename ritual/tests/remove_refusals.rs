@@ -1,6 +1,6 @@
 //! Acceptance: `remove` refuses what it must, says what is wrong in one whole
 //! line, and writes nothing; and when it fails after it has begun writing, it
-//! puts everything back.
+//! puts the manifest and the lockfile back and names the files it had deleted.
 //!
 //! Every scenario reads the whole work tree before and after (every file's
 //! bytes and mode, every directory's mode, `Cargo.lock` included) and
@@ -12,16 +12,14 @@
 mod support;
 
 use std::error::Error;
-use std::fs;
 
 use support::one_line::toml_string;
 use support::remove::{
-    HOLDING_DIRECTORY, MANIFEST, ONE_UNCOMMITTED_CHANGE_LINE, ReadOnlyDirectory, Worn,
-    assert_printed, assert_refused, commit_line, dependency_under_key,
-    fixture_wearing_in_another_member, keys_check_lists, porcelain, run_remove,
-    stopped_wearing_line, sync_and_commit, tree_state, wear,
+    MANIFEST, ONE_UNCOMMITTED_CHANGE_LINE, ReadOnlyDirectory, Worn, assert_printed, assert_refused,
+    commit_line, dependency_under_key, fixture_wearing_in_another_member, keys_check_lists,
+    porcelain, run_remove, stopped_wearing_line, sync_and_commit, tree_state, wear,
 };
-use support::wear::{COMMAND_LINE_PACKAGE, commit_everything, fixture_for_wearing};
+use support::wear::{COMMAND_LINE_PACKAGE, fixture_for_wearing};
 use support::{
     Fixture, TestOutcome, wearing_table, write_minimal_skeleton, write_package_manifest,
 };
@@ -341,51 +339,26 @@ fn a_work_tree_with_an_uncommitted_change_is_refused_and_nothing_is_written() ->
 }
 
 #[test]
-fn something_at_the_holding_directorys_name_is_refused_when_files_would_be_deleted() -> TestOutcome
-{
-    // `remove` moves the files it deletes into `.skeletons-remove` first, so
-    // that a failure can move them back. A committed file with that name is
-    // in the way, and `remove` says so before writing anything.
-    let worn = Worn::synced("passthrough-plain", None)?;
-    worn.fixture.write(HOLDING_DIRECTORY, b"mine\n")?;
-    commit_everything(&worn.fixture, "fixture: something in the way")?;
-    let before = tree_state(worn.fixture.root())?;
-
-    let report = run_remove(&worn.fixture, &["passthrough-plain"])?;
-
-    assert_refused(
-        &report,
-        ".skeletons-remove is in the way at the workspace root, so remove wrote nothing: it \
-         moves the files it deletes there first, so that a failure can move them back; delete \
-         or move it, then run the `remove` task again",
-    );
-    assert_eq!(
-        tree_state(worn.fixture.root())?,
-        before,
-        "a refused remove must leave the work tree as it was"
-    );
-    Ok(())
-}
-
-#[test]
-fn a_failure_partway_puts_the_manifest_the_lockfile_and_every_file_back() -> TestOutcome {
+fn a_delete_failing_partway_puts_the_manifest_and_the_lockfile_back_and_names_the_files_deleted_and_not()
+-> TestOutcome {
     // `nested-dotfiles` claims `.github/dependabot.yml`, `a/b/deep.yml` and
-    // `root.yml`, all matching. `a/b` is made unwritable, so moving
-    // `deep.yml` out of it fails after `remove` has already written the
-    // manifest and the lockfile (and moved the first file). The run must end
-    // on the failure, say it put the project back, and leave the manifest,
-    // the lockfile, every file's bytes and mode and every directory as they
-    // were. A process that can write into a 0o555 directory anyway (a
-    // superuser) cannot show this, so there the scenario says `skipped:` and
-    // passes.
+    // `root.yml`, all matching. `a/b` is made unwritable, so deleting
+    // `deep.yml` fails after `remove` has written the manifest and the
+    // lockfile and deleted `dependabot.yml`. The run must end on the failure,
+    // and leave the manifest and the lockfile as they were, `dependabot.yml`
+    // deleted (git has it), and `deep.yml` and `root.yml` as they were. The
+    // one line must say what became of the project and name the file deleted
+    // and the two that were not. A process that can write into a 0o555
+    // directory anyway (a superuser) cannot show this, so there the scenario
+    // says `skipped:` and passes.
     let worn = Worn::synced("nested-dotfiles", None)?;
     let root = worn.fixture.root();
     let Some(_unwritable) = ReadOnlyDirectory::make(&root.join("a/b"))? else {
         support::one_line::skip("this process can write into a 0o555 directory");
         return Ok(());
     };
-    let tree_before = tree_state(root)?;
-    let status_before = porcelain(&worn.fixture)?;
+    let mut expected_tree = tree_state(root)?;
+    expected_tree.remove(".github/dependabot.yml");
 
     let report = run_remove(&worn.fixture, &["nested-dotfiles"])?;
 
@@ -394,28 +367,22 @@ fn a_failure_partway_puts_the_manifest_the_lockfile_and_every_file_back() -> Tes
         "remove must fail with status 1; stdout was: {}; stderr was: {}",
         report.stdout, report.stderr
     );
-    let line = support::wear::the_single_refusal_line(&report);
-    assert!(
-        line.starts_with("remove could not move a/b/deep.yml out of the work tree: "),
-        "the failure must name the file it could not move; it was: {line}"
-    );
-    assert!(
-        line.ends_with("; ritual put the project back as it found it"),
-        "the failure must end by saying the project was put back; it was: {line}"
+    assert_eq!(
+        support::wear::the_single_refusal_line(&report),
+        "remove could not delete a/b/deep.yml: Permission denied (os error 13); ritual put the \
+         project back as it found it; the file remove had already deleted is not put back, and \
+         git has it: .github/dependabot.yml; not deleted: a/b/deep.yml and root.yml",
+        "the failure must name what became of every claimed file, word for word"
     );
     assert_eq!(
         tree_state(root)?,
-        tree_before,
-        "the manifest, the lockfile, every file and every directory must be as they were"
+        expected_tree,
+        "the manifest, the lockfile and every file but the one deleted must be as they were"
     );
     assert_eq!(
         porcelain(&worn.fixture)?,
-        status_before,
-        "git must report exactly what it reported before"
-    );
-    assert!(
-        !fs::exists(root.join(HOLDING_DIRECTORY))?,
-        "the holding directory must not be left behind"
+        ["D .github/dependabot.yml"],
+        "git must report the one deletion and nothing else"
     );
     Ok(())
 }

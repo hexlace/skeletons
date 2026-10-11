@@ -15,7 +15,6 @@ use std::path::PathBuf;
 
 use rituals::Failure;
 
-use super::HOLDING_DIRECTORY;
 use super::files::{FilesFlag, Unknowable};
 use super::names::{ManifestShown, WearingKey};
 use super::non_empty::NonEmpty;
@@ -75,9 +74,6 @@ pub(crate) enum RemoveRefusal {
         key: WearingKey,
         unknowable: Unknowable,
     },
-    /// Something is at the path the files are moved into while they are
-    /// deleted.
-    HoldingPathInTheWay,
     /// The manifest could not be read to take the wearing out of it.
     ManifestUnreadable {
         manifest: ManifestShown,
@@ -132,15 +128,10 @@ pub(crate) enum RemoveRefusal {
         manifest: ManifestShown,
         key: WearingKey,
     },
-    /// The directory the files are moved into could not be created.
-    HoldingNotCreated { detail: String },
-    /// A file could not be moved out of the work tree.
-    MoveFailed { path: String, detail: String },
+    /// A file could not be deleted.
+    DeleteFailed { path: String, detail: String },
     /// A directory the deletion left empty could not be removed.
     DirectoryNotRemoved { directory: String, detail: String },
-    /// The wearing is removed and its files are out of the tree, and the
-    /// directory they were moved into could not be deleted.
-    HoldingNotDeleted { key: WearingKey, detail: String },
 }
 
 impl RemoveRefusal {
@@ -186,7 +177,6 @@ impl RemoveRefusal {
             } => worn_elsewhere_message(name, manifest, elsewhere),
             Self::SeveralKeys { asked, keys } => several_keys_message(asked, keys),
             Self::FilesUnknowable { key, unknowable } => files_unknowable_message(key, unknowable),
-            Self::HoldingPathInTheWay => holding_path_in_the_way_message(),
             Self::ManifestUnreadable {
                 manifest,
                 key,
@@ -208,12 +198,10 @@ impl RemoveRefusal {
             Self::StillWorn { manifest, key } => still_worn_message(manifest, key),
             Self::PackageVanished { manifest, key } => package_vanished_message(manifest, key),
             Self::DependencyRemains { manifest, key } => dependency_remains_message(manifest, key),
-            Self::HoldingNotCreated { detail } => holding_not_created_message(detail),
-            Self::MoveFailed { path, detail } => move_failed_message(path, detail),
+            Self::DeleteFailed { path, detail } => delete_failed_message(path, detail),
             Self::DirectoryNotRemoved { directory, detail } => {
                 directory_not_removed_message(directory, detail)
             }
-            Self::HoldingNotDeleted { key, detail } => holding_not_deleted_message(key, detail),
         }
     }
 
@@ -313,18 +301,6 @@ fn files_unknowable_message(key: &WearingKey, unknowable: &Unknowable) -> String
     )
 }
 
-/// `` {holding directory} is in the way at the workspace root, so remove wrote
-/// nothing: it moves the files it deletes there first, so that a failure can
-/// move them back; delete or move it, then run the `remove` task again ``.
-fn holding_path_in_the_way_message() -> String {
-    format!(
-        "{HOLDING_DIRECTORY} is in the way at the workspace root, so remove wrote nothing: it \
-         moves the files it deletes there first, so that a failure can move them back; delete \
-         or move it, then {}",
-        WritingCommand::Remove.run_again()
-    )
-}
-
 /// `` remove could not read {manifest} to take `{key}` out of it: {detail} ``.
 fn manifest_unreadable_message(manifest: &ManifestShown, key: &WearingKey, detail: &str) -> String {
     format!(
@@ -402,19 +378,10 @@ fn dependency_remains_message(manifest: &ManifestShown, key: &WearingKey) -> Str
     )
 }
 
-/// `` remove could not create {holding directory} to move the files it deletes
-/// into: {detail} ``.
-fn holding_not_created_message(detail: &str) -> String {
+/// `` remove could not delete {path}: {detail} ``.
+fn delete_failed_message(path: &str, detail: &str) -> String {
     format!(
-        "remove could not create {HOLDING_DIRECTORY} to move the files it deletes into: {}",
-        Escaped(detail)
-    )
-}
-
-/// `` remove could not move {path} out of the work tree: {detail} ``.
-fn move_failed_message(path: &str, detail: &str) -> String {
-    format!(
-        "remove could not move {} out of the work tree: {}",
+        "remove could not delete {}: {}",
         Escaped(path),
         Escaped(detail)
     )
@@ -430,16 +397,58 @@ fn directory_not_removed_message(directory: &str, detail: &str) -> String {
     )
 }
 
-/// `` remove stopped wearing `{key}` and moved its files into {holding
-/// directory}, which it could not then delete: {detail}; delete {holding
-/// directory} by hand ``.
-fn holding_not_deleted_message(key: &WearingKey, detail: &str) -> String {
+/// `line`, a failure of the deletion as `rollback` has worded it, followed by
+/// what became of the files: the clause for those deleted, then the clause for
+/// those not.
+///
+/// `rollback` ends the line with what it did about the manifest and
+/// `Cargo.lock`, and says nothing about the files, which it cannot put back.
+/// The clauses come after its words, so the whole line is true whichever it
+/// said.
+pub(crate) fn with_the_files_deleted(
+    line: &str,
+    deleted: &[String],
+    undeleted: &[String],
+) -> String {
     format!(
-        "remove stopped wearing `{}` and moved its files into {HOLDING_DIRECTORY}, which it \
-         could not then delete: {}; delete {HOLDING_DIRECTORY} by hand",
-        Escaped(key.as_str()),
-        Escaped(detail)
+        "{line}{}{}",
+        deleted_clause(deleted),
+        undeleted_clause(undeleted)
     )
+}
+
+/// `` ; the files remove had already deleted are not put back, and git has
+/// them: {files} ``, in the singular for one, and `` ; remove had deleted no
+/// file `` for none.
+fn deleted_clause(deleted: &[String]) -> String {
+    let files = escaped_list(deleted);
+    match deleted {
+        [] => "; remove had deleted no file".to_owned(),
+        [_one] => format!(
+            "; the file remove had already deleted is not put back, and git has it: {files}"
+        ),
+        _several => format!(
+            "; the files remove had already deleted are not put back, and git has them: {files}"
+        ),
+    }
+}
+
+/// `` ; not deleted: {files} ``, and nothing when every file was deleted.
+fn undeleted_clause(undeleted: &[String]) -> String {
+    if undeleted.is_empty() {
+        String::new()
+    } else {
+        format!("; not deleted: {}", escaped_list(undeleted))
+    }
+}
+
+/// `paths` escaped, joined as this crate's one list grammar does.
+fn escaped_list(paths: &[String]) -> String {
+    let escaped: Vec<String> = paths
+        .iter()
+        .map(|path| Escaped(path.as_str()).to_string())
+        .collect();
+    join_and(&escaped)
 }
 
 /// `items` escaped, each in backticks, joined as this crate's one list grammar
@@ -455,7 +464,7 @@ fn backticked<'key>(items: impl Iterator<Item = &'key WearingKey>) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{Asked, RemoveRefusal};
+    use super::{Asked, RemoveRefusal, deleted_clause, undeleted_clause, with_the_files_deleted};
     use crate::remove::files::{FilesFlag, Unknowable};
     use crate::remove::names::{ManifestShown, WearingKey};
     use crate::remove::non_empty::NonEmpty;
@@ -755,20 +764,13 @@ mod tests {
 
     #[test]
     fn a_refusal_becomes_the_failure_a_task_returns_with_its_message_as_it_is() {
-        let refusal = RemoveRefusal::HoldingPathInTheWay;
+        let refusal = RemoveRefusal::DeleteFailed {
+            path: "ci.yml".to_owned(),
+            detail: "permission denied".to_owned(),
+        };
         let message = refusal.message();
 
         assert_eq!(refusal.into_failure().to_string(), message);
-    }
-
-    #[test]
-    fn something_at_the_holding_path_is_named_with_why_and_what_to_do() {
-        assert_eq!(
-            RemoveRefusal::HoldingPathInTheWay.message(),
-            ".skeletons-remove is in the way at the workspace root, so remove wrote nothing: it \
-             moves the files it deletes there first, so that a failure can move them back; \
-             delete or move it, then run the `remove` task again"
-        );
     }
 
     /// The failures of editing the manifest and bringing the lockfile current,
@@ -845,24 +847,16 @@ mod tests {
         ]
     }
 
-    /// The failures of moving the files out of the work tree and deleting what
-    /// holds them, each with the fixed text it is held to.
+    /// The failures of deleting the files and removing the directories they
+    /// leave empty, each with the fixed text it is held to.
     fn file_failures() -> Vec<(RemoveRefusal, &'static str)> {
         vec![
             (
-                RemoveRefusal::HoldingNotCreated {
-                    detail: "permission denied".to_owned(),
-                },
-                "remove could not create .skeletons-remove to move the files it deletes into: \
-                 permission denied",
-            ),
-            (
-                RemoveRefusal::MoveFailed {
+                RemoveRefusal::DeleteFailed {
                     path: ".github/workflows/ci.yml".to_owned(),
                     detail: "permission denied".to_owned(),
                 },
-                "remove could not move .github/workflows/ci.yml out of the work tree: permission \
-                 denied",
+                "remove could not delete .github/workflows/ci.yml: permission denied",
             ),
             (
                 RemoveRefusal::DirectoryNotRemoved {
@@ -871,14 +865,6 @@ mod tests {
                 },
                 "remove could not remove .github/workflows, which deleting its files left empty: \
                  directory not empty",
-            ),
-            (
-                RemoveRefusal::HoldingNotDeleted {
-                    key: key("ci"),
-                    detail: "permission denied".to_owned(),
-                },
-                "remove stopped wearing `ci` and moved its files into .skeletons-remove, which \
-                 it could not then delete: permission denied; delete .skeletons-remove by hand",
             ),
         ]
     }
@@ -902,7 +888,7 @@ mod tests {
     /// How many kinds of [`RemoveRefusal`] there are. The match in
     /// [`kind_index`] has no wildcard, so a kind added without an arm does not
     /// compile, and the samples must then cover it.
-    const KINDS: usize = 17;
+    const KINDS: usize = 14;
 
     const fn kind_index(refusal: &RemoveRefusal) -> usize {
         match refusal {
@@ -911,18 +897,15 @@ mod tests {
             RemoveRefusal::WornElsewhere { .. } => 2,
             RemoveRefusal::SeveralKeys { .. } => 3,
             RemoveRefusal::FilesUnknowable { .. } => 4,
-            RemoveRefusal::HoldingPathInTheWay => 5,
-            RemoveRefusal::ManifestUnreadable { .. } => 6,
-            RemoveRefusal::ManifestDefect { .. } => 7,
-            RemoveRefusal::CargoRefused { .. } => 8,
-            RemoveRefusal::StillWorn { .. } => 9,
-            RemoveRefusal::DependencyRemains { .. } => 10,
-            RemoveRefusal::MoveFailed { .. } => 11,
-            RemoveRefusal::DirectoryNotRemoved { .. } => 12,
-            RemoveRefusal::HoldingNotDeleted { .. } => 13,
-            RemoveRefusal::HoldingNotCreated { .. } => 14,
-            RemoveRefusal::LockfileUnreadable { .. } => 15,
-            RemoveRefusal::PackageVanished { .. } => 16,
+            RemoveRefusal::ManifestUnreadable { .. } => 5,
+            RemoveRefusal::ManifestDefect { .. } => 6,
+            RemoveRefusal::CargoRefused { .. } => 7,
+            RemoveRefusal::StillWorn { .. } => 8,
+            RemoveRefusal::DependencyRemains { .. } => 9,
+            RemoveRefusal::DeleteFailed { .. } => 10,
+            RemoveRefusal::DirectoryNotRemoved { .. } => 11,
+            RemoveRefusal::LockfileUnreadable { .. } => 12,
+            RemoveRefusal::PackageVanished { .. } => 13,
         }
     }
 
@@ -1009,17 +992,12 @@ mod tests {
                 manifest: poisoned_manifest(),
                 key: poisoned_key(),
             },
-            RemoveRefusal::HoldingNotCreated { detail: poison() },
-            RemoveRefusal::MoveFailed {
+            RemoveRefusal::DeleteFailed {
                 path: poison(),
                 detail: poison(),
             },
             RemoveRefusal::DirectoryNotRemoved {
                 directory: poison(),
-                detail: poison(),
-            },
-            RemoveRefusal::HoldingNotDeleted {
-                key: poisoned_key(),
                 detail: poison(),
             },
         ]
@@ -1031,16 +1009,9 @@ mod tests {
         // field of every refusal about the request that holds text from
         // outside, and each message must be one line that shows the name as
         // the two characters `\n`, never raw and never escaped a second time.
-        // The one kind with no text from outside is only asked to stay on one
-        // line.
         for refusal in &request_samples() {
             assert_escaped_once(&refusal.message(), &format!("{refusal:?}"));
         }
-
-        assert_one_line(
-            &RemoveRefusal::HoldingPathInTheWay.message(),
-            "the holding path refusal",
-        );
     }
 
     #[test]
@@ -1054,13 +1025,11 @@ mod tests {
 
     #[test]
     fn the_samples_of_text_from_outside_cover_every_kind_of_refusal() {
-        // The kind with no text from outside is counted with the rest, so a
-        // kind added without a sample is found here.
-        let holding = RemoveRefusal::HoldingPathInTheWay;
+        // A kind added without a sample is found here.
         let (request, run) = (request_samples(), run_samples());
 
         assert_every_kind(
-            request.iter().chain(&run).chain([&holding]).map(kind_index),
+            request.iter().chain(&run).map(kind_index),
             KINDS,
             "RemoveRefusal",
         );
@@ -1105,10 +1074,6 @@ mod tests {
                 manifest: manifest("Cargo.toml"),
                 key: key(""),
             },
-            RemoveRefusal::HoldingNotDeleted {
-                key: key(""),
-                detail: "denied".to_owned(),
-            },
         ];
 
         for refusal in &by_key {
@@ -1143,6 +1108,81 @@ mod tests {
         );
     }
 
+    /// `names` as the owned strings a deletion carries.
+    fn paths(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    #[test]
+    fn some_files_deleted_and_some_not_are_each_named_after_what_rollback_said() {
+        // The failed file is among those not deleted, and each list is joined
+        // as the other messages join theirs.
+        assert_eq!(
+            with_the_files_deleted(
+                "remove could not delete b.yml: permission denied; ritual put the project back \
+                 as it found it",
+                &paths(&["a.yml", "a2.yml"]),
+                &paths(&["b.yml", "c.yml", "d.yml"]),
+            ),
+            "remove could not delete b.yml: permission denied; ritual put the project back as \
+             it found it; the files remove had already deleted are not put back, and git has \
+             them: a.yml and a2.yml; not deleted: b.yml, c.yml and d.yml"
+        );
+    }
+
+    #[test]
+    fn one_file_deleted_is_named_in_the_singular() {
+        assert_eq!(
+            with_the_files_deleted("it failed", &paths(&["a.yml"]), &paths(&["b.yml"])),
+            "it failed; the file remove had already deleted is not put back, and git has it: \
+             a.yml; not deleted: b.yml"
+        );
+    }
+
+    #[test]
+    fn no_file_deleted_says_so_and_names_every_file_not_deleted() {
+        assert_eq!(
+            with_the_files_deleted("it failed", &[], &paths(&["a.yml", "b.yml"])),
+            "it failed; remove had deleted no file; not deleted: a.yml and b.yml"
+        );
+    }
+
+    #[test]
+    fn every_file_deleted_has_no_clause_about_files_not_deleted() {
+        // What fails after the last file is a directory, so no file is left
+        // undeleted and the line does not say "not deleted" of nothing.
+        assert_eq!(
+            with_the_files_deleted("it failed", &paths(&["a.yml", "b.yml"]), &[]),
+            "it failed; the files remove had already deleted are not put back, and git has \
+             them: a.yml and b.yml"
+        );
+    }
+
+    #[test]
+    fn each_clause_about_the_files_is_worded_alone_for_every_count() {
+        assert_eq!(deleted_clause(&[]), "; remove had deleted no file");
+        assert_eq!(
+            deleted_clause(&paths(&["a"])),
+            "; the file remove had already deleted is not put back, and git has it: a"
+        );
+        assert_eq!(
+            deleted_clause(&paths(&["a", "b", "c"])),
+            "; the files remove had already deleted are not put back, and git has them: a, b \
+             and c"
+        );
+        assert_eq!(undeleted_clause(&[]), "");
+        assert_eq!(undeleted_clause(&paths(&["a"])), "; not deleted: a");
+    }
+
+    #[test]
+    fn the_clauses_about_the_files_print_paths_from_outside_on_one_line_escaped_once() {
+        let named = vec![poison()];
+
+        let text = with_the_files_deleted("it failed", &named, &named);
+
+        assert_escaped_once(&text, "the clauses about the files");
+    }
+
     #[test]
     fn no_refusal_names_sync_or_wear() {
         // Every message is worded for `remove` and sends the wearer to
@@ -1150,7 +1190,6 @@ mod tests {
         let mut all: Vec<RemoveRefusal> =
             failures().into_iter().map(|(refusal, _)| refusal).collect();
         all.extend([
-            RemoveRefusal::HoldingPathInTheWay,
             RemoveRefusal::OutsideItsProject {
                 package: "p".to_owned(),
                 root: PathBuf::from("/r"),

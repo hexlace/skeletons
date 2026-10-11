@@ -18,11 +18,10 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use support::remove::{
-    CLAIMING, Entry, HOLDING_DIRECTORY, MANIFEST, Worn, assert_check_wears_nothing, assert_printed,
-    assert_refused, check_refusal_reasons, commit_line, fixture_wearing_a_skeleton_that_claims,
-    kept_other_summary, kept_summary, make_the_skeleton_render_what_is_there, mark,
-    no_dependency_line, porcelain, run_remove, stopped_wearing_line, sync_and_commit,
-    took_out_line, tree_state,
+    CLAIMING, Entry, MANIFEST, Worn, assert_check_wears_nothing, assert_printed, assert_refused,
+    check_refusal_reasons, commit_line, fixture_wearing_a_skeleton_that_claims, kept_other_summary,
+    kept_summary, make_the_skeleton_render_what_is_there, mark, no_dependency_line, porcelain,
+    run_remove, stopped_wearing_line, sync_and_commit, took_out_line, tree_state,
 };
 use support::wear::{commit_everything, fixture_for_wearing, git_step};
 use support::{Fixture, TestOutcome, path_dependency_on_test_skeleton, wearing_table};
@@ -46,8 +45,8 @@ fn with_every_file_matching_the_wearing_and_the_files_and_emptied_directories_go
     // Every claimed file is as `sync` wrote it. Bare `remove` must delete all
     // three, take the three directories they leave empty (`.github`, `a/b`
     // and then `a`) with them, leave the workspace root and the unclaimed
-    // `src` alone, leave no holding directory behind, and leave git showing
-    // exactly the manifest, the lockfile and the three deletions as changes.
+    // `src` alone, and leave git showing exactly the manifest, the lockfile and
+    // the three deletions as changes.
     let worn = Worn::synced(NESTED, None)?;
 
     let report = run_remove(&worn.fixture, &[NESTED])?;
@@ -63,7 +62,7 @@ fn with_every_file_matching_the_wearing_and_the_files_and_emptied_directories_go
         ],
     );
     let root = worn.fixture.root();
-    for gone in [".github", "a", "root.yml", HOLDING_DIRECTORY] {
+    for gone in [".github", "a", "root.yml"] {
         assert!(
             !fs::exists(root.join(gone))?,
             "{gone} must not be left in the work tree"
@@ -703,11 +702,7 @@ fn fixture_claiming_a_lockfile_that_differs() -> Result<Fixture, Box<dyn std::er
 fn assert_the_lockfile_is_still_usable(fixture: &Fixture) -> TestOutcome {
     assert!(
         fs::exists(fixture.root().join("Cargo.lock"))?,
-        "the lockfile must not be moved away"
-    );
-    assert!(
-        !fs::exists(fixture.root().join(HOLDING_DIRECTORY))?,
-        "no holding directory may be left"
+        "the lockfile must not be deleted"
     );
     assert_check_wears_nothing(fixture)
 }
@@ -715,9 +710,9 @@ fn assert_the_lockfile_is_still_usable(fixture: &Fixture) -> TestOutcome {
 #[test]
 fn delete_files_leaves_a_claimed_lockfile_it_has_just_brought_current() -> TestOutcome {
     // The skeleton claims `Cargo.lock`, which differs from what it renders,
-    // and `ci.yml`. `--delete-files` deletes `ci.yml` and must not move the
-    // lockfile away: `remove` has just rewritten it and Cargo reads the
-    // workspace through it. It is named in the place of a `deleted` line.
+    // and `ci.yml`. `--delete-files` deletes `ci.yml` and must not delete the
+    // lockfile: `remove` has just rewritten it and Cargo reads the workspace
+    // through it. It is named in the place of a `deleted` line.
     let fixture = fixture_claiming_a_lockfile_that_differs()?;
 
     let report = run_remove(&fixture, &[CLAIMING, "--delete-files"])?;

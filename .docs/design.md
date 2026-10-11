@@ -1749,9 +1749,9 @@ asked at all is an abort before anything is written, as it is for `sync`.
 **The lockfile `remove` brings current is never deleted, under any flag.** The
 proof above is about git, and a file can pass it and still not be the wearer's
 to lose: `remove` brings `Cargo.lock` current, so a skeleton that claims
-`Cargo.lock` has a file the run has just rewritten, and moving it away
+`Cargo.lock` has a file the run has just rewritten, and deleting it
 afterwards leaves a project in which every later locked Cargo command fails,
-with the last read of the workspace made before the move and so unable to
+with the last read of the workspace made before the delete and so unable to
 notice. The lockfile is therefore decided before anything is written, in the
 same place and the same kind of decision as a file git could not give back:
 each claimed path is compared, as exact text, with the lockfile's path spelled
@@ -1767,14 +1767,14 @@ other: the survey accepts a claim only when its directory lists an entry
 spelled exactly so, and refuses the wearing's claims when it lists a variant
 (`ritual/tests/remove_files.rs` →
 `a_claim_that_spells_the_lockfile_in_another_case_is_refused_rather_than_deleted`).
-The set of files handed to the mover is built from the files git was asked
+The set of files handed to the deleter is built from the files git was asked
 about and could give back, and the lockfile is set aside before anyone asks, so
 the set cannot hold it; `prepare` asserts that again, against the real absolute
 paths and before anything is written, because an assertion inside the attempt
 would skip the undo (`crates/skeletons-engine/src/remove/files.rs` →
 `a_claimed_lockfile_is_never_among_the_files_to_delete`, and
 `crates/skeletons-engine/src/remove.rs` →
-`the_lockfile_among_the_files_to_move_is_a_defect_in_the_plan`). The decisions,
+`the_lockfile_among_the_files_to_delete_is_a_defect_in_the_plan`). The decisions,
 and what the wearer reads for each
 (`crates/skeletons-engine/src/remove/files.rs` →
 `a_claimed_lockfile_is_set_aside_whatever_its_state_and_whatever_the_flag`, →
@@ -1798,33 +1798,37 @@ under a bare run and under `--delete-files` alike
 (`ritual/tests/remove_files.rs` →
 `a_skeleton_that_claims_a_cargo_manifest_leaves_the_files_unknowable_and_the_manifest_untouched`).
 
-**Files are moved, and deleted only after the run has succeeded.** Rollback
-records a file it writes and restores it from its bytes, so a file it restored
-would lose its mode, and it records no deletion at all. A file it moves comes
-back whole. So the files are not deleted inside the run but moved into a
-directory the run reserves in the workspace root, `.skeletons-remove`, under a
-number each, so that no two collide whatever they are called, and the
-directories the moves emptied are removed. If the run then fails, the undo puts
-those directories back and moves every file home with its mode, and the
-manifest and `Cargo.lock` are written back with them
+**The files are deleted last, and a failed delete is not undone.** Rollback
+records a file it writes and restores it from its bytes, which would lose its
+mode, and it records no deletion at all. So the files are not recorded: they are
+deleted for real, after the manifest and `Cargo.lock` are written and the read
+back has shown the wearing gone, and git is what holds them, which is why each
+passes the proof before anything is written. The deletes run inside the same
+attempt as the writes, so a delete that fails returns a failure and the
+manifest and `Cargo.lock` are put back. The deleting stops at the first failure
+and no directory is removed after it. The files already deleted stay deleted,
+and the failure says so: it names the file that failed, then what rollback did,
+then the files deleted, which are not put back and which git has, and the files
+not deleted, the one that failed among them. The clauses about the files come
+after rollback's words, because rollback's words cannot be about files it did
+not record, and the whole line is then true whichever clause rollback ended
+with. Each piece is worded by a pure function, and the one function that makes
+the attempt and appends them is the one the command and its tests run through
 (`crates/skeletons-engine/src/remove/deletion.rs` →
-`a_later_failure_puts_back_every_file_its_mode_and_every_emptied_directory`;
+`a_delete_failing_after_an_earlier_one_reports_which_were_deleted_and_which_were_not`,
+→ `the_first_delete_failing_reports_none_deleted`, and →
+`a_directory_that_cannot_be_removed_for_another_reason_reports_every_file_deleted`;
 `crates/skeletons-engine/src/remove.rs` →
-`a_file_that_cannot_be_moved_puts_the_manifest_the_lockfile_and_the_earlier_file_back`;
+`a_delete_that_fails_after_an_earlier_one_puts_the_manifest_and_lockfile_back_and_names_both_lists`,
+and →
+`a_directory_that_cannot_be_removed_names_every_file_deleted_and_none_not_deleted`;
+`crates/skeletons-engine/src/remove/refusal.rs` →
+`some_files_deleted_and_some_not_are_each_named_after_what_rollback_said`;
 `ritual/tests/remove_refusals.rs` →
-`a_failure_partway_puts_the_manifest_the_lockfile_and_every_file_back`). The
-files are moved last, so the manifest is already changed when a move fails. Only
-when the run has succeeded is the holding directory deleted, and then nothing is
-left to undo. Deleting after the run, with the wearing already removed, would
-leave a partial deletion that no rollback covers, and recording each file with
-the bytes rollback restores would claim an exact recovery that is not exact. The
-cost is a name at the workspace root. Something already at that path is refused
-before anything is written, and only when a file is to be deleted, since
-otherwise nothing is reserved
-(`ritual/tests/remove_refusals.rs` →
-`something_at_the_holding_directorys_name_is_refused_when_files_would_be_deleted`,
-and `crates/skeletons-engine/src/remove/deletion.rs` →
-`no_files_reserves_nothing_and_purging_it_touches_nothing`).
+`a_delete_failing_partway_puts_the_manifest_and_the_lockfile_back_and_names_the_files_deleted_and_not`).
+The files go last, so the manifest is already changed when a delete fails, and
+nothing is read after the first file is gone: the read back is taken as a
+closure that can be called once, and the deletes come after it.
 
 What the rollback can and cannot give back is the same as for `wear`: a returned
 failure is undone and a panic is not, so every condition the wearer can cause or
@@ -1832,13 +1836,9 @@ act on is a returned failure, including the defects in `skeletons` that are
 found after the manifest was written
 (`crates/skeletons-engine/src/remove.rs` →
 `a_read_back_that_still_finds_the_wearing_is_a_defect_and_both_files_come_back`),
-and a change made around the run is overwritten. The one failure that comes
-after success is the holding directory failing to be deleted. By then the
-wearing is gone and every file is out of the work tree, so nothing is put back,
-and the success lines are printed first so that the person is told what was done
-before being told what is left to clean up
-(`crates/skeletons-engine/src/remove/deletion.rs` →
-`a_holding_directory_that_cannot_be_deleted_names_the_wearing_and_the_error`).
+and a change made around the run is overwritten. Nothing fails after the
+success lines are printed: the deletes are the last thing the run does before it
+prints.
 
 **The manifest is edited in place, not by `cargo remove`.** `cargo remove` also
 deletes unused `[workspace.dependencies]` entries and profile tables for the
@@ -1889,8 +1889,9 @@ does not edit would show (`crates/skeletons-engine/src/remove/confirm.rs` →
 `a_table_at_the_key_that_check_refuses_is_still_worn`;
 `crates/skeletons-engine/src/remove.rs` →
 `a_read_back_that_still_finds_a_dependency_says_to_take_it_out_by_hand`).
-"Leaves the project building" is proven to that level and no further: nothing
-compiles the project.
+Nothing compiles the project, and nothing reads the workspace after the files
+are deleted. Removing a skeleton deletes the files it claims, including one the
+project needs to build, and git has them.
 
 **Everything the workspace and the survey already answer is refused before
 anything is written.** The workspace is read `--locked` and only `--locked`
@@ -1906,8 +1907,8 @@ edits would otherwise be mixed into what `remove` wrote or deleted
 `a_work_tree_with_an_uncommitted_change_is_refused_and_nothing_is_written`).
 Then the manifest and `Cargo.lock` are put to the questions `wear` asks of them,
 whether git can hand them back and whether they can be written in place, then
-each file in the work tree is put to the proof and the files are judged by it,
-and last the holding path is shown to be free.
+and each file in the work tree is put to the proof and the files are judged by
+it.
 
 **What the code settled.** The first is a directory the deletion leaves
 empty. It is removed, deepest first, and so is each directory above it that this
@@ -1915,7 +1916,7 @@ empties in turn, because git tracks no directory and the tree should then equal
 a checkout of the commit the person makes. A directory that still holds anything
 stays, and so does everything above it, and the workspace root is never reached
 (`crates/skeletons-engine/src/remove/deletion.rs` →
-`every_file_is_moved_into_the_holding_directory_and_emptied_directories_are_gone`,
+`every_file_is_deleted_and_emptied_directories_are_gone`,
 and → `a_directory_that_still_holds_something_stays_and_so_does_everything_above_it`;
 `ritual/tests/remove_files.rs` → `a_directory_that_still_holds_something_stays`).
 
@@ -2146,16 +2147,12 @@ is left, because `remove` does not rebuild `cargo remove`'s clean-up of
 features: the refusal is Cargo's, in its words, and the project is put back. A
 wearing in another member is refused by name and taken out by hand.
 
-**`remove` reserves `.skeletons-remove` at the workspace root while it deletes
-files.** Something already at that path is refused before anything is written,
-whenever a file is to be deleted.
-
 **`remove` trusts the survey and the proof it took moments before, as `sync`
 does between its last look and its write, and narrows that time less.** A file
-is surveyed, then proved against git, then moved after Cargo has brought
+is surveyed, then proved against git, then deleted after Cargo has brought
 `Cargo.lock` current, and `remove` does not look at the path again immediately
-before it moves the file, as `sync` does before each write. An edit that lands in
-that interval is moved and deleted with the file, and a directory above the file
+before it deletes the file, as `sync` does before each write. An edit that lands in
+that interval is deleted with the file, and a directory above the file
 swapped for a symbolic link in it is followed. The interval is the time the
 relock and the read back take. Git is not the undo for such an edit: it was
 never committed, so no commit holds it, and it is lost with the file. The clean

@@ -65,8 +65,9 @@ current, and deletes the files the skeleton wrote only when every one still
 holds what the skeleton renders and git can give it back. `--delete-files`
 deletes them whether they changed or not, and `--keep-files` leaves them all.
 Like `wear` it refuses unless the work tree is clean, and a run that fails
-after it has begun to write puts the manifest, `Cargo.lock` and every file
-back, and says so.
+after it has begun to write puts the manifest and `Cargo.lock` back, and says
+so; a delete that fails leaves the files already deleted deleted, and the
+failure names the files deleted and the files not.
 
 None of these commands runs a git command that writes the repository's own
 index, refs, config or object database. A content filter the repository

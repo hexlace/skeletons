@@ -29,9 +29,6 @@ pub(crate) const MANIFEST: &str = "Cargo.toml";
 /// The version every checked-in test skeleton declares.
 pub(crate) const SKELETON_VERSION: &str = "0.0.0";
 
-/// The directory `remove` moves the files it deletes into while it works.
-pub(crate) const HOLDING_DIRECTORY: &str = ".skeletons-remove";
-
 /// What `check` prints for a workspace that wears nothing.
 pub(crate) const WEARS_NOTHING: &str = "this workspace wears no skeletons; a manifest wears one \
      with a [package.metadata.skeletons.<dependency>] table beside the dependency\n";

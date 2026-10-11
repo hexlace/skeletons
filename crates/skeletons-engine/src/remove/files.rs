@@ -10,14 +10,14 @@
 //! git's answer for each of those files, in path order, and says what became of
 //! them, which is what the success lines report.
 //!
-//! The lockfile `remove` brings current in the run is never deleted and never
-//! moved, under any flag. [`plan`] sets a claimed path that is the lockfile's
-//! aside by comparing it with the lockfile's path, before git is asked about
-//! anything: it is left whatever git would say, so git is not asked, and it is
-//! nobody's change to protect, so it counts for nothing in the decision below.
+//! The lockfile `remove` brings current in the run is never deleted under any
+//! flag. [`plan`] sets a claimed path that is the lockfile's aside by comparing
+//! it with the lockfile's path, before git is asked about anything: it is left
+//! whatever git would say, so git is not asked, and it is nobody's change to
+//! protect, so it counts for nothing in the decision below.
 //! It is a decision of the same kind as a file git could not give back, and
 //! only a file git was asked about and could give back can ever be handed to
-//! the mover. The manifest `remove` edits needs no such rule: the walk of a
+//! the deleter. The manifest `remove` edits needs no such rule: the walk of a
 //! skeleton's files refuses any name like a Cargo manifest, so no skeleton
 //! claims one.
 //!
@@ -220,8 +220,8 @@ impl Fate {
 /// Why a file is left where it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LeftBecause {
-    /// It is the lockfile `remove` brings current in this run, so deleting or
-    /// moving it would undo what the run has just written.
+    /// It is the lockfile `remove` brings current in this run, so deleting it
+    /// would undo what the run has just written.
     Lockfile,
     /// Git's index has no entry for the file.
     NotTracked,
@@ -1225,7 +1225,7 @@ mod tests {
     #[test]
     fn a_claimed_lockfile_is_never_among_the_files_to_delete() {
         // Every file git was asked about can be given back, and still the
-        // lockfile is not handed to the mover, under either flag.
+        // lockfile is not handed to the deleter, under either flag.
         for flag in [FilesFlag::Bare, FilesFlag::DeleteFiles] {
             let claimed = Claimed::known(vec![
                 file("Cargo.lock", FileState::Matches),

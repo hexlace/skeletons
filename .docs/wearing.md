@@ -1146,8 +1146,8 @@ cargo ritual skeletons remove <KEY|CRATE> [--delete-files | --keep-files]
 current, and deals with the files `sync` wrote. It writes into the same one
 manifest `wear` does, the command line's own, and on a manifest `wear` wrote it
 is the inverse: the manifest comes back byte for byte as it was before. It
-makes sure the project is still one Cargo can read without the wearing, and
-`check` afterwards no longer lists the skeleton.
+makes sure the project is still one Cargo can read without the wearing before it
+deletes any file.
 
 **The argument** is the wearing's dependency key or the skeleton's crate name.
 The candidates are the keys under `[package.metadata.skeletons]` in the command
@@ -1196,11 +1196,14 @@ A claimed file that is missing is nothing to delete. It is no reason to refuse
 and no reason to keep the others, and no line names it. When none of the files
 is in the work tree, the output says so.
 
+Removing a skeleton deletes the files it claims, including one the project needs
+to build, and git has them.
+
 **`Cargo.lock` is never deleted.** It is the one file `remove` writes that a
 skeleton can claim: `remove` brings it current once the manifest is edited, and
 deleting it would undo that and leave a project Cargo cannot read, since every
 later locked Cargo command reads it. So a claimed `Cargo.lock` is never deleted
-and never moved, under any flag. `remove` settles it before it writes anything,
+under any flag. `remove` settles it before it writes anything,
 by comparing each claimed path with the lockfile's path taken relative to the
 workspace root as a claim is. The comparison is exact text. A claim that spells
 `Cargo.lock` in another case, or in another Unicode normalisation, never gets
@@ -1278,14 +1281,12 @@ directory above it. The workspace root is never removed.
    `sync` use. It proves the lockfile current and the manifest loadable, and
    `remove` keeps what it wrote only if the reader finds no wearing table at
    the key, worn or refused, and Cargo reports no dependency declared under it.
-4. The files. Each file to be deleted is moved into a directory the run reserves
-   at the workspace root, `.skeletons-remove`, under a number for its name, and
-   then each emptied directory is removed. Nothing is deleted yet. Only when the
-   whole run has succeeded is `.skeletons-remove` deleted, and with it the
-   files.
+4. The files. Each file to be deleted is deleted, in path order, and then each
+   emptied directory is removed.
 
-The files go last, so the manifest is already changed when a move fails. When
-no file is to be deleted nothing is reserved and nothing is moved.
+The files go last, after the read back has shown the wearing gone, so the
+manifest and `Cargo.lock` are already changed when a delete fails, and nothing
+reads the workspace after the first file is gone.
 
 **What it prints.** On success, lines on stdout: what was taken out, a line for
 each file or one for all of them, and what to commit. The first line names the
@@ -1520,29 +1521,21 @@ is the argument parser's and exits with status 2 before any of these.)
   above, `sync`'s lines worded for `remove`, and they come before anything is
   written. A file git answers about, even to say it could not give the file
   back, is not a refusal: it is left in place and named.
-- something is at `.skeletons-remove` in the workspace root, and a file is to be
-  deleted. Nothing is checked when no file is, since nothing is reserved:
 
-  ```text
-  .skeletons-remove is in the way at the workspace root, so remove wrote nothing: it moves the files it deletes there first, so that a failure can move them back; delete or move it, then run the `remove` task again
-  ```
-
-**It undoes what it did when it fails after the first write.** Everything
-`remove` writes goes through ritual's rollback, which records the manifest,
-`Cargo.lock`, and each file and directory it moves or removes, and, when the run
-returns a failure, puts them all back as they were. A file that was moved comes
-back whole, mode included, and a directory that was removed is created again.
-That is why the files are moved into `.skeletons-remove` during the run and
-deleted only after it has succeeded: rollback restores a file it wrote from its
-bytes, which would lose the mode, and records no deletion at all. When the undo
-put something back, the message ends with `; ritual put the project back as it
-found it`. When there was nothing to put back, because the run failed before it
-had changed any file, the message is the failure exactly as it was raised. When
-the undo itself fails, the message names every path that was not put back and
-says to check it before `` running the `remove` task again``, as `wear`'s does.
+**It puts the manifest and `Cargo.lock` back when it fails after the first
+write.** Both go through ritual's rollback, which records them and, when the run
+returns a failure, puts them back as they were. A file that was deleted is not
+put back: rollback records no deletion, and git has each file, since each passed
+the proof before anything was written. When the undo put something back, the
+message ends with `; ritual put the project back as it found it`. When there was
+nothing to put back, because the run failed before it had changed any file, the
+message is the failure exactly as it was raised. When the undo itself fails, the
+message names every path that was not put back and says to check it before
+`` running the `remove` task again``, as `wear`'s does.
 
 These are the failures that come after the first write, each of which ends with
-that clause when something had been changed:
+that clause when something had been changed. The last two are the failures of
+deleting, which are followed by more, below:
 
 ```text
 remove could not read ritual/Cargo.toml to take `dependabot` out of it: <the operating system's words>
@@ -1552,8 +1545,7 @@ remove took `dependabot` out of ritual/Cargo.toml, and Cargo refused what was le
 remove took `dependabot` out of ritual/Cargo.toml, and reading it back still finds [package.metadata.skeletons.dependabot]; this is a defect in skeletons
 remove took `dependabot` out of ritual/Cargo.toml, and reading the workspace back no longer finds the package this command line is built from; this is a defect in skeletons
 remove took `dependabot` out of ritual/Cargo.toml, and Cargo still reports a dependency under `dependabot`: it is declared somewhere remove does not edit; take it out by hand, then run the `remove` task again
-remove could not create .skeletons-remove to move the files it deletes into: <the operating system's words>
-remove could not move rustfmt.toml out of the work tree: <the operating system's words>
+remove could not delete rustfmt.toml: <the operating system's words>
 remove could not remove .github, which deleting its files left empty: <the operating system's words>
 ```
 
@@ -1564,14 +1556,29 @@ words. The two that are defects in `skeletons` are returned failures and not
 panics for the reason `wear`'s are: rollback undoes a failure and does not undo
 a panic, so a panic there would leave the project half written.
 
-**One failure comes after success.** Once the run has succeeded the success
-lines are printed, and only then is `.skeletons-remove` deleted. If that fails,
-the wearing is gone and every file is out of the work tree, so nothing is put
-back, and the line is the last thing printed, after the success lines, with the
-exit status 1:
+**A failed delete names the files deleted and the files not.** The deleting
+stops at the first delete that fails, and no directory is removed. The failure
+names that file, then says what rollback did, which cannot be about the files,
+and then says what became of them: the files already deleted, which are not put
+back and which git has, and the files that were not deleted, the one that failed
+among them. Each list is in path order. When some were deleted:
 
 ```text
-remove stopped wearing `dependabot` and moved its files into .skeletons-remove, which it could not then delete: <the operating system's words>; delete .skeletons-remove by hand
+remove could not delete rustfmt.toml: <the operating system's words>; ritual put the project back as it found it; the files remove had already deleted are not put back, and git has them: .github/dependabot.yml and rust-toolchain.toml; not deleted: rustfmt.toml and tidy.toml
+```
+
+With one file deleted the clause reads `the file remove had already deleted is
+not put back, and git has it: <the file>`. When the first delete fails:
+
+```text
+remove could not delete rust-toolchain.toml: <the operating system's words>; ritual put the project back as it found it; remove had deleted no file; not deleted: rust-toolchain.toml and rustfmt.toml
+```
+
+A directory the deletes left empty that cannot be removed comes after every file
+is deleted, so there is no clause about files not deleted:
+
+```text
+remove could not remove .github, which deleting its files left empty: <the operating system's words>; ritual put the project back as it found it; the files remove had already deleted are not put back, and git has them: .github/dependabot.yml
 ```
 
 **The limits.**
@@ -1585,28 +1592,22 @@ remove stopped wearing `dependabot` and moved its files into .skeletons-remove, 
   refuse what is left.** `remove` does not rebuild `cargo remove`'s clean-up of
   features. The refusal is Cargo's, in Cargo's words, and the project is put
   back; edit the feature, then run `remove` again.
-- **The holding directory has a name.** `.skeletons-remove` at the workspace
-  root is reserved while files are being deleted, and a project that has
-  something there has to move it first.
 - **It proves each file once, before it writes anything.** The proof is taken
-  once, and the move waits on Cargo bringing `Cargo.lock` current. An edit made
+  once, and the delete waits on Cargo bringing `Cargo.lock` current. An edit made
   by something else to a file `remove` is about to delete, after the proof and
-  before the move, goes with the file, and no commit holds it, since the edit
+  before the delete, goes with the file, and no commit holds it, since the edit
   was never committed: git can give back what the proof showed it holds, and
   nothing newer. It is the kind of limit `sync` states for the instant between
   its last look and its write, and `remove` looks less often than `sync` does.
 - **The undo does not give back what rollback cannot.** A panic, and a change
   made around the run, are the two things named under [Wear](#wear), and they
-  hold here. A run that is killed partway is in the same class: rollback runs
-  when the run returns a failure, and a killed run returns nothing. The manifest
-  and `Cargo.lock` stay as far as it had changed them, and the files it had
-  already moved stay in `.skeletons-remove`, under numbers and not their names.
-  The next run refuses, because the work tree is no longer clean and
-  `.skeletons-remove` is in the way. Nothing is lost: the manifest is tracked,
-  and every file that was moved had passed the proof that git holds exactly
-  what it held, so `git checkout -- <path>` gives each one back as it was, and
-  `.skeletons-remove` is then deleted by hand. `remove` does nothing more about
-  a killed run than say this.
+  hold here. Ending the process partway is in the same class: rollback runs when
+  the run returns a failure, and a process that is ended returns nothing, so the
+  manifest and `Cargo.lock` stay as far as it had changed them and the files it
+  had already deleted stay deleted. The next run refuses, because the work tree
+  is no longer clean, and `git checkout -- <path>` gives each deleted file back
+  as it was, since each had passed the proof that git holds exactly what it
+  held.
 
 ## `--json`
 

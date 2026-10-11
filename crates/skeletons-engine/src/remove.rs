@@ -3,7 +3,9 @@
 //! It takes the skeleton's dependency and its
 //! `[package.metadata.skeletons.<key>]` table out of the running command
 //! line's own manifest, brings `Cargo.lock` current, and deletes the files the
-//! skeleton wrote only when that is plainly what was asked. Every decision it
+//! skeleton wrote only when that is plainly what was asked. Deleting a skeleton's
+//! files deletes every one it claims, including one the project needs to build,
+//! and git has them. Every decision it
 //! makes, and every word it says, is a pure function of values in [`resolve`],
 //! [`files`], [`manifest`], [`refusal`], [`message`] and [`confirm`], so each
 //! is held by a test that touches no disk, no process and no git. [`give_back`]
@@ -27,13 +29,15 @@
 //! - [`confirm`] reads the workspace back and checks that the wearing is gone;
 //! - [`give_back`] asks git whether it could give each file back, which
 //!   settles the files [`files`] plans to put to git;
-//! - [`deletion`] moves those files out of the work tree where a failure can
-//!   move them back, and deletes them for good once the run has succeeded.
+//! - [`deletion`] deletes those files, and the directories they leave empty.
 //!
 //! This module is the command. It settles everything it can refuse before it
 //! writes anything, then does all of its writing inside [`rollback::attempt`],
-//! so that a failure puts the manifest, `Cargo.lock` and the files back, and
-//! only after the attempt has succeeded deletes the holding directory.
+//! so that a failure puts the manifest and `Cargo.lock` back. The files are
+//! deleted last, after the manifest and `Cargo.lock` are written and the
+//! workspace has been read back, and a deleted file is not put back by a later
+//! failure: git has it, and the failure names the files deleted and the files
+//! not.
 
 mod confirm;
 mod deletion;
@@ -62,16 +66,12 @@ use crate::work_tree;
 use crate::work_tree::abort::WorkTreeAbort;
 use crate::work_tree::writing_command::WritingCommand;
 use crate::workspace::{self, Prospect, ReadWorkspaceError};
-use deletion::Staged;
+use deletion::Deletion;
 use files::{Claimed, FilesFlag, Settlement};
 use message::{Lockfile, Removed};
 use names::{ManifestShown, WearingKey};
 use refusal::{Asked, RemoveRefusal};
 use resolve::Candidate;
-
-/// The directory in the workspace root that the files `remove` deletes are
-/// moved into while it works, so that a failure can move them back whole.
-const HOLDING_DIRECTORY: &str = ".skeletons-remove";
 
 /// What `remove --help` says the task does.
 const ABOUT: &str = "stop wearing a skeleton: take out its dependency and wearing table, and its \
@@ -127,7 +127,13 @@ pub(crate) fn task() -> Task {
 fn run(command_line: &CommandLine, arguments: &RemoveArguments) -> Outcome {
     let prepared = prepare(command_line, &arguments.name, arguments.files_flag())?;
     let wording = Wording::project(&prepared.workspace_root, RETRY);
-    let done = rollback::attempt(wording, |changes| write(changes, &prepared))?;
+    let done = attempt_removal(
+        wording,
+        &prepared,
+        || workspace::relock(&prepared.directory),
+        || workspace::read_prospect(&prepared.directory, &prepared.command_line_crate.package),
+        deletion::delete_from_disk,
+    )?;
     let removed = Removed {
         wearing: &prepared.wearing,
         manifest: &prepared.manifest(),
@@ -137,10 +143,7 @@ fn run(command_line: &CommandLine, arguments: &RemoveArguments) -> Outcome {
     for line in message::removed_lines(&removed) {
         report(line);
     }
-    // The success lines come first: the wearing is gone and the files are out
-    // of the tree whether or not the holding directory can be deleted, and the
-    // wearer needs to be told so before being told what is left to clean up.
-    deletion::purge(done.staged, prepared.wearing.key()).map_err(RemoveRefusal::into_failure)
+    Ok(())
 }
 
 /// What a run has settled before it writes anything: the wearing it removes,
@@ -186,8 +189,7 @@ impl Prepared {
 /// `remove` brings current and so never deletes, and which was set aside when
 /// the files were planned. Before anything is written, the files to delete are
 /// checked against the real paths of the manifest and the lockfile
-/// ([`assert_nothing_written_is_moved`]). The holding path is shown to be free
-/// when any file is to be deleted.
+/// ([`assert_nothing_written_is_deleted`]).
 fn prepare(
     command_line: &CommandLine,
     name: &str,
@@ -241,7 +243,7 @@ fn prepare(
     // `remove` changes the manifest and `Cargo.lock` in place and deletes
     // files, so git is the only way back for what `rollback` could not take
     // back, and only for what was committed: an edit made by something else
-    // after the proof, before the move, was never committed and goes with the
+    // after the proof, before the delete, was never committed and goes with the
     // file. Whole-tree dirt counts, as it does for `sync` and `wear`, because
     // the person's own uncommitted edits would otherwise be mixed into what
     // `remove` wrote or deleted. A clean tree says nothing about a file git is
@@ -254,10 +256,7 @@ fn prepare(
     let files = plan
         .settle(|path| give_back::fate(&work_tree, &clean, path))
         .map_err(|abort| git_could_not_be_asked(&abort, &prospect))?;
-    assert_nothing_written_is_moved(&files, &prospect.workspace.root, &command_line_crate);
-    if !files.to_delete().is_empty() && !deletion::holding_path_is_free(&prospect.workspace.root) {
-        return Err(RemoveRefusal::HoldingPathInTheWay.into_failure());
-    }
+    assert_nothing_written_is_deleted(&files, &prospect.workspace.root, &command_line_crate);
     Ok(Prepared {
         wearing,
         files,
@@ -268,8 +267,8 @@ fn prepare(
     })
 }
 
-/// Asserts that no file about to be moved away is the manifest or the lockfile
-/// the run is about to write.
+/// Asserts that no file about to be deleted is the manifest or the lockfile the
+/// run is about to write.
 ///
 /// This is a claim about the code, not about the project: the lockfile is set
 /// aside when the files are planned, and the walk of a skeleton's files refuses
@@ -277,7 +276,7 @@ fn prepare(
 /// checked here, against the real absolute paths and before anything is
 /// written, because a panic inside [`rollback::attempt`] would skip the undo
 /// and leave the project half written.
-fn assert_nothing_written_is_moved(
+fn assert_nothing_written_is_deleted(
     files: &Settlement,
     workspace_root: &Path,
     command_line_crate: &CommandLineCrate,
@@ -286,11 +285,11 @@ fn assert_nothing_written_is_moved(
         let path = file.to_path(workspace_root);
         assert_ne!(
             path, command_line_crate.manifest_path,
-            "the manifest remove writes is never among the files it moves away"
+            "the manifest remove writes is never among the files it deletes"
         );
         assert_ne!(
             path, command_line_crate.lockfile_path,
-            "the lockfile remove writes is never among the files it moves away"
+            "the lockfile remove writes is never among the files it deletes"
         );
     }
 }
@@ -312,49 +311,81 @@ fn git_could_not_be_asked(abort: &WorkTreeAbort, prospect: &Prospect) -> Failure
     ))
 }
 
-/// What a run that has written everything leaves for the lines it prints and
-/// for what it does last.
+/// What a run that has written everything leaves for the lines it prints.
 #[derive(Debug)]
 struct Done {
     lockfile: Lockfile,
-    /// The holding directory the files were moved into, which is deleted once
-    /// the run has succeeded.
-    staged: Staged,
 }
 
-/// The whole of what `remove` changes, inside [`rollback::attempt`].
-fn write(changes: &mut Changes, prepared: &Prepared) -> Result<Done, Failure> {
-    write_with(
-        changes,
-        prepared,
-        || workspace::relock(&prepared.directory),
-        || workspace::read_prospect(&prepared.directory, &prepared.command_line_crate.package),
-    )
-}
-
-/// Takes the wearing out of the manifest, brings `Cargo.lock` current, reads
-/// the workspace back to confirm the wearing is gone, and moves the files that
-/// are to be deleted out of the work tree, in that order, with the relock and
-/// the read back taken as arguments so a test can stand in for `cargo`.
+/// The whole of what `remove` changes, inside [`rollback::attempt`], and the
+/// words of a failure that left deleted files behind.
 ///
-/// The files go last, so the manifest is already changed when a move fails.
-/// None of them is the manifest or the lockfile just written; [`prepare`] has
-/// checked that.
+/// `rollback` words the end of a failure by what it put back, and it cannot put
+/// back a file that was deleted, so a failure of the deletion has the clauses
+/// about the files appended after what `rollback` said. They name every file
+/// deleted and every file not, whichever clause `rollback` ended with.
 ///
-/// Every failure the wearer can cause or act on is an `Err`, so that
-/// `rollback` puts the project back: it does that when the run returns a
-/// failure and does not when it panics. A violated invariant is a defect, and
-/// a defect panics; the assertions in the process runner that the relock and
-/// the read back go through, and the one in [`deletion::stage`] that the
-/// workspace root is absolute, can be reached from here, and the project is not
-/// put back after one. The proof that git holds each file runs in [`prepare`],
-/// before the attempt begins. Nothing here writes a file except through
-/// `changes`.
-fn write_with(
-    changes: &mut Changes,
+/// This is the one place the attempt is made and its failure completed: the
+/// command and the tests of its words both call it, so a test sees the line the
+/// command prints.
+fn attempt_removal(
+    wording: Wording<'_>,
     prepared: &Prepared,
     relock: impl FnOnce() -> Result<(), ReadWorkspaceError>,
     read_back: impl FnOnce() -> Result<Prospect, ReadWorkspaceError>,
+    delete_file: impl FnMut(&Path) -> std::io::Result<()>,
+) -> Result<Done, Failure> {
+    // `rollback::attempt` returns only a `Failure`, so what the deletion had
+    // done travels beside it.
+    let mut failed_deletion: Option<Deletion> = None;
+    rollback::attempt(wording, |changes| {
+        write_with(
+            changes,
+            prepared,
+            &mut failed_deletion,
+            relock,
+            read_back,
+            delete_file,
+        )
+    })
+    .map_err(|failure| match failed_deletion {
+        None => failure,
+        Some(deletion) => Failure::new(refusal::with_the_files_deleted(
+            &failure.to_string(),
+            &deletion.deleted,
+            &deletion.undeleted,
+        )),
+    })
+}
+
+/// Takes the wearing out of the manifest, brings `Cargo.lock` current, reads
+/// the workspace back to confirm the wearing is gone, and deletes the files that
+/// are to be deleted, in that order, with the relock, the read back and the
+/// delete taken as arguments so a test can stand in for `cargo` and for a file
+/// that cannot be deleted.
+///
+/// The files go last, so the manifest and the lockfile are already written when
+/// a delete fails, and nothing reads the workspace after the first file is
+/// gone. None of them is the manifest or the lockfile just written;
+/// [`prepare`] has checked that. When a delete fails, what it had done is put
+/// in `failed_deletion` for [`attempt_removal`] to word.
+///
+/// Every failure the wearer can cause or act on is an `Err`, so that
+/// `rollback` puts the manifest and `Cargo.lock` back: it does that when the
+/// run returns a failure and does not when it panics. A violated invariant is a
+/// defect, and a defect panics; the assertions in the process runner that the
+/// relock and the read back go through, and the one in [`deletion::delete`]
+/// that the workspace root is absolute, can be reached from here, and the
+/// project is not put back after one. The proof that git holds each file runs
+/// in [`prepare`], before the attempt begins. Nothing here writes a file except
+/// through `changes`, or deletes one except through `delete_file`.
+fn write_with(
+    changes: &mut Changes,
+    prepared: &Prepared,
+    failed_deletion: &mut Option<Deletion>,
+    relock: impl FnOnce() -> Result<(), ReadWorkspaceError>,
+    read_back: impl FnOnce() -> Result<Prospect, ReadWorkspaceError>,
+    delete_file: impl FnMut(&Path) -> std::io::Result<()>,
 ) -> Result<Done, Failure> {
     let (manifest, key) = (prepared.manifest(), prepared.wearing.key());
     take_out_wearing(changes, &prepared.command_line_crate, &manifest, key)?;
@@ -369,13 +400,19 @@ fn write_with(
     };
     confirm::confirm(&read.workspace, &member.declared, &manifest, key)
         .map_err(RemoveRefusal::into_failure)?;
-    let staged = deletion::stage(
-        changes,
+    // `read_back` is `FnOnce` and spent above, which is what keeps any read of
+    // the workspace from coming after the deletes: the files are not put back,
+    // so nothing is checked about what they leave.
+    deletion::delete(
         &prepared.workspace_root,
         &prepared.files.to_delete(),
+        delete_file,
     )
-    .map_err(RemoveRefusal::into_failure)?;
-    Ok(Done { lockfile, staged })
+    .map_err(|failed| {
+        *failed_deletion = Some(failed.deletion);
+        failed.refusal.into_failure()
+    })?;
+    Ok(Done { lockfile })
 }
 
 /// Writes the manifest with the wearing taken out of it, through `changes`.
@@ -460,14 +497,15 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use rituals::{Failure, clap};
-    use rituals_compose::rollback::{self, Wording};
+    use rituals_compose::rollback::Wording;
 
     use super::files::{Disposition, Fate, FilesFlag, Settlement};
     use super::message::Lockfile;
     use super::names::WearingKey;
     use super::resolve::{Candidate, Standing};
     use super::{
-        Done, Prepared, RemoveArguments, assert_nothing_written_is_moved, deletion, write_with,
+        Done, Prepared, RemoveArguments, assert_nothing_written_is_deleted, attempt_removal,
+        deletion,
     };
     use crate::claim::ClaimPath;
     use crate::command_line_crate::CommandLineCrate;
@@ -544,16 +582,26 @@ mod tests {
             std::fs::write(path, contents).expect("write the file");
         }
 
+        /// A run whose deletes are the real ones.
         fn run(
             &self,
             relock: impl FnOnce() -> Result<(), ReadWorkspaceError>,
             read_back: impl FnOnce() -> Result<Prospect, ReadWorkspaceError>,
         ) -> Result<Done, Failure> {
+            self.run_deleting(relock, read_back, deletion::delete_from_disk)
+        }
+
+        /// A run through the function the command runs through, with
+        /// `delete_file` as the delete.
+        fn run_deleting(
+            &self,
+            relock: impl FnOnce() -> Result<(), ReadWorkspaceError>,
+            read_back: impl FnOnce() -> Result<Prospect, ReadWorkspaceError>,
+            delete_file: impl FnMut(&Path) -> std::io::Result<()>,
+        ) -> Result<Done, Failure> {
             let wording =
                 Wording::project(self.directory.path(), "running the `remove` task again");
-            rollback::attempt(wording, |changes| {
-                write_with(changes, &self.prepared, relock, read_back)
-            })
+            attempt_removal(wording, &self.prepared, relock, read_back, delete_file)
         }
     }
 
@@ -862,49 +910,50 @@ mod tests {
         assert_eq!(project.read("Cargo.toml"), "[package\n");
     }
 
+    fn names_in(directory: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(directory)
+            .expect("read the directory")
+            .map(|entry| {
+                entry
+                    .expect("read an entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
     #[test]
-    fn the_files_to_delete_are_moved_out_and_the_holding_directory_is_purged_after() {
-        // Two files in a directory of their own are moved into the holding
-        // directory, and the directory they left empty is gone. The run
-        // succeeds, and only purging what it hands back deletes the files for
-        // good.
+    fn the_files_to_delete_are_deleted_and_the_directory_they_emptied_goes() {
+        // Two files in a directory of their own are deleted, and the directory
+        // they left empty is gone. Nothing is left in the project but the
+        // manifest and the lockfile.
         let project = Project::new(WORN, deleting(&["ci/one.yml", "ci/two.yml"]));
         project.write_file("ci/one.yml", "one\n");
         project.write_file("ci/two.yml", "two\n");
 
-        let done = project
+        project
             .run(relocking(project.directory.path()), nothing_left())
             .expect("a wearing that is gone is a success");
 
-        assert!(
-            !project.path("ci").exists(),
-            "the emptied directory must go"
-        );
-        let holding = project.path(".skeletons-remove");
         assert_eq!(
-            std::fs::read_to_string(holding.join("0")).expect("the first file is held"),
-            "one\n"
+            names_in(project.directory.path()),
+            ["Cargo.lock", "Cargo.toml"]
         );
-        assert_eq!(
-            std::fs::read_to_string(holding.join("1")).expect("the second file is held"),
-            "two\n"
-        );
-
-        deletion::purge(done.staged, &WearingKey::new("tidy"))
-            .expect("the holding directory is deleted");
-
-        assert!(!holding.exists());
+        assert_eq!(project.read("Cargo.toml"), UNWORN);
     }
 
     #[test]
-    #[should_panic(expected = "the lockfile remove writes is never among the files it moves away")]
-    fn the_lockfile_among_the_files_to_move_is_a_defect_in_the_plan() {
+    #[should_panic(expected = "the lockfile remove writes is never among the files it deletes")]
+    fn the_lockfile_among_the_files_to_delete_is_a_defect_in_the_plan() {
         // The decision that sets the lockfile aside is made in `files`, so a
-        // settlement that hands it to the mover is a defect there, found in
+        // settlement that hands it to the deleter is a defect there, found in
         // `prepare` before anything is written.
         let project = Project::new(WORN, deleting(&["Cargo.lock"]));
 
-        assert_nothing_written_is_moved(
+        assert_nothing_written_is_deleted(
             &project.prepared.files,
             &project.prepared.workspace_root,
             &project.prepared.command_line_crate,
@@ -912,11 +961,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "the manifest remove writes is never among the files it moves away")]
-    fn the_manifest_among_the_files_to_move_is_a_defect_in_the_plan() {
+    #[should_panic(expected = "the manifest remove writes is never among the files it deletes")]
+    fn the_manifest_among_the_files_to_delete_is_a_defect_in_the_plan() {
         let project = Project::new(WORN, deleting(&["Cargo.toml"]));
 
-        assert_nothing_written_is_moved(
+        assert_nothing_written_is_deleted(
             &project.prepared.files,
             &project.prepared.workspace_root,
             &project.prepared.command_line_crate,
@@ -924,13 +973,13 @@ mod tests {
     }
 
     #[test]
-    fn files_that_are_neither_the_manifest_nor_the_lockfile_may_be_moved() {
+    fn files_that_are_neither_the_manifest_nor_the_lockfile_may_be_deleted() {
         let project = Project::new(
             WORN,
             deleting(&["ci.yml", "Cargo.lock.bak", "sub/Cargo.toml"]),
         );
 
-        assert_nothing_written_is_moved(
+        assert_nothing_written_is_deleted(
             &project.prepared.files,
             &project.prepared.workspace_root,
             &project.prepared.command_line_crate,
@@ -938,27 +987,84 @@ mod tests {
     }
 
     #[test]
-    fn a_file_that_cannot_be_moved_puts_the_manifest_the_lockfile_and_the_earlier_file_back() {
-        // The second file is not there, so moving it fails after the manifest
-        // was written, the lockfile relocked, the workspace read back and the
-        // first file moved. Everything comes back, the first file with its
-        // bytes at its own path, and the holding directory is gone.
-        let project = Project::new(WORN, deleting(&["ci/one.yml", "ci/missing.yml"]));
+    fn a_delete_that_fails_after_an_earlier_one_puts_the_manifest_and_lockfile_back_and_names_both_lists()
+     {
+        // The first file is really deleted and the second is refused, after
+        // the manifest was written, the lockfile relocked and the workspace
+        // read back. The manifest and the lockfile come back byte for byte,
+        // the first file stays deleted, the second and third are there, and
+        // the one line says what rollback did, then which files are gone and
+        // which are not.
+        let project = Project::new(
+            WORN,
+            deleting(&["ci/one.yml", "ci/two.yml", "ci/three.yml"]),
+        );
         project.write_file("ci/one.yml", "one\n");
+        project.write_file("ci/two.yml", "two\n");
+        project.write_file("ci/three.yml", "three\n");
+        let mut asked = 0_usize;
+
+        let failure = project
+            .run_deleting(
+                relocking(project.directory.path()),
+                nothing_left(),
+                |path| {
+                    asked += 1;
+                    if asked == 1 {
+                        deletion::delete_from_disk(path)
+                    } else {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "denied for the test",
+                        ))
+                    }
+                },
+            )
+            .expect_err("a delete that is refused must fail the run");
+
+        assert_eq!(
+            failure.to_string(),
+            format!(
+                "remove could not delete ci/two.yml: denied for the test{PUT_BACK}; the file \
+                 remove had already deleted is not put back, and git has it: ci/one.yml; not \
+                 deleted: ci/two.yml and ci/three.yml"
+            )
+        );
+        assert_put_back(&project);
+        assert!(!project.path("ci/one.yml").exists());
+        assert_eq!(project.read("ci/two.yml"), "two\n");
+        assert_eq!(project.read("ci/three.yml"), "three\n");
+    }
+
+    #[test]
+    fn a_directory_that_cannot_be_removed_names_every_file_deleted_and_none_not_deleted() {
+        // `link` is a link to a directory, so removing it as a directory is
+        // refused for a reason of the operating system's. Every file was
+        // deleted by then, so the line says so and has no clause about files
+        // not deleted, and the manifest and the lockfile are back.
+        let project = Project::new(WORN, deleting(&["link/f.yml"]));
+        project.write_file("real/f.yml", "f\n");
+        std::os::unix::fs::symlink("real", project.path("link")).expect("create the link");
 
         let failure = project
             .run(relocking(project.directory.path()), nothing_left())
-            .expect_err("a file that cannot be moved must fail the run");
+            .expect_err("a directory that cannot be removed must fail the run");
 
         let message = failure.to_string();
         assert!(
-            message.starts_with("remove could not move ci/missing.yml out of the work tree: "),
+            message
+                .starts_with("remove could not remove link, which deleting its files left empty: "),
             "{message}"
         );
-        assert!(message.ends_with(PUT_BACK), "{message}");
+        assert!(
+            message.ends_with(&format!(
+                "{PUT_BACK}; the file remove had already deleted is not put back, and git has \
+                 it: link/f.yml"
+            )),
+            "{message}"
+        );
         assert_put_back(&project);
-        assert_eq!(project.read("ci/one.yml"), "one\n");
-        assert!(!project.path(".skeletons-remove").exists());
+        assert!(!project.path("real/f.yml").exists());
     }
 
     /// The command `remove`'s arguments are read through, as the task builds

@@ -39,7 +39,9 @@ whatever it replaces. Both work from the manifests and the lockfile as they
 are on every run. Nothing is stored between runs, so there is nothing to go
 stale. `wear` is how a repository starts: it adds a skeleton as a dependency
 and the wearing table that says the repository means to wear it, which
-leaves the files to `sync`.
+leaves the files to `sync`. `remove` is how it stops: it takes the dependency
+and the table out again, and the skeleton's files with them when that is
+plainly what was asked.
 
 ## Mounting the bundle
 
@@ -88,8 +90,11 @@ cargo ritual import skeletons tools
 
 writes `tools = { package = "skeletons", … }` and `tasks = ["ritual", "tools"]`,
 and the commands run as `cargo ritual tools check`. The tool's own messages
-name only the `check`, `sync` and `wear` tasks, so they read the same either
-way.
+name only the `check`, `sync`, `wear` and `remove` tasks, so they read the same
+either way. The one exception is `remove`'s refusal of a crate worn under
+several keys, which has to show a command with a key in it, and shows `cargo`,
+the binary's name and the subcommands that were typed, which is how a project
+made by `ritual new` reaches its command line.
 
 This version of `skeletons` is built on ritual 0.2, and mounts in a command
 line built on ritual 0.2, such as the one ritual 0.2's `new` makes. `import`
@@ -108,8 +113,8 @@ this workspace wears no skeletons; a manifest wears one with a [package.metadata
 
 The first `cargo ritual` after a change builds the command line, so Cargo
 prints its progress before the output. Later runs reuse the build. Commit what
-`import` changed, `Cargo.lock` included, since `sync` and `wear` refuse to run
-over uncommitted changes.
+`import` changed, `Cargo.lock` included, since `sync`, `wear` and `remove`
+refuse to run over uncommitted changes.
 
 ## Wearing a first skeleton
 
@@ -195,8 +200,9 @@ A few rules cover a first wearing:
 
 Every file a worn skeleton renders lands at a path relative to the workspace
 root, whichever member wears it. [`.docs/wearing.md`](.docs/wearing.md) has
-the rest: what `wear` refuses and how it puts the project back, what happens
-when two skeletons claim one path, and every way a wearing can be refused.
+the rest: what `wear` and `remove` refuse and how they put the project back,
+what happens when two skeletons claim one path, and every way a wearing can be
+refused.
 
 ## Check
 
@@ -307,6 +313,53 @@ anything, and it makes no network request of its own, so it needs the
 skeletons' sources already fetched, which `cargo fetch` does. The full
 reading, including how a failure part-way through is reported, is in
 [`.docs/wearing.md`](.docs/wearing.md#sync).
+
+## Remove
+
+Stopping is `wear` in reverse. `remove` takes the skeleton's dependency and its
+wearing table out of the command line's crate, brings `Cargo.lock` current, and
+decides what to do with the files `sync` wrote. Like `wear` and `sync` it
+refuses to run in a git work tree with uncommitted changes, so commit first. The
+argument is the dependency key or the skeleton's crate, and a key wins over a
+crate of the same name:
+
+```sh
+cargo ritual skeletons remove dependabot
+```
+
+```text
+stopped wearing a-dependabot-skeleton 0.1.0: took the dependency `dependabot` and [package.metadata.skeletons.dependabot] out of ritual/Cargo.toml
+deleted .github/dependabot.yml
+commit ritual/Cargo.toml, Cargo.lock and the 1 deleted file to record it
+```
+
+A manifest `wear` wrote is back as it was before `wear`, byte for byte, unless
+the dependency table `wear` put the key into was there and empty before: taking
+the key out empties it again, `remove` cannot tell it from a table `wear`
+created, and it goes with its header. The files depend on
+what you asked, and `remove` never guesses. With neither flag, it deletes the
+skeleton's files when every one still holds what the skeleton renders, as above,
+because they are the skeleton's, unchanged. If any has changed, it deletes none
+of them: it stops wearing the skeleton, says which files have changed, and lists
+all of them, so you can keep them as your own or clear them out. `--delete-files`
+deletes every file, changed ones included, and `--keep-files` leaves every file
+where it is. `--delete-files` and `--keep-files` exclude each other. Removing a
+skeleton deletes the files it claims, including one the project needs to build,
+and git has them.
+
+A file is deleted only if git could give it back, by the same proof `sync`
+requires before it overwrites one. A file git ignores, hides or would not check
+out as it is stays where it is, with the reason, and the wearing still goes. It
+counts as neither deleted nor changed, so it never makes the others stay. A
+`Cargo.lock` that a skeleton claims is left the same way under every flag,
+because `remove` has just rewritten it and the project needs it. The files are
+deleted last, and a directory their deletion emptied that cannot be removed is
+named as left, with the system's reason, without failing the run. If a run fails
+after it has begun to write, the manifest and
+`Cargo.lock` are put back and it says so; a delete that fails stops the
+deleting, the files already deleted stay deleted, and the failure names the
+files deleted and the files not. The full reading, every refusal and the limits are
+in [`.docs/wearing.md`](.docs/wearing.md#remove).
 
 ## Concepts
 
@@ -419,13 +472,14 @@ written, and it need not be UTF-8. See
 ## Where next
 
 - [`skeletons` on docs.rs](https://docs.rs/skeletons) is the crate's own
-  page: mounting the bundle, and what `check`, `sync` and `wear` guarantee.
+  page: mounting the bundle, and what `check`, `sync`, `wear` and `remove`
+  guarantee.
 - [`skeletons-library` on docs.rs](https://docs.rs/skeletons-library) is for a
   program that wants the verdict on a workspace's files as data, rather than
   as the commands' tables and messages.
 - [`.docs/wearing.md`](.docs/wearing.md) is the reference for a repository
-  that wears skeletons: the wearing table, `wear`, where bones land, `check`
-  and `sync`'s output, and every refusal.
+  that wears skeletons: the wearing table, `wear` and `remove`, where bones
+  land, `check` and `sync`'s output, and every refusal.
 - [`.docs/skeleton-format.md`](.docs/skeleton-format.md) is the reference for
   writing a skeleton.
 - [`.docs/design.md`](.docs/design.md) explains why `skeletons` is shaped the

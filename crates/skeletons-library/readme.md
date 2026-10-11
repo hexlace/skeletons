@@ -7,9 +7,10 @@ matches. It writes nothing in the workspace, makes no network request, and
 says nothing in words: a caller decides what a drifted file or a refusal means
 to its own users.
 
-A caller that wants the commands themselves, `check`, `sync` and `wear` with
-their tables and messages, mounts [`skeletons`](https://crates.io/crates/skeletons)
-in a ritual command line instead. This crate is for a program that wants the
+A caller that wants the commands themselves, `check`, `sync`, `wear` and
+`remove` with their tables and messages, mounts
+[`skeletons`](https://crates.io/crates/skeletons) in a ritual command line
+instead. This crate is for a program that wants the
 verdict for a file as a value.
 
 ## Using it

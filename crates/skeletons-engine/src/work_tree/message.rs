@@ -2,8 +2,8 @@
 //! or when git says the work tree is not clean, or that git does not read a
 //! file the command writes.
 //!
-//! `sync` and `wear` refuse on the same questions in the same shapes, so the
-//! messages live here once and each takes the [`WritingCommand`] that is
+//! `sync`, `wear` and `remove` refuse on the same questions in the same shapes,
+//! so the messages live here once and each takes the [`WritingCommand`] that is
 //! asking: it supplies the command's name, what it would write over and the
 //! remedy that runs it again. Nothing here names a command itself.
 
@@ -397,6 +397,78 @@ mod tests {
             "git status printed more than 16 MiB, the most `skeletons` reads from git, so wear \
              wrote nothing"
         );
+    }
+
+    #[test]
+    fn remove_words_the_clean_work_tree_refusal_in_its_own_terms() {
+        // `remove` changes the manifest and any tracked `Cargo.lock` and
+        // deletes files, so what git holds is all three.
+        assert_eq!(
+            dirty_summary(1, WritingCommand::Remove),
+            "the working tree has 1 uncommitted change, so remove wrote nothing: it writes only \
+             into a clean working tree, where git holds the manifest it changes, any Cargo.lock \
+             git tracks and the files it deletes; commit, stash or move it, then run the \
+             `remove` task again"
+        );
+        assert_eq!(
+            dirty_summary(2, WritingCommand::Remove),
+            "the working tree has 2 uncommitted changes, so remove wrote nothing: it writes \
+             only into a clean working tree, where git holds the manifest it changes, any \
+             Cargo.lock git tracks and the files it deletes; commit, stash or move them, then \
+             run the `remove` task again"
+        );
+    }
+
+    #[test]
+    fn remove_reads_a_directory_outside_git_as_having_no_undo_for_what_it_changes_and_deletes() {
+        let message = abort_message(
+            &WorkTreeAbort::NotAWorkTree,
+            std::path::Path::new("/path/to/workspace"),
+            WritingCommand::Remove,
+        );
+        assert_eq!(
+            message,
+            "/path/to/workspace is not inside a git work tree, so remove wrote nothing: without \
+             git there is no undo for what it changes and deletes; commit the workspace to git \
+             first"
+        );
+    }
+
+    #[test]
+    fn remove_names_its_own_task_for_redirecting_variables() {
+        assert_eq!(
+            redirected_git_message(&["GIT_DIR"], WritingCommand::Remove),
+            "GIT_DIR is set, and git would answer from wherever it points rather than from \
+             this work tree's own repository, so remove wrote nothing: git sets it for the hooks \
+             it runs, so run the `remove` task outside a git hook (the `check` task works inside \
+             one), or unset it"
+        );
+    }
+
+    #[test]
+    fn no_message_worded_for_remove_names_sync_or_wear() {
+        // Every shared message takes its command from the argument. Reads
+        // every abort and both dirty summaries, which between them hold every
+        // sentence a refusal of `remove` shares with the other commands.
+        let root = std::path::Path::new("/root");
+        for abort in every_abort() {
+            let message = abort_message(&abort, root, WritingCommand::Remove);
+            for other in ["sync", "wear"] {
+                assert!(
+                    !message.contains(other),
+                    "{abort:?} read {message}, which names {other}"
+                );
+            }
+        }
+        for count in [1, 2] {
+            let message = dirty_summary(count, WritingCommand::Remove);
+            for other in ["sync", "wear"] {
+                assert!(
+                    !message.contains(other),
+                    "{count} read {message}, which names {other}"
+                );
+            }
+        }
     }
 
     #[test]

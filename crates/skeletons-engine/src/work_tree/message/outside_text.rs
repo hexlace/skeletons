@@ -18,8 +18,12 @@ use crate::work_tree::abort::{GitQuestion, WorkTreeAbort};
 use crate::work_tree::clean::{Dirt, DirtyPath};
 use crate::work_tree::writing_command::WritingCommand;
 
-/// Both commands that word these messages, so each is read for every kind.
-const COMMANDS: [WritingCommand; 2] = [WritingCommand::Sync, WritingCommand::Wear];
+/// Every command that words these messages, so each is read for every kind.
+const COMMANDS: [WritingCommand; 3] = [
+    WritingCommand::Sync,
+    WritingCommand::Wear,
+    WritingCommand::Remove,
+];
 
 /// Whether a message of some kind names text from outside, and so must show
 /// it escaped; a message that names none is only asked to stay on one line.

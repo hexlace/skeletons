@@ -17,13 +17,11 @@ pub(crate) fn hidden_from_work_tree_line(
     let path = Escaped(path);
     let name = command.name();
     let run_again = command.run_again();
-    let (marked, options) = match flag {
-        HiddenFlag::SkipWorktree => ("skip-worktree", "--no-skip-worktree"),
-        HiddenFlag::AssumeUnchanged => ("assume-unchanged", "--no-assume-unchanged"),
-        HiddenFlag::Both => (
-            "skip-worktree and assume-unchanged",
-            "--no-skip-worktree --no-assume-unchanged",
-        ),
+    let marked = flag.marked();
+    let options = match flag {
+        HiddenFlag::SkipWorktree => "--no-skip-worktree",
+        HiddenFlag::AssumeUnchanged => "--no-assume-unchanged",
+        HiddenFlag::Both => "--no-skip-worktree --no-assume-unchanged",
     };
     format!(
         "{path} is marked {marked} in git's index, so git does not read its bytes from the work \

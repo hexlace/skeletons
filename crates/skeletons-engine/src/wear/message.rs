@@ -1,21 +1,22 @@
 //! What `wear` tells the wearer when it has added a skeleton.
 
 use super::confirm::Added;
-use super::hand_back::Tracking;
+use crate::command_line_crate::hand_back::Tracking;
 use crate::skeleton::Escaped;
 
 /// The two lines `wear` prints when it succeeds: what it added and where,
 /// then the next step.
 ///
-/// The next step names the `sync` task and nothing before it: a task is
-/// never told the key it is mounted under, so it cannot say how its command
-/// line reaches `sync`, and the wearer recognises the subcommand on their
-/// own. It says to commit first because `sync` writes only into a clean work
-/// tree, and `wear` has just changed the manifest and `Cargo.lock`; the
-/// lockfile is always at the workspace root, which is where the wearer sees
-/// it named. It is named only when git tracks it: `git add` refuses a
-/// lockfile git ignores, so telling the wearer to commit it would send them
-/// at a command that fails.
+/// The next step names the `sync` task and nothing before it. `wear` is
+/// handed its command line, but the full command `CommandLine::cargo_command`
+/// gives holds only where the project's cargo alias is the binary's name, and
+/// the line reads the same however the command line is reached; the wearer
+/// recognises the subcommand on their own. It says to commit first because
+/// `sync` writes only into a clean work tree, and `wear` has just changed the
+/// manifest and `Cargo.lock`; the lockfile is always at the workspace root,
+/// which is where the wearer sees it named. It is named only when git tracks
+/// it: `git add` refuses a lockfile git ignores, so telling the wearer to
+/// commit it would send them at a command that fails.
 pub(crate) fn added_lines(added: &Added, lockfile: Tracking) -> [String; 2] {
     let (package, manifest, key) = (
         Escaped(&added.package),
@@ -39,9 +40,9 @@ pub(crate) fn added_lines(added: &Added, lockfile: Tracking) -> [String; 2] {
 #[cfg(test)]
 mod tests {
     use super::added_lines;
+    use crate::command_line_crate::hand_back::Tracking;
     use crate::survey::poison::{assert_escaped_once, poison};
     use crate::wear::confirm::Added;
-    use crate::wear::hand_back::Tracking;
 
     fn added(package: &str, manifest: &str, key: &str) -> Added {
         Added {

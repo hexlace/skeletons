@@ -4,9 +4,9 @@
 //! writing commands ask git (`clean`, and `sync`'s own `proof`) is asked
 //! through.
 //!
-//! Both `sync` and `wear` ask these questions and refuse on the answers, each
-//! in its own words: [`writing_command::WritingCommand`] says which one is asking, and the
-//! messages in [`message`] take it.
+//! `sync`, `wear` and `remove` ask these questions and refuse on the answers,
+//! each in its own words: [`writing_command::WritingCommand`] says which one
+//! is asking, and the messages in [`message`] take it.
 
 pub(crate) mod abort;
 pub(crate) mod clean;

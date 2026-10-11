@@ -107,9 +107,10 @@ pub(crate) enum WearingRefusal {
 /// `Allowed` is cargo's own normal fetch of exactly what the lockfile pins, so
 /// a fresh clone whose members were never built still reads. `Refused` runs
 /// cargo with `--offline`: a clone whose sources were never fetched fails with
-/// cargo's own offline error rather than fetching them. `skeletons check` and
-/// `skeletons wear` read with `Allowed`; `skeletons sync` reads with `Refused`,
-/// because writing requires nothing beyond what is already locked.
+/// cargo's own offline error rather than fetching them. `skeletons check`,
+/// `skeletons wear` and `skeletons remove` read with `Allowed`; `skeletons sync`
+/// reads with `Refused`, because writing requires nothing beyond what is
+/// already locked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Network {
     /// Cargo may fetch a locked source it does not already have.
@@ -122,6 +123,22 @@ pub enum Network {
 /// root itself) and turns it into every wearing table any member declares.
 pub fn read(directory: &Path, network: Network) -> Result<Workspace, ReadWorkspaceError> {
     Ok(from_document(&cargo_metadata::fetch(directory, network)?))
+}
+
+/// Brings `directory`'s `Cargo.lock` current, which `cargo metadata` does when
+/// it is not told `--locked`, and reads nothing else from it.
+///
+/// This is how a lockfile loses the packages only a removed dependency needed.
+/// It may write `Cargo.lock`, which is why [`read`] and `read_prospect`, which
+/// never do, are asked afterwards to prove the result.
+///
+/// # Errors
+///
+/// Returns [`ReadWorkspaceError`] when `cargo metadata` could not be run or
+/// refused.
+#[cfg(feature = "commands")]
+pub(crate) fn relock(directory: &Path) -> Result<(), ReadWorkspaceError> {
+    cargo_metadata::relock(directory)
 }
 
 /// Turns one `cargo metadata` document into every wearing table any member

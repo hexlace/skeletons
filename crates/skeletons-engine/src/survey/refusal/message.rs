@@ -591,6 +591,11 @@ fn not_a_skeleton_message(manifest: &str, dependency: &str, name: &str, version:
     )
 }
 
+/// Why a file belongs to one skeleton only, in the words an overlap of one
+/// path, or of two that are one name, gives for wearing only one of the
+/// skeletons that claim it.
+pub(crate) const ONE_SKELETON_PER_FILE: &str = "a file belongs to one skeleton";
+
 fn overlap_message(overlap: &Overlap) -> String {
     let claimant_list = join_and(
         &overlap
@@ -613,69 +618,100 @@ fn overlap_message(overlap: &Overlap) -> String {
         "claimed by {} worn skeletons, {claimant_list}",
         overlap.claimants.len()
     );
-    let tail = format!("{claimed_by}; a file belongs to one skeleton, so wear only one of them");
 
     match overlap.paths.as_slice() {
-        [one] => format!("{} is {tail}", Escaped(one.as_str())),
-        [first, second] => two_paths_overlap_text(first, second, &claimed_by, &tail),
-        many => many_paths_overlap_text(many, &claimed_by),
+        [one] => format!(
+            "{} is {claimed_by}; {ONE_SKELETON_PER_FILE}, so wear only one of them",
+            Escaped(one.as_str())
+        ),
+        [first, second] => {
+            let words = two_paths_words(first, second);
+            with_the_advice(&words, &claimed_by)
+        }
+        many => with_the_advice(&many_paths_words(many), &claimed_by),
     }
 }
 
-/// The message for an overlap of exactly two paths, worded for how the two
+/// How the paths of an overlap of two or more collide, worded for the
+/// relation they stand in under the fold: what is wrong with them, and why
+/// one skeleton must give them up.
+pub(crate) struct CollisionWords {
+    /// What is wrong with the paths, as a clause that ends before the comma
+    /// that leads to who claims them.
+    pub(crate) clause: String,
+    /// Why the paths cannot be had by several skeletons, when there is more to
+    /// say than the clause does.
+    pub(crate) reason: Option<&'static str>,
+}
+
+/// The sentence of an overlap of two or more paths: the paths' own words, who
+/// claims them, and what to do.
+fn with_the_advice(words: &CollisionWords, claimed_by: &str) -> String {
+    let CollisionWords { clause, reason } = words;
+    let claimed = format!("{clause}, and are {claimed_by}");
+    reason.map_or_else(
+        || format!("{claimed}; wear only one of them"),
+        |reason| format!("{claimed}; {reason}, so wear only one of them"),
+    )
+}
+
+/// The words for an overlap of exactly two paths, worded for how the two
 /// relate under the fold. Every spelling it names goes through [`told_apart`]
 /// together, so two that differ only in Unicode normalization are told apart.
-fn two_paths_overlap_text(
-    first_path: &ClaimPath,
-    second_path: &ClaimPath,
-    claimed_by: &str,
-    tail: &str,
-) -> String {
+pub(crate) fn two_paths_words(first_path: &ClaimPath, second_path: &ClaimPath) -> CollisionWords {
     let (first, second) = (first_path.as_str(), second_path.as_str());
     match folded_relation(first_path, second_path) {
         FoldedRelation::SamePath => {
             let shown = told_apart(&[first, second]);
-            format!(
-                "{} and {} are one name to a filesystem that ignores case or Unicode \
-                 normalization{}, and are {tail}",
-                &shown[0],
-                &shown[1],
-                shown.note_in_parentheses()
-            )
+            CollisionWords {
+                clause: format!(
+                    "{} and {} are one name to a filesystem that ignores case or Unicode \
+                     normalization{}",
+                    &shown[0],
+                    &shown[1],
+                    shown.note_in_parentheses()
+                ),
+                reason: Some(ONE_SKELETON_PER_FILE),
+            }
         }
         FoldedRelation::Nested => {
             let shown = told_apart(&[first, second]);
-            format!(
-                "{} and {} cannot both exist, since one is inside the other{}, and are {tail}",
-                &shown[0],
-                &shown[1],
-                shown.note_in_parentheses()
-            )
+            CollisionWords {
+                clause: format!(
+                    "{} and {} cannot both exist, since one is inside the other{}",
+                    &shown[0],
+                    &shown[1],
+                    shown.note_in_parentheses()
+                ),
+                reason: Some(ONE_SKELETON_PER_FILE),
+            }
         }
         FoldedRelation::SharedDirectorySpelledDifferently {
             first_at,
             second_at,
         } => {
             let shown = told_apart(&[first, second, &first_at, &second_at]);
-            format!(
-                "{} and {} are in one directory spelled two ways, {} and {}{}, which a \
-                 filesystem that ignores case or Unicode normalization takes as one, and are \
-                 {claimed_by}; a directory has one spelling on disk, so wear only one of them",
-                &shown[0],
-                &shown[1],
-                &shown[2],
-                &shown[3],
-                shown.note_in_parentheses()
-            )
+            CollisionWords {
+                clause: format!(
+                    "{} and {} are in one directory spelled two ways, {} and {}{}, which a \
+                     filesystem that ignores case or Unicode normalization takes as one",
+                    &shown[0],
+                    &shown[1],
+                    &shown[2],
+                    &shown[3],
+                    shown.note_in_parentheses()
+                ),
+                reason: Some("a directory has one spelling on disk"),
+            }
         }
     }
 }
 
-/// The message for an overlap of three or more paths. They can be joined by
-/// any mix of the relations above, so the reason is stated to fit every one
-/// of them: two different files under one directory spelled two ways are not
-/// "one file", and the two-path tail would say they are.
-fn many_paths_overlap_text(paths: &[ClaimPath], claimed_by: &str) -> String {
+/// The words for an overlap of three or more paths. They can be joined by any
+/// mix of the relations above, so the reason is stated to fit every one of
+/// them: two different files under one directory spelled two ways are not
+/// "one file", and the two-path words would say they are.
+pub(crate) fn many_paths_words(paths: &[ClaimPath]) -> CollisionWords {
     let names: Vec<&str> = paths.iter().map(ClaimPath::as_str).collect();
     let shown = told_apart(&names);
     let path_list = join_and(
@@ -683,12 +719,14 @@ fn many_paths_overlap_text(paths: &[ClaimPath], claimed_by: &str) -> String {
             .map(|index| shown[index].to_owned())
             .collect::<Vec<_>>(),
     );
-    format!(
-        "{path_list} cannot all be written, since a filesystem that ignores case or Unicode \
-         normalization takes some of them, or directories above them, as one{}, and are \
-         {claimed_by}; wear only one of them",
-        shown.note_in_parentheses()
-    )
+    CollisionWords {
+        clause: format!(
+            "{path_list} cannot all be written, since a filesystem that ignores case or Unicode \
+             normalization takes some of them, or directories above them, as one{}",
+            shown.note_in_parentheses()
+        ),
+        reason: None,
+    }
 }
 
 /// Joins `items` as `"a"`, `"a and b"`, or `"a, b and c"` — this crate's one

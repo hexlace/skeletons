@@ -1,5 +1,5 @@
-//! `cargo ritual skeletons check`, `sync` and `wear` all answer, and each prints
-//! exactly its help text.
+//! `cargo ritual skeletons check`, `sync`, `wear` and `remove` all answer, and
+//! each prints exactly its help text.
 //!
 //! No fixture workspace is needed: `--help` answers the same regardless of
 //! the working directory.
@@ -164,6 +164,42 @@ fn wear_help_and_h_print_exactly_the_help_text() -> TestOutcome {
         assert_eq!(
             report.stdout, WEAR_HELP_TEXT,
             "`skeletons wear {flag}` must print exactly the help text"
+        );
+    }
+    Ok(())
+}
+
+/// The exact text `skeletons remove --help`/`-h` must print, word for word: `remove`'s own
+/// `about`, its usage line, and each argument's and flag's `///` doc comment as its help
+/// text, unwrapped, with no "see more" hint.
+const REMOVE_HELP_TEXT: &str = concat!(
+    "stop wearing a skeleton: take out its dependency and wearing table, and its files if none ",
+    "has changed\n\n",
+    "Usage: ritual skeletons remove [OPTIONS] <KEY|CRATE>\n\nArguments:\n",
+    "  <KEY|CRATE>  the wearing's dependency key, or the skeleton's crate\n\nOptions:\n",
+    "      --delete-files  delete every file the skeleton claims, changed ones included\n",
+    "      --keep-files    leave every file the skeleton claims where it is\n",
+    "  -h, --help          Print help\n",
+);
+
+#[test]
+fn remove_help_and_h_print_exactly_the_help_text() -> TestOutcome {
+    // `RemoveArguments` carries its reasoning as a `//` comment above the derive, the same
+    // as `WearArguments`, so clap treats it as a plain `about` with no `long_about`, and
+    // this prints the exact text for both spellings.
+    let sandbox = Sandbox::new()?;
+    let current_directory = std::env::current_dir()?;
+
+    for flag in ["--help", "-h"] {
+        let report = run_ritual(&current_directory, &sandbox, &["skeletons", "remove", flag])?;
+        assert_eq!(
+            report.exit_code, 0,
+            "`skeletons remove {flag}` must answer; stderr was: {}",
+            report.stderr
+        );
+        assert_eq!(
+            report.stdout, REMOVE_HELP_TEXT,
+            "`skeletons remove {flag}` must print exactly the help text"
         );
     }
     Ok(())

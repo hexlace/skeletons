@@ -1,8 +1,8 @@
 //! Parsing `git ls-files -v --stage -z`'s own output — one record per index
 //! entry, `<tag> SP <mode> SP <oid> SP <stage> TAB <path> NUL` — and reading
 //! the one letter that says whether git looks at the file in the work tree.
-//! `sync` proves every path it writes against these records, and `wear` the
-//! two files it changes.
+//! `sync` proves every path it writes against these records, `remove` every
+//! file it would delete, and `wear` and `remove` the two files they change.
 
 use crate::git::ObjectId;
 
@@ -31,6 +31,18 @@ pub(crate) enum HiddenFlag {
     SkipWorktree,
     AssumeUnchanged,
     Both,
+}
+
+impl HiddenFlag {
+    /// The flag as a message says a file is marked with it: the names git's
+    /// own options use, joined for both.
+    pub(crate) const fn marked(self) -> &'static str {
+        match self {
+            Self::SkipWorktree => "skip-worktree",
+            Self::AssumeUnchanged => "assume-unchanged",
+            Self::Both => "skip-worktree and assume-unchanged",
+        }
+    }
 }
 
 /// What a command that reads a file through git's index makes of an entry's
@@ -182,6 +194,16 @@ mod tests {
     use proptest::prelude::*;
 
     use super::{HiddenFlag, IndexTag, TagReading, parse_ls_files_tagged};
+
+    #[test]
+    fn each_flag_is_marked_by_the_names_git_uses_for_it() {
+        assert_eq!(HiddenFlag::SkipWorktree.marked(), "skip-worktree");
+        assert_eq!(HiddenFlag::AssumeUnchanged.marked(), "assume-unchanged");
+        assert_eq!(
+            HiddenFlag::Both.marked(),
+            "skip-worktree and assume-unchanged"
+        );
+    }
 
     #[test]
     fn each_tag_is_read_as_read_hidden_by_its_flag_or_unmerged() {

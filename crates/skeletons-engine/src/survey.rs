@@ -17,9 +17,12 @@ use crate::skeleton;
 use crate::workspace::{Wearing, Workspace, WornDependency, WornId};
 
 pub(crate) use refusal::Refusal;
-pub use refusal::{RefusalKind, RefusalRecord, RefusedWearing};
 #[cfg(feature = "commands")]
-pub(crate) use refusal::{join_and, option_shape_detail, unsafe_path_change_clause};
+pub(crate) use refusal::{
+    CollisionWords, ONE_SKELETON_PER_FILE, join_and, many_paths_words, option_shape_detail,
+    two_paths_words, unsafe_path_change_clause,
+};
+pub use refusal::{RefusalKind, RefusalRecord, RefusedWearing};
 #[cfg(feature = "commands")]
 pub(crate) use spelling::told_apart;
 

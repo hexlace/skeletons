@@ -11,7 +11,7 @@ use crate::work_tree::abort::GitQuestion;
 use crate::work_tree::writing_command::WritingCommand;
 
 /// `` `git {command}` timed out after {n} s {doing what}, and was stopped, so
-/// {sync|wear} wrote nothing: {what held it up}; {what to do} ``.
+/// {sync|wear|remove} wrote nothing: {what held it up}; {what to do} ``.
 pub(super) fn timed_out_message(question: &GitQuestion, command: WritingCommand) -> String {
     let seconds = local_timeout().as_secs();
     let name = command.name();

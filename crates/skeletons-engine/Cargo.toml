@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 keywords.workspace = true
-description = "The engine behind skeletons and skeletons-library: check, sync and wear."
+description = "The engine behind skeletons and skeletons-library: check, sync, wear and remove."
 readme = "readme.md"
 categories = ["development-tools"]
 # Test skeletons are real crates under this one's own directory, each with a
@@ -36,13 +36,14 @@ exclude = ["/test-skeletons", "/src/behind/captures", "/src/workspace/fixtures"]
 # The commands': the `Task` that `task()` returns and the `Task` each command
 # builds. Optional, turned on by the `commands` feature.
 rituals = { workspace = true, optional = true }
-# The commands': ritual's `rollback`, which `wear` writes through: see the
-# workspace manifest. Optional, turned on by the `commands` feature.
+# The commands': ritual's `rollback`, which `wear` and `remove` write through:
+# see the workspace manifest. Optional, turned on by the `commands` feature.
 rituals-compose = { workspace = true, optional = true }
 # The commands': writing the wearing table into the command line's manifest in
-# place, keeping every comment and blank line the wearer wrote there
-# (`wear/table.rs`). The same 0.22 that `rituals-compose` already compiles, so
-# no new package arrives. Optional, turned on by the `commands` feature.
+# place, and taking it out again, keeping every comment and blank line the
+# wearer wrote there (`wear/table.rs`, `remove/manifest.rs`). The same 0.22
+# that `rituals-compose` already compiles, so no new package arrives. Optional,
+# turned on by the `commands` feature.
 toml_edit = { workspace = true, optional = true }
 # Reading `[package.metadata.skeletons]` out of a skeleton's own `Cargo.toml`. Real
 # library code, compiled into every build: `check` calls `skeleton::render` for
@@ -78,7 +79,7 @@ proptest.workspace = true
 tempfile.workspace = true
 
 [features]
-# The three commands `check`, `sync` and `wear`, the work-tree checks and the
+# The commands `check`, `sync`, `wear` and `remove`, the work-tree checks and the
 # `behind` query they share, and `task()`, which groups them, together with
 # every dependency only they use: the command-line framework, the network
 # client and the manifest editor. Off by default, so a project that only reads

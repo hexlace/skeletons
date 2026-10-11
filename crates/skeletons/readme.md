@@ -35,7 +35,7 @@ yet starts with ritual's
 [Install](https://github.com/hexlace/ritual#install) and
 [Quickstart](https://github.com/hexlace/ritual#quickstart).
 
-## Check, sync and wear
+## Check, sync, wear and remove
 
 `check` compares a repository's own files against the skeletons it wears. It
 reads the wearing tables and the lockfile fresh on every run, and reports, for
@@ -59,22 +59,32 @@ an empty `[package.metadata.skeletons.<key>]` table beside it, which is all
 a run that fails after `cargo add` has changed them puts both back exactly as
 they were, and says so.
 
-None of the three commands runs a git command that writes the repository's
-own index, refs, config or object database. A content filter the repository
-configures can, and `sync` runs one while it reads a file to prove git holds
-it: git-lfs's clean filter can add an object under `.git/lfs/objects/`, and
-never changes one already there. The one repository `check` writes to is a
-temporary one of its own, created and removed within the run, when the head
-of a `branch` pin has moved, or of a `git` dependency that names none of
-`tag`, `branch` or `rev`.
+`remove <key|crate>` is how it stops. It takes the skeleton's dependency and
+its wearing table out of the command line's own manifest, brings `Cargo.lock`
+current, and deletes the files the skeleton wrote only when every one still
+holds what the skeleton renders and git can give it back. `--delete-files`
+deletes them whether they changed or not, and `--keep-files` leaves them all.
+Like `wear` it refuses unless the work tree is clean, and a run that fails
+after it has begun to write puts the manifest and `Cargo.lock` back, and says
+so; a delete that fails leaves the files already deleted deleted, and the
+failure names the files deleted and the files not.
+
+None of these commands runs a git command that writes the repository's own
+index, refs, config or object database. A content filter the repository
+configures can, and `sync` and `remove` run one while they read a file to prove
+git holds it: git-lfs's clean filter can add an object under
+`.git/lfs/objects/`, and never changes one already there. The one repository
+`check` writes to is a temporary one of its own, created and removed within the
+run, when the head of a `branch` pin has moved, or of a `git` dependency that
+names none of `tag`, `branch` or `rev`.
 
 ## Going further
 
 The references live beside the code, and every claim above is argued in them:
 
 - [Wearing a skeleton](https://github.com/hexlace/skeletons/blob/main/.docs/wearing.md)
-  covers the wearing table, `wear`, where bones land, `check` and `sync`'s
-  output, and every way each can refuse.
+  covers the wearing table, `wear` and `remove`, where bones land, `check` and
+  `sync`'s output, and every way each can refuse.
 - [The skeleton format](https://github.com/hexlace/skeletons/blob/main/.docs/skeleton-format.md)
   covers writing a skeleton.
 - [The design](https://github.com/hexlace/skeletons/blob/main/.docs/design.md)

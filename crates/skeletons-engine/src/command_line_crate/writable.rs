@@ -1,12 +1,13 @@
-//! Whether `wear` can write the two files it changes, in place.
+//! Whether a command can write the two files it changes in the command line
+//! crate, in place.
 //!
 //! `cargo add` writes through a temporary file and a rename, so it succeeds
-//! on a read-only manifest. `wear`'s own table write and `rollback`'s restore
-//! write in place, and both fail on one, which would leave the dependency
-//! added and neither a worn project nor the files as they were. So both files
-//! are asked, before anything is written.
+//! on a read-only manifest. A command's own table write and `rollback`'s
+//! restore write in place, and both fail on one, which would leave the
+//! dependency added and neither a worn project nor the files as they were. So
+//! both files are asked, before anything is written.
 //!
-//! The question put to the operating system is the one `wear` is about to
+//! The question put to the operating system is the one the command is about to
 //! need answered: can this file be opened for writing, without creating it
 //! and without truncating it. Opening for append writes no byte and leaves
 //! the modification time alone, and the answer comes from the operating system
@@ -21,13 +22,14 @@ use std::path::Path;
 
 use rituals::Failure;
 
-use super::{CommandLineCrate, WRITING};
+use super::CommandLineCrate;
 use crate::skeleton::Escaped;
+use crate::work_tree::writing_command::WritingCommand;
 
-/// Whether a file has to exist for `wear` to change it.
+/// Whether a file has to exist for a command to change it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Presence {
-    /// The file is there, or `wear` has nothing to change: the manifest.
+    /// The file is there, or the command has nothing to change: the manifest.
     Required,
     /// The file may not be there yet: `Cargo.lock`. A missing one is not
     /// this check's to refuse, since reading the workspace `--locked` already
@@ -38,8 +40,12 @@ enum Presence {
 /// Refuses, before anything is written, a manifest or an existing
 /// `Cargo.lock` that cannot be written in place.
 ///
-/// Each file is named as `wear` shows it, relative to the workspace root.
-pub(super) fn check(command_line_crate: &CommandLineCrate) -> Result<(), Failure> {
+/// Each file is named as `command` shows it, relative to the workspace root,
+/// and a refusal is worded for `command`.
+pub(crate) fn check(
+    command_line_crate: &CommandLineCrate,
+    command: WritingCommand,
+) -> Result<(), Failure> {
     for (path, shown, presence) in [
         (
             &command_line_crate.manifest_path,
@@ -52,14 +58,19 @@ pub(super) fn check(command_line_crate: &CommandLineCrate) -> Result<(), Failure
             Presence::MayBeAbsent,
         ),
     ] {
-        check_file(path, shown, presence)?;
+        check_file(path, shown, presence, command)?;
     }
     Ok(())
 }
 
 /// Opens `path` for appending and drops it at once, which writes nothing.
-fn check_file(path: &Path, shown: &str, presence: Presence) -> Result<(), Failure> {
-    assert!(!shown.is_empty(), "a file `wear` changes has a name");
+fn check_file(
+    path: &Path,
+    shown: &str,
+    presence: Presence,
+    command: WritingCommand,
+) -> Result<(), Failure> {
+    assert!(!shown.is_empty(), "a file a command changes has a name");
     match (
         OpenOptions::new()
             .append(true)
@@ -71,15 +82,15 @@ fn check_file(path: &Path, shown: &str, presence: Presence) -> Result<(), Failur
         (Ok(_file), Presence::Required | Presence::MayBeAbsent) => Ok(()),
         (Err(error), Presence::MayBeAbsent) if error.kind() == ErrorKind::NotFound => Ok(()),
         (Err(error), Presence::Required | Presence::MayBeAbsent) => {
-            Err(Failure::new(line(shown, &error)))
+            Err(Failure::new(line(shown, &error, command)))
         }
     }
 }
 
-/// `` {path} cannot be written in place, so wear wrote nothing: wear changes
-/// it in place, and the operating system refused to open it for writing:
-/// {error}; make it writable, then run the `wear` task again ``.
-fn line(shown: &str, error: &std::io::Error) -> String {
+/// `` {path} cannot be written in place, so {command} wrote nothing: {command}
+/// changes it in place, and the operating system refused to open it for
+/// writing: {error}; make it writable, then run the `{command}` task again ``.
+fn line(shown: &str, error: &std::io::Error, command: WritingCommand) -> String {
     let shown = Escaped(shown);
     let reason = error.to_string();
     let reason = Escaped(&reason);
@@ -87,9 +98,9 @@ fn line(shown: &str, error: &std::io::Error) -> String {
         "{shown} cannot be written in place, so {} wrote nothing: {} changes it in place, and \
          the operating system refused to open it for writing: {reason}; make it writable, then \
          {}",
-        WRITING.name(),
-        WRITING.name(),
-        WRITING.run_again(),
+        command.name(),
+        command.name(),
+        command.run_again(),
     )
 }
 
@@ -98,13 +109,14 @@ mod tests {
     use std::io::ErrorKind;
 
     use super::{Presence, check_file, line};
+    use crate::work_tree::writing_command::WritingCommand;
 
     #[test]
     fn the_refusal_names_the_file_says_nothing_was_written_and_ends_in_a_remedy() {
         let error = std::io::Error::from(ErrorKind::PermissionDenied);
 
         assert_eq!(
-            line("crates/cli/Cargo.toml", &error),
+            line("crates/cli/Cargo.toml", &error, WritingCommand::Wear),
             "crates/cli/Cargo.toml cannot be written in place, so wear wrote nothing: wear \
              changes it in place, and the operating system refused to open it for writing: \
              permission denied; make it writable, then run the `wear` task again"
@@ -122,7 +134,12 @@ mod tests {
             .and_then(|metadata| metadata.modified())
             .expect("read the modification time");
 
-        let outcome = check_file(&path, "Cargo.toml", Presence::Required);
+        let outcome = check_file(
+            &path,
+            "Cargo.toml",
+            Presence::Required,
+            WritingCommand::Wear,
+        );
 
         assert!(outcome.is_ok(), "{outcome:?}");
         assert_eq!(std::fs::read(&path).expect("read it back"), b"[package]\n");
@@ -139,7 +156,12 @@ mod tests {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let path = directory.path().join("Cargo.lock");
 
-        let outcome = check_file(&path, "Cargo.lock", Presence::MayBeAbsent);
+        let outcome = check_file(
+            &path,
+            "Cargo.lock",
+            Presence::MayBeAbsent,
+            WritingCommand::Wear,
+        );
 
         assert!(outcome.is_ok(), "{outcome:?}");
         assert!(!path.exists(), "the probe must not create the file");
@@ -150,8 +172,13 @@ mod tests {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let path = directory.path().join("Cargo.toml");
 
-        let failure = check_file(&path, "Cargo.toml", Presence::Required)
-            .expect_err("a manifest that is not there cannot be changed");
+        let failure = check_file(
+            &path,
+            "Cargo.toml",
+            Presence::Required,
+            WritingCommand::Wear,
+        )
+        .expect_err("a manifest that is not there cannot be changed");
 
         assert!(
             failure
@@ -170,8 +197,13 @@ mod tests {
         let directory = tempfile::tempdir().expect("a temporary directory");
 
         for presence in [Presence::Required, Presence::MayBeAbsent] {
-            let failure = check_file(directory.path(), "Cargo.lock", presence)
-                .expect_err("a directory cannot be written as a file");
+            let failure = check_file(
+                directory.path(),
+                "Cargo.lock",
+                presence,
+                WritingCommand::Wear,
+            )
+            .expect_err("a directory cannot be written as a file");
 
             assert!(
                 failure
@@ -180,5 +212,17 @@ mod tests {
                 "{presence:?}: {failure}"
             );
         }
+    }
+
+    #[test]
+    fn the_refusal_is_worded_for_the_command_that_asked() {
+        let error = std::io::Error::from(ErrorKind::PermissionDenied);
+
+        assert_eq!(
+            line("Cargo.toml", &error, WritingCommand::Sync),
+            "Cargo.toml cannot be written in place, so sync wrote nothing: sync changes it in \
+             place, and the operating system refused to open it for writing: permission denied; \
+             make it writable, then run the `sync` task again"
+        );
     }
 }

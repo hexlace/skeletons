@@ -52,10 +52,12 @@ refusing outright unless the work tree is clean and every file it would
 replace is exactly what git would check out (see
 [Check, behind and sync](#check-behind-and-sync)). `wear` is how a repository
 starts: it adds a skeleton as a dependency and writes the empty wearing table
-that makes it worn, and leaves the files to `sync` (see [Wear](#wear)). See
-[wearing.md](wearing.md) for the wearer's own reference:
-the wearing table, `wear`, where bones land, `check` and `sync`'s own output,
-and every way each can refuse.
+that makes it worn, and leaves the files to `sync` (see [Wear](#wear)). `remove`
+is how it stops: it takes that dependency and table out again, brings
+`Cargo.lock` current, and deletes the skeleton's files only when that is plainly
+what was asked (see [Remove](#remove)). See [wearing.md](wearing.md) for the
+wearer's own reference: the wearing table, `wear` and `remove`, where bones
+land, `check` and `sync`'s own output, and every way each can refuse.
 
 ## A skeleton is a set of claims about a repository
 
@@ -828,6 +830,11 @@ merely deleted in the work tree still counts as dirty — the whole-tree
 question does not exempt it the way a question scoped to the paths `sync`
 is about to write would.
 
+`wear` and `remove` ask question (a) through the same code and refuse the same
+way, each in its own words. `remove` also puts rule (b)'s proof to every file it
+would delete, which is the one place that proof is asked for a deletion and not a
+write (see [Remove](#remove)).
+
 ### Positive proof, per path
 
 **(b) Positive proof, per path `sync` is about to write, that the bytes
@@ -1019,6 +1026,12 @@ read (`crates/skeletons-engine/src/sync/proof/ignored.rs` →
 `a_claim_the_local_exclude_file_ignores_is_refused_naming_that_file`, →
 `a_claim_a_later_negated_rule_un_ignores_is_still_created` and →
 `a_claim_added_with_force_despite_an_ignore_rule_is_still_updated`).
+
+`remove` meets the other side of this. A file it would delete that git ignores
+and does not track fails the proof for want of an index entry, and is left in
+place and named, not deleted (see [Remove](#remove)). It is not asked
+`check-ignore`: the index having nothing for it already says git could not give
+it back, and a tracked file is not ignored in effect.
 
 ### Spellings git cannot fold
 
@@ -1451,7 +1464,7 @@ be tracked and read from the work tree, tagged `H` and not `h`, `S` or `s`, and
 a tracked `Cargo.lock` has to be too; otherwise `wear` refuses before writing,
 because a dependency and a table written into a file git does not watch would
 leave a lockfile that no committed manifest explains
-(`crates/skeletons-engine/src/wear/hand_back.rs` →
+(`crates/skeletons-engine/src/command_line_crate/hand_back.rs` →
 `a_file_flagged_so_git_does_not_read_it_is_refused_for_each_flag_and_each_file`
 and →
 `a_manifest_git_holds_nothing_for_is_refused_and_a_lockfile_is_allowed`;
@@ -1475,7 +1488,7 @@ permission bits, so an access control list, an immutable flag and a read-only
 mount answer as they would for the real write, and a process that can write any
 file passes, which is right because it can also restore. A missing `Cargo.lock`
 is the `--locked` read's to refuse
-(`crates/skeletons-engine/src/wear/writable.rs` →
+(`crates/skeletons-engine/src/command_line_crate/writable.rs` →
 `a_path_that_cannot_be_opened_for_writing_is_refused_for_either_file_whoever_runs_it`,
 and `ritual/tests/wear_refusals.rs` →
 `a_read_only_manifest_is_refused_before_anything_is_written` and →
@@ -1572,16 +1585,439 @@ left to be found by the next `check`
 (`ritual/tests/wear.rs` →
 `wearing_from_a_path_adds_the_dependency_and_an_empty_table_then_sync_and_check_agree`).
 
-**The next step names the `sync` task alone.** A task is never told the key it
-is mounted under, so `wear` cannot say how its command line reaches `sync`, and
-the wearer recognises the subcommand on their own command line. The same holds
-for every message that asks for another run. The line opens by telling the
-wearer to commit the manifest and `Cargo.lock`, because `sync` writes only into
-a clean work tree and `wear` has just changed both; it names `Cargo.lock` only
-when git tracks it, since `git add` refuses a lockfile git ignores.
+**The next step names the `sync` task alone.** A task built to receive its
+command line, as `wear` and `remove` are, is handed it, and
+`CommandLine::cargo_command()` spells the command that reached it. `wear` does
+not use it for the next step, because that command holds only where the
+project's cargo alias is the binary's name, which is not so for a binary run
+directly or an alias renamed by hand, while the task name reads the same however
+the command line is reached; the wearer recognises the subcommand on their own
+command line. The same holds for every message that asks for another run, and
+those are shared with `check` and `sync`, which are built without a command line
+and so are told neither the key they are mounted under nor how they were
+reached. The line opens by telling the wearer to commit the manifest and
+`Cargo.lock`, because `sync` writes only into a clean work tree and `wear` has
+just changed both; it names `Cargo.lock` only when git tracks it, since
+`git add` refuses a lockfile git ignores.
 
-`wear` adds a skeleton and nothing takes one off: by hand that is two
-deletions, with no order to get wrong.
+## Remove
+
+Wearing a skeleton leaves two pieces in a manifest, the dependency and the
+wearing table, and `sync` leaves its files in the work tree. Taking a skeleton
+off by hand is two deletions in the manifest, a lockfile that still lists what
+only that dependency needed, and a decision about each file that nothing helps
+with: which are the skeleton's, which the project has made its own, and which
+git could not give back if they went. `remove <key|crate> [--delete-files |
+--keep-files]` does the two deletions, brings `Cargo.lock` current and makes
+that decision, writing into the same manifest `wear` writes into. On a manifest
+`wear` wrote it is the inverse: the manifest comes back byte for byte
+(`ritual/tests/remove.rs` →
+`removing_by_key_takes_out_the_dependency_and_the_table_and_the_files`), except
+when the dependency table `wear` put the key into was there and empty before.
+Taking the key out empties it again, nothing in the manifest tells it from a
+table `wear` created, and it goes with its header
+(`crates/skeletons-engine/src/remove/manifest.rs` →
+`a_dependency_table_that_was_empty_before_wear_goes_with_its_header_when_remove_empties_it`).
+
+**The name is a key first, and a crate second.** A person types what they see,
+and what they see in the manifest is the key, while what they know the skeleton
+as is its crate. The two are the same word whenever the key was left to default,
+and the name is then both. A key wins over a crate of the same name, because
+refusing the name as ambiguous would make that key impossible to remove, while
+the other wearing is always reachable by its own key
+(`crates/skeletons-engine/src/remove/resolve.rs` →
+`a_key_wins_over_a_crate_of_the_same_name`, and
+`ritual/tests/remove_refusals.rs` →
+`a_key_wins_over_a_crate_of_the_same_name`). Otherwise a crate that exactly one
+key wears is that wearing, compared exactly and not with `-` and `_` taken as
+the same (`crates/skeletons-engine/src/remove/resolve.rs` →
+`a_crate_is_compared_exactly_and_not_with_hyphens_and_underscores_folded`). A
+crate that several keys wear is refused rather than guessed at, and the line
+shows the command with one of the keys, since the person has to type one
+(`ritual/tests/remove_refusals.rs` →
+`a_crate_that_several_keys_wear_is_refused_with_a_key_to_use_instead`).
+
+The candidates are every key under `[package.metadata.skeletons]` in the command
+line's own manifest, including the wearings `check` refuses. A table whose
+dependency is no skeleton, or which has no dependency at all, is something
+`wear` could have half written and a person wants gone, and calling its key "not
+a key" would be false (`crates/skeletons-engine/src/remove/resolve.rs` →
+`a_wearing_with_no_dependency_is_still_a_key`). The two keys a skeleton keeps
+for its own declaration, `options` and `verbatim`, are never candidates.
+
+**Bare `remove` deletes the files only when everything matches, and never
+guesses.** Which files go depends on what stopping meant to the person, and a
+file the skeleton wrote and nobody touched is the skeleton's, while one the
+project edited is the project's now. The one call that needs no asking is the
+first: when every claimed file that is there, and that git could give back,
+still matches what the skeleton renders, they are all the skeleton's and all go.
+When any has changed, the decision belongs to the person, so `remove` deletes
+none of them, not even the ones that match, since a skeleton half deleted is
+neither worn nor cleared out, and it lists every file with whether it matches or
+has changed
+(`crates/skeletons-engine/src/remove/files.rs` →
+`bare_keeps_every_file_git_can_give_back_when_one_of_them_has_changed`, and
+`ritual/tests/remove_files.rs` →
+`with_one_file_changed_the_wearing_goes_and_every_file_stays_and_is_listed`).
+`--delete-files` is for the project that wore a large skeleton, edited a few of
+its files and now wants all of it gone, and `--keep-files` for the rare project
+that wants to stop wearing a skeleton and keep its files. They exclude each
+other, and giving both is a usage error, so a request is never one the tool has
+to interpret (`crates/skeletons-engine/src/remove.rs` →
+`clap_refuses_both_flags_together_in_either_order`). A claimed file that is
+missing is nothing to delete, and neither a reason to refuse nor a reason to
+keep the others (`crates/skeletons-engine/src/remove/files.rs` →
+`bare_with_a_file_missing_does_not_ask_about_it`, and
+`ritual/tests/remove_files.rs` →
+`delete_files_deletes_a_changed_file_and_does_not_refuse_a_missing_one`).
+
+**A wearing whose files cannot be known is refused, unless the flag is
+`--keep-files`.** The survey drops a skeleton's rows whenever it refuses the
+skeleton, and drops the claims of bones that overlap, so its rows are the whole
+set of a wearing's files only when no refusal names the wearing. Deleting from a
+partial set is a guess, so a bare `remove` and `--delete-files` refuse and carry
+`check`'s own reasons, with `--keep-files` as the way out
+(`crates/skeletons-engine/src/remove/files.rs` →
+`unknown_files_refuse_a_bare_run_and_a_delete_run_with_the_reasons`, and →
+`an_overlap_makes_the_files_of_every_claimant_unknown`;
+`ritual/tests/remove_files.rs` →
+`a_wearing_whose_files_cannot_be_known_is_refused_bare_and_with_delete_files`).
+An overlap with the wearing being removed is the exception to carrying `check`'s
+words: its advice is to wear only one of the skeletons, and running `remove` is
+how that is done, so it would send the wearer round. The reason therefore
+reaches the message as data, the other wearings and the paths, not as a string,
+and `remove` words it itself: the other wearing and the shared file, with
+`--keep-files` as the one way through, which stops this wearing and leaves the
+file to the other (`crates/skeletons-engine/src/remove/refusal.rs` →
+`an_overlap_on_one_path_names_the_other_wearing_and_the_path_and_leaves_it_to_them`,
+and `ritual/tests/remove_refusals.rs` →
+`an_overlap_with_the_wearing_is_refused_without_telling_the_wearer_to_run_remove_again`).
+Several other wearings are listed, and only one can keep the file
+(`crates/skeletons-engine/src/remove/refusal.rs` →
+`an_overlap_on_one_path_with_several_others_names_each_and_says_only_one_can_keep_it`).
+Paths that collide without being one file are worded as `check` words them,
+because that wording is one function both commands call
+(`crates/skeletons-engine/src/remove/refusal.rs` →
+`an_overlap_on_a_directory_spelled_two_ways_says_so_and_never_calls_it_a_shared_file`).
+Beside a refusal of another kind the line keeps that one to fix and offers
+`--keep-files` once (`crates/skeletons-engine/src/remove/refusal.rs` →
+`an_overlap_beside_another_refusal_keeps_that_one_to_fix_and_offers_the_way_through_once`).
+`--keep-files` touches no file, so it needs to know none, and the dependency and
+the table come out even then, which is the case that matters most: a
+half-written wearing is exactly what a person wants gone
+(`ritual/tests/remove_files.rs` →
+`a_wearing_whose_files_cannot_be_known_proceeds_with_keep_files`). The survey
+still runs under that flag. Whether `check` refuses the wearing decides how the
+first line names it, since a refused wearing is not a skeleton to name with a
+version, while the files themselves are left where they are whatever the survey
+made of them
+(`crates/skeletons-engine/src/remove/files.rs` →
+`keep_files_leaves_everything_whether_the_files_are_known_or_not`).
+
+**A file is deleted only on the proof `sync` asks before it overwrites one.** A
+clean work tree does not say that git could give a file back. An untracked file
+that git's ignore rules hide, a file the index flags so that git does not read
+it from the work tree, and a file under a content filter that does not write
+back what it was handed all report clean while holding bytes no commit has, and
+deleting any of them would lose the only copy. So each file in the work tree is
+put to the proof that its bytes are exactly what git would check out for its
+index entry (`crates/skeletons-engine/src/sync/proof.rs` → `prove_held`), the
+same function `sync` runs, so that there is one proof and one reading of "what
+git would check out". A file that passes is one the flag may delete. One that
+does not is left in place and named with the reason, and the wearing is still
+removed, because the person asked to stop wearing and a file git could not give
+back is no reason to keep wearing. It is not counted as changed either, whatever
+it holds: git could not give it back whether or not it was edited, and a file
+that stays whatever the rule says is no change for the rule to protect, so it
+should not make a bare `remove` keep the others
+(`crates/skeletons-engine/src/remove/give_back.rs` →
+`an_ignored_untracked_file_is_left_as_not_tracked`, and
+`crates/skeletons-engine/src/sync/proof.rs` →
+`a_line_a_lossy_clean_filter_strips_is_not_what_git_checks_out`;
+`ritual/tests/remove_files.rs` →
+`a_claimed_file_git_ignores_is_left_and_named_while_the_others_are_deleted`, and
+→ `a_claimed_file_marked_skip_worktree_is_left_and_named`).
+
+The order is the point. Whether a bare `remove` keeps the files can only be said
+over the files git could give back, and which those are is git's to say, so the
+proof comes first, for every file that is there, changed or not, and the
+decision is taken after it over what passed alone. The plan `remove` makes
+before it asks git holds the files and the rule to judge them by, and has no way
+to say that they are kept; only settling it with git's answers can
+(`crates/skeletons-engine/src/remove/files.rs` →
+`bare_with_one_changed_file_still_only_asks_git_and_decides_nothing`). A file git
+could not give back, changed on disk or not, leaves the files that match to be
+deleted, and when one git can give back has changed they are kept and the left
+file is still named in its place, with a summary that counts only the files
+kept and says `other`
+(`crates/skeletons-engine/src/remove/files.rs` →
+`a_changed_file_git_could_not_give_back_does_not_make_bare_keep_the_others`, →
+`a_file_git_could_not_give_back_is_left_and_named_when_the_rest_are_kept`, and →
+`settling_asks_about_each_file_in_order_changed_or_not_and_records_the_answers`;
+`crates/skeletons-engine/src/remove/message.rs` →
+`a_file_left_among_kept_files_is_listed_in_its_place_and_the_summary_says_other`;
+`ritual/tests/remove_files.rs` →
+`an_ignored_claimed_file_that_has_changed_is_left_and_does_not_make_the_others_stay`,
+→ `a_skip_worktree_claimed_file_that_has_changed_is_left_and_does_not_make_the_others_stay`,
+and →
+`a_tracked_file_that_changed_keeps_the_others_and_the_file_git_could_not_give_back_is_named`).
+When git could not give back any file that is there, nothing is left for the
+rule to keep or delete, and the `left` lines stand alone
+(`ritual/tests/remove_files.rs` →
+`when_git_could_not_give_back_any_present_file_each_is_named_and_nothing_else_is_said`).
+Every way the proof
+can refuse is given a place in the reason before the crate builds
+(`crates/skeletons-engine/src/remove/give_back.rs` →
+`every_reason_the_proof_gives_is_placed`). A question to git that cannot be
+asked at all is an abort before anything is written, as it is for `sync`.
+
+**The lockfile `remove` brings current is never deleted, under any flag.** The
+proof above is about git, and a file can pass it and still not be the wearer's
+to lose: `remove` brings `Cargo.lock` current, so a skeleton that claims
+`Cargo.lock` has a file the run has just rewritten, and deleting it
+afterwards leaves a project in which every later locked Cargo command fails,
+with the last read of the workspace made before the delete and so unable to
+notice. The lockfile is therefore decided before anything is written, in the
+same place and the same kind of decision as a file git could not give back:
+each claimed path is compared, as exact text, with the lockfile's path spelled
+relative to the workspace root as a claim is. A match is left and named, with a
+reason of its own that says the project needs it and does not tell the wearer
+to delete it by hand, since deleting it breaks the project. It is not asked of
+git, since it is left whatever git would say, and it is not counted as changed:
+a claimed lockfile almost never equals what a skeleton renders, so counting it
+would make a bare `remove` keep every other file every time, which says nothing
+about what the project did with the skeleton's files. A claim spelled in another
+case needs no case-folding comparison, on a case-insensitive filesystem or any
+other: the survey accepts a claim only when its directory lists an entry
+spelled exactly so, and refuses the wearing's claims when it lists a variant
+(`ritual/tests/remove_files.rs` →
+`a_claim_that_spells_the_lockfile_in_another_case_is_refused_rather_than_deleted`).
+The set of files handed to the deleter is built from the files git was asked
+about and could give back, and the lockfile is set aside before anyone asks, so
+the set cannot hold it; `prepare` asserts that again, against the real absolute
+paths and before anything is written, because an assertion inside the attempt
+would skip the undo (`crates/skeletons-engine/src/remove/files.rs` →
+`a_claimed_lockfile_is_never_among_the_files_to_delete`, and
+`crates/skeletons-engine/src/remove.rs` →
+`the_lockfile_among_the_files_to_delete_is_a_defect_in_the_plan`). The decisions,
+and what the wearer reads for each
+(`crates/skeletons-engine/src/remove/files.rs` →
+`a_claimed_lockfile_is_set_aside_whatever_its_state_and_whatever_the_flag`, →
+`a_claimed_file_is_the_lockfile_only_when_its_text_is_exactly_the_path`, →
+`keep_files_says_nothing_about_a_claimed_lockfile`, →
+`a_claimed_lockfile_is_no_change_to_the_project_so_bare_deletes_the_rest`, and →
+`a_claimed_lockfile_is_left_among_the_files_kept_for_a_change`;
+`crates/skeletons-engine/src/remove/message.rs` →
+`the_lockfile_is_left_and_says_why_without_telling_the_wearer_to_delete_it`;
+`ritual/tests/remove_files.rs` →
+`delete_files_leaves_a_claimed_lockfile_it_has_just_brought_current`, →
+`bare_deletes_the_matching_file_beside_a_claimed_lockfile_and_keeps_none`,
+and → `bare_leaves_a_claimed_lockfile_that_still_matches_what_the_skeleton_renders`).
+
+The manifest `remove` edits needs no rule of its own, because a skeleton cannot
+claim a file named like a Cargo manifest: the render refuses one, at any depth
+and in any case (`crates/skeletons-engine/src/acceptance/manifests.rs` →
+`a_name_that_folds_to_cargo_toml_is_refused_the_same_way`), so `check` refuses
+such a skeleton, the files it claims are unknowable, and `remove` refuses it
+under a bare run and under `--delete-files` alike
+(`ritual/tests/remove_files.rs` →
+`a_skeleton_that_claims_a_cargo_manifest_leaves_the_files_unknowable_and_the_manifest_untouched`).
+
+**The files are deleted last, and a failed delete is not undone.** Rollback
+records a file it writes and restores it from its bytes, which would lose its
+mode, and it records no deletion at all. So the files are not recorded: they are
+deleted for real, after the manifest and `Cargo.lock` are written and the read
+back has shown the wearing gone, and git is what holds them, which is why each
+passes the proof before anything is written. The deletes run inside the same
+attempt as the writes, so a delete that fails returns a failure and the
+manifest and `Cargo.lock` are put back. The deleting stops at the first failure
+and no directory is removed after it. The files already deleted stay deleted,
+and the failure says so: it names the file that failed, then what rollback did,
+then the files deleted, which are not put back and which git has, and the files
+not deleted, the one that failed among them. The clauses about the files come
+after rollback's words, because rollback's words cannot be about files it did
+not record, and the whole line is then true whichever clause rollback ended
+with. Each piece is worded by a pure function, and the one function that makes
+the attempt and appends them is the one the command and its tests run through
+(`crates/skeletons-engine/src/remove/deletion.rs` →
+`a_delete_failing_after_an_earlier_one_reports_which_were_deleted_and_which_were_not`,
+and → `the_first_delete_failing_reports_none_deleted`;
+`crates/skeletons-engine/src/remove.rs` →
+`a_failed_delete_puts_the_manifest_and_lockfile_back_and_names_both_lists`;
+`crates/skeletons-engine/src/remove/refusal.rs` →
+`some_files_deleted_and_some_not_are_each_named_after_what_rollback_said`;
+`ritual/tests/remove_refusals.rs` →
+`a_failed_delete_puts_back_the_manifest_and_lockfile_and_names_both_lists`).
+The files go last, so the manifest is already changed when a delete fails, and
+nothing is read after the first file is gone: the read back is taken as a
+closure that can be called once, and the deletes come after it.
+
+What the rollback can and cannot give back is the same as for `wear`: a returned
+failure is undone and a panic is not, so every condition the wearer can cause or
+act on is a returned failure, including the defects in `skeletons` that are
+found after the manifest was written
+(`crates/skeletons-engine/src/remove.rs` →
+`a_read_back_that_still_finds_the_wearing_is_a_defect_and_both_files_come_back`),
+and a change made around the run is overwritten. Nothing fails after the
+success lines are printed: the deletes are the last thing the run does before it
+prints.
+
+**The manifest is edited in place, not by `cargo remove`.** `cargo remove` also
+deletes unused `[workspace.dependencies]` entries and profile tables for the
+crate, and the comments above tables it empties, in the workspace root manifest
+as well as the member's. It changes things that are not this wearing, in a
+manifest that is not this one. So the dependency under the key is taken out of
+each dependency table of the one manifest, those under `[target.…]` included,
+with `toml_edit`, and so is the wearing table, whatever it holds; a table the
+removal leaves empty goes with its header, one that was already empty stays
+(which is why a table that was empty before `wear` and that `wear` put the key
+into does not stay: removing the key is what leaves it empty), and everything
+else the wearer wrote stays. The result is compared against an
+independent parse: it must be the original less exactly those entries and the
+tables their removal emptied, so an edit that leaves something out, puts
+something back, drops an empty table it should not have touched or changes a
+value is refused
+(`crates/skeletons-engine/src/remove/manifest.rs` →
+`removing_what_wear_wrote_gives_back_the_manifest_byte_for_byte`, →
+`a_dependency_in_each_shape_of_dependency_table_is_removed_and_nothing_else`,
+and →
+`the_check_refuses_an_edit_that_leaves_something_out_puts_something_back_or_changes_a_value`).
+No comment the wearer wrote is lost, with one exception. A header that goes
+takes none of its comments with it: the comments above it and the one beside it
+are moved onto whatever follows it in the text, the next header that stays or,
+when none does, the end of the file, in the order the headers had. That holds
+for every header that goes, those inside the wearing table (sub-tables and
+arrays of tables) and a dependency written as a table of its own among them
+(`crates/skeletons-engine/src/remove/manifest.rs` →
+`the_comments_around_the_wearing_tables_header_move_to_what_follows`, →
+`the_comments_around_each_header_inside_the_wearing_table_move_to_what_follows`,
+→ `the_comments_around_a_dependency_table_the_removal_emptied_move_on`, and →
+`the_comments_around_a_target_table_that_goes_with_its_dependencies_move_on_in_order`).
+The exception is a comment attached to a key line that is removed: the comment
+lines directly above the `key = value` line, the one after its value on its line,
+and the same for every key line inside a table that goes and inside a
+multi-line value. Those go with the line
+(`crates/skeletons-engine/src/remove/manifest.rs` →
+`a_comment_on_the_removed_entry_goes_with_it_and_other_comments_stay`, →
+`the_comments_that_go_with_a_removed_key_line_include_those_inside_its_value`).
+A check on the text, run beside the comparison of values, refuses the edit and
+names the line when a comment line of the original (one whose trimmed text
+starts with `#`) is no longer a line of the result, counted line for line,
+unless it is one of those that went with a key line
+(`crates/skeletons-engine/src/remove/manifest.rs` →
+`the_comment_check_refuses_an_edit_that_loses_a_comment_and_names_the_line`, →
+`the_comment_check_accepts_an_edit_that_loses_only_excepted_lines`).
+This rebuilds the part of `cargo remove` that finds the tables a dependency can
+be declared in, and says so. It does not rebuild its clean-up of `[features]`: a
+feature that still names the key makes Cargo refuse what is left, and that is
+reported in Cargo's words and rolled back
+(`crates/skeletons-engine/src/remove.rs` →
+`cargo_refusing_what_is_left_puts_both_files_back_with_cargos_words`).
+
+**`Cargo.lock` comes current through `cargo metadata`, and is then proven.**
+Once the dependency line is gone the lockfile still lists the packages only it
+needed. `cargo metadata` without `--locked` drops them and nothing else,
+rewrites the file in Cargo's own form, and makes no index update when the
+lockfile already satisfies what is left
+(`crates/skeletons-engine/src/workspace/cargo_metadata.rs` →
+`relocking_drops_the_packages_only_a_removed_dependency_needed`).
+`cargo update --workspace` also brings the lockfile current, and refreshes the
+registry index too, which changes more than the skeleton. The relock runs inside the rollback with
+the lockfile recorded, and whether it changed the file is observed from its
+bytes, because Cargo leaves a lockfile alone when nothing it holds is unneeded,
+and the last line names `Cargo.lock` only when there is something to commit
+(`crates/skeletons-engine/src/remove.rs` →
+`a_lockfile_cargo_left_as_it_was_is_reported_unchanged`).
+
+The workspace is then read back `--locked`, through the reader `check` and
+`sync` use. That proves the lockfile current and the manifest loadable, and it
+must show no wearing table at the key, worn or refused, and no dependency
+declared under it anywhere in the manifest, which is how a dependency `remove`
+does not edit would show (`crates/skeletons-engine/src/remove/confirm.rs` →
+`a_dependency_under_the_key_with_no_table_remains`, and →
+`a_table_at_the_key_that_check_refuses_is_still_worn`;
+`crates/skeletons-engine/src/remove.rs` →
+`a_read_back_that_still_finds_a_dependency_says_to_take_it_out_by_hand`).
+Nothing compiles the project, and nothing reads the workspace after the files
+are deleted. Removing a skeleton deletes the files it claims, including one the
+project needs to build, and git has them
+(`ritual/tests/remove_files.rs` →
+`a_claimed_file_the_project_needs_to_build_is_deleted_like_any_other`).
+
+**Everything the workspace and the survey already answer is refused before
+anything is written.** The workspace is read `--locked` and only `--locked`
+first, so a lockfile that is stale or missing is refused before bringing it
+current could rewrite more of it than the skeleton, and no read made before the
+write rewrites it. What that read holds answers the refusals that are about the
+name and the manifest as they stand. The files are surveyed and planned next,
+whatever flag was typed. The work tree is asked after those, so a request that is wrong is
+refused as wrong whether or not the tree is clean, and it is the whole-tree
+question `sync` asks, counting every uncommitted path, because the person's own
+edits would otherwise be mixed into what `remove` wrote or deleted
+(`ritual/tests/remove_refusals.rs` →
+`a_work_tree_with_an_uncommitted_change_is_refused_and_nothing_is_written`).
+Then the manifest and `Cargo.lock` are put to the questions `wear` asks of them,
+whether git can hand them back and whether they can be written in place, then
+and each file in the work tree is put to the proof and the files are judged by
+it.
+
+**What the code settled.** The first is a directory the deletion leaves
+empty. It is removed, deepest first, and so is each directory above it that this
+empties in turn, because git tracks no directory and the tree should then equal
+a checkout of the commit the person makes. A directory that still holds anything
+stays, and so does everything above it, and the workspace root is never reached
+(`crates/skeletons-engine/src/remove/deletion.rs` →
+`every_file_is_deleted_and_emptied_directories_are_gone`,
+and → `a_directory_that_still_holds_something_stays_and_so_does_everything_above_it`;
+`ritual/tests/remove_files.rs` → `a_directory_that_still_holds_something_stays`).
+
+A directory that cannot be removed for another reason, such as a parent that is
+not writable, is not a failure of the run. By then every file is deleted and the
+manifest and `Cargo.lock` are written and read back, so the whole of what the
+command exists to do has happened, and an empty directory is nothing git sees.
+Failing the run would put the manifest and `Cargo.lock` back and leave the
+project wearing a skeleton whose files were all gone. So the run succeeds and
+the directory is named in a line of its own, with the operating system's words.
+Only the directory the removal was refused for is named: the directories above
+it hold it and stay without a line, and the other emptied directories are still
+removed (`crates/skeletons-engine/src/remove/deletion.rs` →
+`a_directory_that_cannot_be_removed_for_another_reason_is_left_and_the_run_succeeds`,
+and → `an_unrelated_emptied_directory_is_still_removed_after_another_was_refused`;
+`crates/skeletons-engine/src/remove.rs` →
+`a_directory_that_cannot_be_removed_leaves_the_run_succeeding_and_names_it`;
+`crates/skeletons-engine/src/remove/message.rs` →
+`a_directory_left_has_its_line_after_the_files_and_before_what_to_commit`).
+
+The second is a file git cannot give back, which a clean work tree says nothing
+about. It is left in place and named under every flag that would delete it, as
+above, and the wearing is still removed. This matches `sync`, which refuses to
+create a file git ignores and to overwrite one git hides.
+
+The third is a wearing in another member. `remove` acts where `wear` writes, in
+the command line's own manifest. A name that is worn only in another manifest is
+refused by name, with the hand remedy, and the line says which manifest it does
+change and why, so the person is not left guessing why a wearing `check` lists
+cannot be removed here
+(`crates/skeletons-engine/src/remove/refusal.rs` →
+`a_wearing_in_another_manifest_is_named_with_the_hand_remedy`;
+`ritual/tests/remove_refusals.rs` →
+`a_wearing_in_another_members_manifest_is_refused_and_pointed_at`).
+
+**The messages name the `remove` task alone, with one exception.** `wear` and
+`remove` are handed their command line, and `CommandLine::cargo_command()` would
+let them spell the command that reached them. They do not, because the same
+remedies are printed by commands that are not told how they were reached, and
+because the full command holds only where the project's cargo alias is the
+binary's name, while the task name reads the same however the command line is
+reached. Every line worded for `remove` says `remove`, and names no other
+command (`crates/skeletons-engine/src/remove/refusal.rs` →
+`no_refusal_names_sync_or_wear`). The several-keys refusal is the exception: it
+has to show a command with a key in it, so it shows `cargo`, the binary's name
+and the subcommands that were typed, which is how a project made by `ritual new`
+reaches its command line and holds wherever the cargo alias is the binary's name
+(`crates/skeletons-engine/src/remove/refusal.rs` →
+`a_crate_worn_under_several_keys_shows_the_command_with_the_first_key`).
+
 
 ## Known limits
 
@@ -1770,6 +2206,26 @@ clone whose skeleton dependencies were never fetched aborts with cargo's own
 offline message rather than fetching anything on `sync`'s behalf; running
 `cargo fetch` first is the wearer's own responsibility, the same as for
 building the workspace at all.
+
+**`remove` edits the command line's own manifest and nothing else.** A
+dependency that member inherited from `[workspace.dependencies]` leaves the
+member's manifest, and the entry in the workspace root stays, unused. A
+`[features]` entry that still names the dependency's key makes Cargo refuse what
+is left, because `remove` does not rebuild `cargo remove`'s clean-up of
+features: the refusal is Cargo's, in its words, and the project is put back. A
+wearing in another member is refused by name and taken out by hand.
+
+**`remove` trusts the survey and the proof it took moments before, as `sync`
+does between its last look and its write, and narrows that time less.** A file
+is surveyed, then proved against git, then deleted after Cargo has brought
+`Cargo.lock` current, and `remove` does not look at the path again immediately
+before it deletes the file, as `sync` does before each write. An edit that lands in
+that interval is deleted with the file, and a directory above the file
+swapped for a symbolic link in it is followed. The interval is the time the
+relock and the read back take. Git is not the undo for such an edit: it was
+never committed, so no commit holds it, and it is lost with the file. The clean
+work tree makes sure that what the proof showed git can give back is all that
+was there when the interval began, and nothing more.
 
 ## Beyond this release
 

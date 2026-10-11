@@ -15,7 +15,6 @@
 
 mod cargo_add;
 mod confirm;
-mod hand_back;
 mod message;
 mod prospect;
 mod refusal;
@@ -25,24 +24,29 @@ mod source;
 mod table;
 #[cfg(test)]
 mod test_workspace;
-mod writable;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use rituals::{CommandLine, Failure, Outcome, Task, clap, report};
 use rituals_compose::rollback;
 use rollback::{Changes, Wording};
 
 use crate::check::{AbortingCommand, abort_message};
+use crate::command_line_crate::CommandLineCrate;
+use crate::command_line_crate::hand_back::{self, Tracking};
+use crate::command_line_crate::writable;
 use crate::current_directory;
 use crate::work_tree;
 use crate::work_tree::writing_command::WritingCommand;
-use crate::workspace::{self, Member, Network, ReadWorkspaceError, Workspace};
+use crate::workspace::{self, Network, ReadWorkspaceError, Workspace};
 use confirm::Added;
-use hand_back::Tracking;
 use refusal::WearRefusal;
+#[cfg(test)]
+pub(crate) use request::Key;
 use request::Request;
 use source::{Source, SourceFlags};
+#[cfg(test)]
+pub(crate) use table::with_empty_wearing_table;
 
 /// What `wear --help` says the task does.
 const ABOUT: &str = "start wearing a skeleton: add it as a dev-dependency, with an empty wearing \
@@ -111,49 +115,6 @@ struct Prepared {
     lockfile: Tracking,
 }
 
-/// The command line's own crate, which is the only package `wear` writes
-/// into, and the two files it changes.
-struct CommandLineCrate {
-    package: String,
-    /// Absolute, as `rollback` has to be handed it; it spells the path from
-    /// the workspace root itself when it reports.
-    manifest_path: PathBuf,
-    /// `manifest_path` as a message shows it: relative to the workspace root.
-    manifest_shown: String,
-    /// Absolute, as `manifest_path` is.
-    lockfile_path: PathBuf,
-    /// `lockfile_path` as a message shows it: relative to the workspace root.
-    lockfile_shown: String,
-}
-
-impl CommandLineCrate {
-    /// The crate of `member`, the package `package` names in the workspace
-    /// at `workspace_root`, with `Cargo.lock` beside the workspace's manifest.
-    fn new(package: &str, member: &Member, workspace_root: &Path) -> Self {
-        // `cargo metadata` reports every path as absolute, and `rollback`
-        // spells the paths it reports from the absolute ones it is handed (it
-        // panics on a relative one), so the two it is given are asserted here,
-        // where they come in, and the lockfile path joined onto the root is
-        // absolute with it.
-        assert!(
-            workspace_root.is_absolute(),
-            "the workspace root is always absolute"
-        );
-        assert!(
-            member.manifest_path.is_absolute(),
-            "a member's manifest path is always absolute"
-        );
-        let lockfile_path = workspace_root.join("Cargo.lock");
-        Self {
-            package: package.to_owned(),
-            manifest_path: member.manifest_path.clone(),
-            manifest_shown: member.manifest.clone(),
-            lockfile_shown: workspace::relative_to_root(workspace_root, &lockfile_path),
-            lockfile_path,
-        }
-    }
-}
-
 /// Everything `wear` can refuse before it writes anything.
 ///
 /// The workspace is read `--locked`, and only `--locked`, so that a lockfile
@@ -185,8 +146,8 @@ fn prepare(command_line: &CommandLine, request: Request) -> Result<Prepared, Fai
     // says nothing about a file git is told not to read, so the two files are
     // then asked of git's index, as `sync` asks of every path it writes.
     let (work_tree, clean) = work_tree::open_clean(&prospect.workspace.root, WRITING)?;
-    let lockfile = hand_back::check(&work_tree, &clean, &command_line_crate)?;
-    writable::check(&command_line_crate)?;
+    let lockfile = hand_back::check(&work_tree, &clean, &command_line_crate, WRITING)?;
+    writable::check(&command_line_crate, WRITING)?;
     Ok(Prepared {
         request,
         directory,
@@ -259,10 +220,11 @@ mod tests {
     use rituals::{Failure, Outcome, clap};
     use rituals_compose::rollback::{self, Wording};
 
-    use super::hand_back::Tracking;
     use super::source::Source;
     use super::test_workspace::{not_a_skeleton, workspace_of, worn};
-    use super::{CommandLineCrate, Prepared, Request, WearArguments, write_with};
+    use super::{Prepared, Request, WearArguments, write_with};
+    use crate::command_line_crate::CommandLineCrate;
+    use crate::command_line_crate::hand_back::Tracking;
     use crate::workspace::{ReadWorkspaceError, Workspace};
 
     const MANIFEST: &str = "[package]\nname = \"cli\"\nversion = \"0.1.0\"\n";

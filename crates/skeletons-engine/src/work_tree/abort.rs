@@ -12,7 +12,8 @@ pub(crate) enum GitQuestion {
     /// Whether the whole work tree is clean.
     Status,
     /// What git's index holds for one path, as a message shows it: a claimed
-    /// path for `sync`, the manifest or lockfile for `wear`.
+    /// path for `sync` and for a file `remove` would delete, the manifest or
+    /// lockfile for `wear` and `remove`.
     IndexEntry(String),
     /// What git's index tracks at one directory above a claim.
     IndexAbove(ClaimPath),

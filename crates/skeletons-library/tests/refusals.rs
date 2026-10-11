@@ -8,11 +8,11 @@ mod support;
 use std::fs;
 use std::os::unix::fs::symlink;
 
-use skeletons_library::{FileState, RefusalKind, SkeletonsNamed};
+use skeletons_library::{FileState, RefusalKind, Report, SkeletonsNamed};
 use support::{
     DEPENDABOT_PATH, Fixture, HOUSE_NOTES_PATH, HOUSE_NOTES_RENDERED, OTHER_NOTES_PATH,
-    OTHER_NOTES_RENDERED, TestOutcome, checked_files, paths_of, refused, undetermined,
-    wearing_table, wearings_of, worn_once,
+    OTHER_NOTES_RENDERED, TestOutcome, checked_files, path_dependency, paths_of, refused,
+    undetermined, wearing_table, wearings_of, worn_once, write_file,
 };
 
 #[test]
@@ -250,5 +250,165 @@ fn a_misspelt_table_beside_a_good_wearing_does_not_unsettle_the_good_one() -> Te
         report.skeletons_named("nobody-wears-this"),
         SkeletonsNamed::Undetermined(_)
     ));
+    Ok(())
+}
+
+/// Asserts that `report` holds one refusal and no skeleton, that the refusal is
+/// of `kind`, names the wearing of `key` in `tools/Cargo.toml` and the package
+/// `package`, names no path, and that the lookup for `package` is
+/// `Undetermined` with it while the lookup for any other package is `NotWorn`.
+fn assert_only_unidentified_refusal(
+    report: &Report,
+    kind: RefusalKind,
+    key: &str,
+    package: &str,
+) -> TestOutcome {
+    assert!(report.skeletons().is_empty(), "{:?}", report.skeletons());
+    let refusals = undetermined(report, package)?;
+    assert_eq!(refusals.len(), 1, "{refusals:?}");
+    assert_eq!(refusals[0].kind(), kind);
+    assert_eq!(
+        wearings_of(&refusals[0]),
+        [("tools/Cargo.toml", Some(key), Some(package))]
+    );
+    assert!(refusals[0].paths().is_empty(), "{:?}", refusals[0]);
+    assert_eq!(report.refusals(), refusals);
+    assert!(
+        matches!(
+            report.skeletons_named("nobody-wears-this"),
+            SkeletonsNamed::NotWorn
+        ),
+        "{:?}",
+        report.skeletons_named("nobody-wears-this")
+    );
+    Ok(())
+}
+
+#[test]
+fn a_dependency_under_a_reserved_key_is_refused_as_a_reserved_key() -> TestOutcome {
+    // Given `house-rules` declared under `options`, and again under `verbatim`,
+    // each with a wearing table (the second as the `verbatim` list of the
+    // `skeletons` table), the wearing is refused as `ReservedKey` however the
+    // key is written. It names the key and the package declared under it, the
+    // report holds no skeleton, and only the package asked for is unsettled.
+    for (key, metadata) in [
+        ("options", wearing_table("options")),
+        (
+            "verbatim",
+            "[package.metadata.skeletons]\nverbatim = [\"a\"]\n".to_owned(),
+        ),
+    ] {
+        let fixture = Fixture::new()?;
+        fixture.write_member(
+            "tools",
+            &path_dependency(key, "house-rules", &fixture.house_rules_directory()),
+            &metadata,
+        )?;
+        fixture.generate_lockfile()?;
+
+        let report = skeletons_library::check(fixture.project())?;
+
+        assert_only_unidentified_refusal(&report, RefusalKind::ReservedKey, key, "house-rules")?;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_dependency_with_no_library_is_refused_as_unresolved() -> TestOutcome {
+    // Given `bin-only`, a crate with a binary and no library, declared and given
+    // a wearing table, cargo lists no edge to it, so the wearing resolves to no
+    // package and is refused as `Unresolved`. It names the package declared
+    // under the key.
+    let fixture = Fixture::new()?;
+    let binary = fixture.write_crate("bin-only", "0.1.0", "")?;
+    std::fs::remove_file(binary.join("src/lib.rs"))?;
+    write_file(&binary.join("src/main.rs"), b"fn main() {}\n")?;
+    fixture.write_member(
+        "tools",
+        &path_dependency("bin-only", "bin-only", &binary),
+        &wearing_table("bin-only"),
+    )?;
+    fixture.generate_lockfile()?;
+
+    let report = skeletons_library::check(fixture.project())?;
+
+    assert_only_unidentified_refusal(&report, RefusalKind::Unresolved, "bin-only", "bin-only")
+}
+
+#[test]
+fn a_dependency_that_resolves_to_two_versions_of_a_package_is_refused_as_ambiguous() -> TestOutcome
+{
+    // Given a vendored source holding `x` at two versions, one required as a
+    // dependency and the other as a build dependency of the same member, and a
+    // wearing table under `x`, cargo resolves the key to two packages of one
+    // name. The wearing is refused as `Ambiguous` and names that package once.
+    let fixture = Fixture::new()?;
+    for version in ["1.0.0", "2.0.0"] {
+        let directory = format!("vendor/x-{version}");
+        fixture.write(
+            &format!("{directory}/Cargo.toml"),
+            format!("[package]\nname = \"x\"\nversion = \"{version}\"\nedition = \"2021\"\n")
+                .as_bytes(),
+        )?;
+        fixture.write(&format!("{directory}/src/lib.rs"), b"")?;
+        fixture.write(
+            &format!("{directory}/.cargo-checksum.json"),
+            b"{\"files\":{}}",
+        )?;
+    }
+    fixture.write(
+        ".cargo/config.toml",
+        b"[source.crates-io]\nreplace-with = \"vendored\"\n\n\
+          [source.vendored]\ndirectory = \"vendor\"\n",
+    )?;
+    fixture.write_member(
+        "tools",
+        "x = \"1\"\n",
+        &format!("[build-dependencies]\nx = \"2\"\n\n{}", wearing_table("x")),
+    )?;
+    fixture.generate_lockfile()?;
+
+    let report = skeletons_library::check(fixture.project())?;
+
+    assert_only_unidentified_refusal(&report, RefusalKind::Ambiguous, "x", "x")
+}
+
+#[test]
+fn a_skeleton_with_a_file_that_is_not_text_is_refused_as_invalid_and_stays_worn() -> TestOutcome {
+    // Given `broken-rules`, a skeleton whose `notes/broken.txt` is not UTF-8,
+    // worn under `broken`, the skeleton is found and `Worn`, but its files are
+    // `Refused` with one `SkeletonInvalid` naming the wearing and the package
+    // and no path, and nothing is compared. The refusal is about a worn
+    // skeleton, so the lookup for any other package is `NotWorn`.
+    let fixture = Fixture::new()?;
+    let broken = fixture.write_crate("broken-rules", "0.1.0", "[package.metadata.skeletons]\n")?;
+    write_file(&broken.join("files/notes/broken.txt"), &[0xff, 0xfe, 0xfd])?;
+    fixture.write_member(
+        "tools",
+        &path_dependency("broken", "broken-rules", &broken),
+        &wearing_table("broken"),
+    )?;
+    fixture.generate_lockfile()?;
+
+    let report = skeletons_library::check(fixture.project())?;
+
+    let (refusals, compared) = refused(worn_once(&report, "broken-rules")?)?;
+    assert_eq!(refusals.len(), 1, "{refusals:?}");
+    assert_eq!(refusals[0].kind(), RefusalKind::SkeletonInvalid);
+    assert_eq!(
+        wearings_of(&refusals[0]),
+        [("tools/Cargo.toml", Some("broken"), Some("broken-rules"))]
+    );
+    assert!(refusals[0].paths().is_empty(), "{:?}", refusals[0]);
+    assert!(compared.is_empty(), "{compared:?}");
+    assert_eq!(report.refusals(), refusals);
+    assert!(
+        matches!(
+            report.skeletons_named("nobody-wears-this"),
+            SkeletonsNamed::NotWorn
+        ),
+        "{:?}",
+        report.skeletons_named("nobody-wears-this")
+    );
     Ok(())
 }

@@ -1612,7 +1612,12 @@ git could not give back if they went. `remove <key|crate> [--delete-files |
 that decision, writing into the same manifest `wear` writes into. On a manifest
 `wear` wrote it is the inverse: the manifest comes back byte for byte
 (`ritual/tests/remove.rs` →
-`removing_by_key_takes_out_the_dependency_and_the_table_and_the_files`).
+`removing_by_key_takes_out_the_dependency_and_the_table_and_the_files`), except
+when the dependency table `wear` put the key into was there and empty before.
+Taking the key out empties it again, nothing in the manifest tells it from a
+table `wear` created, and it goes with its header
+(`crates/skeletons-engine/src/remove/manifest.rs` →
+`a_dependency_table_that_was_empty_before_wear_goes_with_its_header_when_remove_empties_it`).
 
 **The name is a key first, and a crate second.** A person types what they see,
 and what they see in the manifest is the key, while what they know the skeleton
@@ -1864,8 +1869,10 @@ as well as the member's. It changes things that are not this wearing, in a
 manifest that is not this one. So the dependency under the key is taken out of
 each dependency table of the one manifest, those under `[target.…]` included,
 with `toml_edit`, and so is the wearing table, whatever it holds; a table the
-removal leaves empty goes with its header, one that was already empty stays, and
-everything else the wearer wrote stays. The result is compared against an
+removal leaves empty goes with its header, one that was already empty stays
+(which is why a table that was empty before `wear` and that `wear` put the key
+into does not stay: removing the key is what leaves it empty), and everything
+else the wearer wrote stays. The result is compared against an
 independent parse: it must be the original less exactly those entries and the
 tables their removal emptied, so an edit that leaves something out, puts
 something back, drops an empty table it should not have touched or changes a

@@ -1145,8 +1145,11 @@ cargo ritual skeletons remove <KEY|CRATE> [--delete-files | --keep-files]
 `wear` writes, the dependency and the wearing table, brings `Cargo.lock`
 current, and deals with the files `sync` wrote. It writes into the same one
 manifest `wear` does, the command line's own, and on a manifest `wear` wrote it
-is the inverse: the manifest comes back byte for byte as it was before. It
-makes sure the project is still one Cargo can read without the wearing before it
+is the inverse: the manifest comes back byte for byte as it was before. The one
+exception is a dependency table that `wear` put the key into and that was empty
+before: taking the key out leaves it empty again, `remove` cannot tell it from
+a table `wear` created, and so it goes with its header, which the manifest did
+not have to lose. It makes sure the project is still one Cargo can read without the wearing before it
 deletes any file.
 
 **The argument** is the wearing's dependency key or the skeleton's crate name.

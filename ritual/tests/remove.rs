@@ -5,7 +5,9 @@
 //! writes its files with `sync`, commits, and then removes it. The story is
 //! that the manifest comes back byte for byte as it was before `wear`, the
 //! success lines are exactly the ones `.docs/wearing.md` gives, and `check`
-//! afterwards no longer lists the skeleton.
+//! afterwards no longer lists the skeleton. The manifests here have no
+//! dependency table that was empty before `wear`; one that was comes back
+//! without its header, which the manifest edit's own tests hold.
 
 mod support;
 

@@ -333,7 +333,10 @@ deleted .github/dependabot.yml
 commit ritual/Cargo.toml, Cargo.lock and the 1 deleted file to record it
 ```
 
-A manifest `wear` wrote is back as it was before `wear`. The files depend on
+A manifest `wear` wrote is back as it was before `wear`, byte for byte, unless
+the dependency table `wear` put the key into was there and empty before: taking
+the key out empties it again, `remove` cannot tell it from a table `wear`
+created, and it goes with its header. The files depend on
 what you asked, and `remove` never guesses. With neither flag, it deletes the
 skeleton's files when every one still holds what the skeleton renders, as above,
 because they are the skeleton's, unchanged. If any has changed, it deletes none

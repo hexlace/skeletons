@@ -18,8 +18,10 @@
 //! The dependency is removed from every dependency table of the manifest that
 //! declares the key, those under `[target.<name>]` too, and a table the removal
 //! leaves empty goes with its header. A table that was empty before stays, with
-//! its comments. Nothing else is touched: an inherited
-//! `[workspace.dependencies]` entry stays.
+//! its comments, when the removal took nothing out of it. A table `wear` put the
+//! key into that was empty before `wear` is empty again only because of the
+//! removal, and nothing tells it from a table `wear` created, so it goes. Nothing
+//! else is touched: an inherited `[workspace.dependencies]` entry stays.
 //!
 //! No comment the wearer wrote is lost, with one exception: a comment attached
 //! to a key line that is removed. That is the comment on the lines directly
@@ -167,9 +169,12 @@ impl Removals {
 /// The dependency is taken out of every dependency table that declares the key,
 /// and a table that the removal leaves empty is taken out with its header, as is a
 /// `skeletons` or `metadata` table that only held the wearing. On a manifest
-/// `wear` wrote this is its inverse: the manifest as it was before. The comments
-/// on a header that goes are kept, moved onto what follows it; only the
-/// comments of key lines that go are lost (see the module documentation).
+/// `wear` wrote this is its inverse: the manifest as it was before, except when
+/// the dependency table `wear` put the key into was there and empty before.
+/// Taking the key out empties it again, and nothing in the manifest tells it
+/// from a table `wear` created, so it goes with its header. The comments on a
+/// header that goes are kept, moved onto what follows it; only the comments of
+/// key lines that go are lost (see the module documentation).
 ///
 /// # Errors
 ///
@@ -531,7 +536,8 @@ mod tests {
     // itself, so the shapes are Cargo's own: a new table at the end, or a line
     // in the table that is there, sorted by key, with a comment after the last
     // table staying last). Wearing then removing must give the original back
-    // byte for byte.
+    // byte for byte. No case has a dependency table that was empty before
+    // `wear`; that one does not come back, and has its own test below.
     const BYTE_CASES: [(&str, &str); 8] = [
         (
             "[package]\nname = \"cli\"\nversion = \"0.1.0\"\n",
@@ -590,6 +596,27 @@ mod tests {
                 "from the manifest:\n{wearing}"
             );
         }
+    }
+
+    #[test]
+    fn a_dependency_table_that_was_empty_before_wear_goes_with_its_header_when_remove_empties_it() {
+        // Wearing then removing is not byte for byte here. The manifest had an
+        // empty `[dev-dependencies]`; `cargo add --dev --rename tidy --path
+        // ../dep`, run against Cargo itself, puts the key in it. Removing the
+        // key leaves the table empty, and a table the removal empties goes
+        // with its header, because nothing in the manifest tells it from a
+        // table `wear` created. So the manifest comes back without the table, and
+        // without the blank line above its header.
+        let before = format!("{PACKAGE}\n[dev-dependencies]\n");
+        let after_cargo_add = format!(
+            "{PACKAGE}\n[dev-dependencies]\ntidy = {{ path = \"../dep\", package = \"dep\" }}\n"
+        );
+        let wearing = worn(&after_cargo_add, "tidy");
+
+        let rewritten = removed(&wearing);
+
+        assert_eq!(rewritten.as_deref(), Ok(PACKAGE));
+        assert_ne!(rewritten.as_deref(), Ok(before.as_str()));
     }
 
     #[test]

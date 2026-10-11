@@ -310,8 +310,9 @@ every bone now matches (1 updated, 0 created)
 
 `sync` writes every drifted file or none of them, and if writing fails
 part-way it names which files it wrote. It never stages, commits or stashes
-anything, and it makes no network request of its own, so it needs the
-skeletons' sources already fetched, which `cargo fetch` does. The full
+anything, and it makes no network request of its own, so it needs every
+locked source already fetched, which a build alone does not do and
+`cargo fetch --locked` or a run of `check` does. The full
 reading, including how a failure part-way through is reported, is in
 [`.docs/wearing.md`](.docs/wearing.md#sync).
 

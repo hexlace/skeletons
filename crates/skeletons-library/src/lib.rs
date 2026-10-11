@@ -86,6 +86,12 @@ const _: () = {
 /// it downloaded earlier; where that cache cannot be written, every locked
 /// source must already be unpacked, as `cargo fetch` leaves it.
 ///
+/// Building the workspace does not fetch every locked source: `cargo build`
+/// leaves out packages locked for other platforms, and dev-dependencies, which
+/// is how `wear` adds a skeleton. On a machine that has done no more than
+/// build, the call fails as a cargo that ran and failed. Run
+/// `cargo fetch --locked` first.
+///
 /// A wearing that cannot be read is not an error. It is a [`Refusal`] in the
 /// [`Report`], and every other wearing is still reported.
 ///
@@ -94,7 +100,9 @@ const _: () = {
 /// - [`is_lockfile_not_current`](ReadWorkspaceError::is_lockfile_not_current)
 ///   when `Cargo.lock` is missing or out of date.
 /// - [`is_cargo_metadata_failed`](ReadWorkspaceError::is_cargo_metadata_failed)
-///   when cargo ran and failed, for example on a source that was never fetched.
+///   when cargo ran and failed, for example on a source that was never fetched:
+///   [`detail`](ReadWorkspaceError::detail) then names the package cargo failed
+///   to download and says that `--offline` was specified.
 /// - [`is_cargo_not_started`](ReadWorkspaceError::is_cargo_not_started) when
 ///   cargo could not be started although `directory` is a directory. A
 ///   `directory` that cannot be entered is reported this way too, and

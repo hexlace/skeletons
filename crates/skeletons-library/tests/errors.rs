@@ -1,12 +1,17 @@
 //! The ways a workspace cannot be read at all: each failure answers exactly one
 //! predicate, shows a fixed phrase, and carries what came from outside in
-//! `detail()`. The predicate `is_metadata_unreadable` is not tested here.
+//! `detail()`. The predicate `is_metadata_unreadable` is reached by a cargo
+//! that prints a document of a format version the library does not read, which
+//! needs a process of its own: see the last test.
 
 mod support;
 
 use std::error::Error;
-use std::os::unix::fs::PermissionsExt;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
+use std::process::Command;
 
 use skeletons_library::ReadWorkspaceError;
 use support::{Fixture, TestOutcome};
@@ -157,4 +162,111 @@ fn a_directory_that_cannot_be_entered_is_a_cargo_that_could_not_be_started() -> 
     assert_eq!(predicates(&error), [false, false, true, false, false]);
     assert_plain(error, "cargo metadata could not be started");
     Ok(())
+}
+
+/// The name of the test that runs its body in a process of its own, as the
+/// test harness lists it. The parent starts the child with `--exact` and this
+/// name, so the two must agree: a child that matches no test prints that it ran
+/// none, which the parent refuses.
+const UNKNOWN_FORMAT_TEST: &str = "a_cargo_printing_an_unknown_format_version_is_unreadable";
+
+/// Set, to anything, only in the process the parent test starts to run the
+/// body. Its presence is what makes a run of the test the child.
+const UNKNOWN_FORMAT_CHILD_MARKER: &str = "SKELETONS_LIBRARY_TEST_UNKNOWN_FORMAT_CHILD";
+
+/// A `cargo metadata` document that is valid JSON with every field the reader
+/// requires, whose format version is one the reader does not know, so that the
+/// only thing wrong with it is the version.
+const UNKNOWN_FORMAT_DOCUMENT: &str = "{\"version\":2,\"workspace_root\":\"/\",\
+     \"workspace_members\":[],\"packages\":[],\"resolve\":{\"nodes\":[]}}";
+
+/// Writes an executable `sh` script at `path` that prints
+/// [`UNKNOWN_FORMAT_DOCUMENT`] whatever it is asked, and exits 0.
+///
+/// The file is complete and closed before this returns, so this process no
+/// longer holds it open for writing when the child is started.
+fn write_unknown_format_cargo(path: &Path) -> TestOutcome {
+    // Deviation from RS-SINGLE-TOOLCHAIN (integration tests use
+    // `std::process::Command`, not shell scripts): the library runs the
+    // program `CARGO` names, which has to be an executable file, and a
+    // one-line POSIX `sh` that prints a document is the narrowest one. A Rust
+    // stand-in would need a binary target added to the crate for this one test.
+    let mut script = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o755)
+        .open(path)?;
+    script
+        .write_all(format!("#!/bin/sh\nprintf '%s\\n' '{UNKNOWN_FORMAT_DOCUMENT}'\n").as_bytes())?;
+    script.sync_all()?;
+    drop(script);
+    Ok(())
+}
+
+/// Starts this test binary again, to run only [`UNKNOWN_FORMAT_TEST`], with
+/// `cargo` as its `CARGO` and the marker set, and requires that the child ran
+/// that one test and it passed.
+///
+/// The library reads `CARGO` from the environment of the process that calls it,
+/// and the tests never change their own environment, so the call has to be made
+/// by a process that was born with the stand-in in its environment.
+fn run_unknown_format_in_a_child(cargo: &Path) -> TestOutcome {
+    let output = Command::new(std::env::current_exe()?)
+        .args(["--exact", UNKNOWN_FORMAT_TEST])
+        .env("CARGO", cargo)
+        .env(UNKNOWN_FORMAT_CHILD_MARKER, "1")
+        .output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // A child that matched no test exits 0, so success alone proves nothing:
+    // only a body that ran and passed prints these two lines.
+    let ran_and_passed = stdout.contains(&format!("test {UNKNOWN_FORMAT_TEST} ... ok"))
+        && stdout.contains("1 passed");
+    if output.status.success() && ran_and_passed {
+        Ok(())
+    } else {
+        Err(format!(
+            "the child did not run {UNKNOWN_FORMAT_TEST} to a pass ({status}); \
+             stdout: {stdout}; stderr: {stderr}",
+            status = output.status,
+        )
+        .into())
+    }
+}
+
+/// The body of the test, run by the child: asks about a directory whose cargo
+/// prints a document of an unknown format version.
+fn read_with_an_unknown_format_cargo() -> TestOutcome {
+    let directory = tempfile::tempdir()?;
+
+    let Err(error) = skeletons_library::check(directory.path()) else {
+        return Err("a document of an unknown format version was read".into());
+    };
+
+    assert_eq!(predicates(&error), [false, false, false, false, true]);
+    let detail = error.detail().ok_or("the reader said nothing")?;
+    assert!(detail.contains("format version 2"), "it said: {detail}");
+    assert_plain(error, "cargo metadata's output could not be read");
+    Ok(())
+}
+
+#[test]
+fn a_cargo_printing_an_unknown_format_version_is_unreadable() -> TestOutcome {
+    // Given a cargo that prints a well-formed document whose format version
+    // the reader does not know: only the metadata-unreadable predicate is true,
+    // `detail()` names the format version rather than a parse failure, and the
+    // error shows as its fixed phrase. The library takes cargo from the
+    // environment of the process that calls it, so the test starts itself again
+    // with the stand-in as `CARGO`. Run without the marker it is the parent: it
+    // writes the stand-in, starts the child and requires that the child ran
+    // this test to a pass. Run with the marker it is the child: it makes the
+    // assertions above.
+    if std::env::var_os(UNKNOWN_FORMAT_CHILD_MARKER).is_some() {
+        return read_with_an_unknown_format_cargo();
+    }
+    let directory = tempfile::tempdir()?;
+    let cargo = directory.path().join("cargo");
+    write_unknown_format_cargo(&cargo)?;
+
+    run_unknown_format_in_a_child(&cargo)
 }

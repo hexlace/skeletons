@@ -18,15 +18,24 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use support::remove::{
-    CLAIMING, Entry, MANIFEST, Worn, assert_check_wears_nothing, assert_printed, assert_refused,
-    check_refusal_reasons, commit_line, fixture_wearing_a_skeleton_that_claims, kept_other_summary,
-    kept_summary, make_the_skeleton_render_what_is_there, mark, no_dependency_line, porcelain,
-    run_remove, stopped_wearing_line, sync_and_commit, took_out_line, tree_state,
+    CLAIMING, Entry, MANIFEST, UnreadableDirectory, Worn, assert_check_wears_nothing,
+    assert_printed, assert_refused, check_refusal_reasons, commit_line,
+    fixture_wearing_a_skeleton_that_claims, kept_other_summary, kept_summary,
+    make_the_skeleton_render_what_is_there, mark, no_dependency_line, porcelain, run_remove,
+    stopped_wearing_line, sync_and_commit, took_out_line, tree_state,
 };
 use support::wear::{commit_everything, fixture_for_wearing, git_step};
-use support::{Fixture, TestOutcome, path_dependency_on_test_skeleton, wearing_table};
+use support::{
+    Fixture, TemporaryDirectory, TestOutcome, checked_in_refused_skeleton, path_dependency_on,
+    path_dependency_on_test_skeleton, wearing_table, write_minimal_skeleton,
+    write_package_manifest,
+};
 
 const NESTED: &str = "nested-dotfiles";
+
+/// The crate and dependency key of the skeleton whose files are made
+/// unreadable under the wearing.
+const UNREADABLE: &str = "unreadable";
 
 /// The stopped-wearing line for `nested-dotfiles` worn under its own name.
 fn stopped_nested() -> String {
@@ -582,7 +591,8 @@ fn when_git_could_not_give_back_any_present_file_each_is_named_and_nothing_else_
 
 /// A workspace wearing `nested-dotfiles` with an option the skeleton does not
 /// declare, so `check` refuses the wearing and the files it claims cannot be
-/// known. Committed clean. With the reasons `check` gives, joined by `; `.
+/// known, though the wearing still resolved to a skeleton with a crate and a
+/// locked version. Committed clean. With the reasons `check` gives, joined by `; `.
 fn fixture_with_unknowable_files() -> Result<(Fixture, String), Box<dyn std::error::Error>> {
     let extra = format!(
         "[dev-dependencies]\n{}\n{}",
@@ -628,7 +638,8 @@ fn a_wearing_whose_files_cannot_be_known_is_refused_bare_and_with_delete_files()
 fn a_wearing_whose_files_cannot_be_known_proceeds_with_keep_files() -> TestOutcome {
     // The same refused wearing, with `--keep-files`: nothing needs to be known
     // about the files, so the dependency and the table come out, and the
-    // first line is the one for a refused wearing that has a dependency.
+    // first line names the crate and version: the wearing resolved to a
+    // skeleton, and only its files are unknown.
     let (fixture, _reasons) = fixture_with_unknowable_files()?;
 
     let report = run_remove(&fixture, &[NESTED, "--keep-files"])?;
@@ -636,7 +647,7 @@ fn a_wearing_whose_files_cannot_be_known_proceeds_with_keep_files() -> TestOutco
     assert_printed(
         &report,
         &[
-            took_out_line(NESTED, MANIFEST),
+            stopped_nested(),
             "left every file it claims in place".to_owned(),
             commit_line(MANIFEST, true, 0),
         ],
@@ -670,6 +681,143 @@ fn a_wearing_table_with_no_dependency_is_taken_out_with_keep_files() -> TestOutc
     assert!(
         !manifest.contains("ghost"),
         "the table must be gone; manifest was:\n{manifest}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_dependency_that_is_not_a_skeleton_is_taken_out_with_keep_files_without_a_name() -> TestOutcome
+{
+    // `plain-crate` resolves to a locked package but has no
+    // `[package.metadata.skeletons]` table, so it is no skeleton to name with
+    // a version. With `--keep-files` the dependency and the wearing table come
+    // out and the first line is the one that names only the key.
+    let crate_directory = TemporaryDirectory::new("not-a-skeleton")?;
+    write_package_manifest(crate_directory.path(), "", "plain-crate", "")?;
+    let extra = format!(
+        "[dev-dependencies]\n{}\n{}",
+        path_dependency_on("plain-crate", crate_directory.path()),
+        wearing_table("plain-crate", ""),
+    );
+    let fixture = fixture_for_wearing(&extra)?;
+
+    let report = run_remove(&fixture, &["plain-crate", "--keep-files"])?;
+
+    assert_printed(
+        &report,
+        &[
+            took_out_line("plain-crate", MANIFEST),
+            "left every file it claims in place".to_owned(),
+            commit_line(MANIFEST, true, 0),
+        ],
+    );
+    let manifest = String::from_utf8(fixture.read(MANIFEST)?)?;
+    assert!(
+        !manifest.contains("plain-crate"),
+        "neither the dependency nor the table may remain; manifest was:\n{manifest}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_skeleton_whose_own_render_is_refused_is_named_when_stopped_with_keep_files() -> TestOutcome {
+    // `refused/unknown-key` carries a manifest defect, so its render is
+    // refused and the files it claims cannot be known. It still resolved to a
+    // skeleton with a crate and a locked version, so `--keep-files` names both.
+    let broken_skeleton = checked_in_refused_skeleton("unknown-key");
+    let extra = format!(
+        "[dev-dependencies]\n{}\n{}",
+        path_dependency_on("unknown-key", &broken_skeleton),
+        wearing_table("unknown-key", ""),
+    );
+    let fixture = fixture_for_wearing(&extra)?;
+
+    let report = run_remove(&fixture, &["unknown-key", "--keep-files"])?;
+
+    assert_printed(
+        &report,
+        &[
+            stopped_wearing_line("unknown-key", "unknown-key", MANIFEST),
+            "left every file it claims in place".to_owned(),
+            commit_line(MANIFEST, true, 0),
+        ],
+    );
+    Ok(())
+}
+
+#[test]
+fn a_wearing_with_an_unsafe_claimed_path_is_named_when_stopped_with_keep_files() -> TestOutcome {
+    // `nested-dotfiles` claims `.github/dependabot.yml`; here `.github` is a
+    // regular file, so the claimed path cannot exist beneath it and `check`
+    // refuses the wearing as an unsafe path. The skeleton is still resolved, so
+    // `--keep-files` names its crate and version and leaves every file alone.
+    let extra = format!(
+        "[dev-dependencies]\n{}\n{}",
+        path_dependency_on_test_skeleton(NESTED, NESTED),
+        wearing_table(NESTED, ""),
+    );
+    let fixture = fixture_for_wearing(&extra)?;
+    fixture.write(".github", b"not a directory\n")?;
+    commit_everything(&fixture, "fixture: a file where a directory belongs")?;
+    check_refusal_reasons(&fixture, NESTED)?;
+
+    let report = run_remove(&fixture, &[NESTED, "--keep-files"])?;
+
+    assert_printed(
+        &report,
+        &[
+            stopped_nested(),
+            "left every file it claims in place".to_owned(),
+            commit_line(MANIFEST, true, 0),
+        ],
+    );
+    assert_eq!(
+        fixture.read(".github")?,
+        b"not a directory\n",
+        "the file must stay where it was"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_wearing_whose_skeleton_cannot_be_read_is_stopped_with_keep_files() -> TestOutcome {
+    // The skeleton is a crate in a directory of its own that Cargo still
+    // resolves, because the lockfile was made while it was whole, but the
+    // directory of files it renders from has been made unreadable by the time
+    // `remove` runs, so nothing of the skeleton can be read. `check` refuses
+    // the wearing as one whose render fails, so not one claimed path is known.
+    // `--keep-files` asks nothing of the skeleton or the files, so it stops the
+    // wearing all the same, names the crate and locked version, and takes the
+    // dependency and the table out. A process that can read the directory
+    // anyway cannot show it, so there the test says `skipped:` and passes.
+    let skeleton = TemporaryDirectory::new("unreadable-skeleton")?;
+    write_minimal_skeleton(skeleton.path(), UNREADABLE, "a.yml", "a: 1\n")?;
+    let extra = format!(
+        "[dev-dependencies]\n{}\n{}",
+        path_dependency_on(UNREADABLE, skeleton.path()),
+        wearing_table(UNREADABLE, ""),
+    );
+    let fixture = fixture_for_wearing(&extra)?;
+    let Some(_unreadable) = UnreadableDirectory::make(&skeleton.path().join("files"))? else {
+        support::one_line::skip("this process can list a 0o000 directory");
+        return Ok(());
+    };
+    check_refusal_reasons(&fixture, UNREADABLE)?;
+
+    let report = run_remove(&fixture, &[UNREADABLE, "--keep-files"])?;
+
+    assert_printed(
+        &report,
+        &[
+            stopped_wearing_line(UNREADABLE, UNREADABLE, MANIFEST),
+            "left every file it claims in place".to_owned(),
+            commit_line(MANIFEST, true, 0),
+        ],
+    );
+    let manifest = String::from_utf8(fixture.read(MANIFEST)?)?;
+    assert!(
+        !manifest.contains(UNREADABLE),
+        "neither the dependency nor the table may remain; manifest was:\n{manifest}"
     );
     Ok(())
 }

@@ -87,3 +87,95 @@ impl fmt::Debug for Version {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cmp::Ordering;
+    use std::error::Error;
+
+    use super::Version;
+
+    type TestOutcome = Result<(), Box<dyn Error>>;
+
+    fn version(text: &str) -> Result<Version, semver::Error> {
+        semver::Version::parse(text).map(Version::new)
+    }
+
+    #[test]
+    fn a_pre_release_sorts_before_its_release() -> TestOutcome {
+        // `1.0.0-rc.1` has the same numbers as `1.0.0` and a pre-release part,
+        // so it is lower under `Ord` and under `PartialOrd`, from either side.
+        let pre_release = version("1.0.0-rc.1")?;
+        let release = version("1.0.0")?;
+
+        assert_eq!(pre_release.cmp(&release), Ordering::Less);
+        assert_eq!(release.cmp(&pre_release), Ordering::Greater);
+        assert_eq!(pre_release.partial_cmp(&release), Some(Ordering::Less));
+        assert!(pre_release < release);
+        Ok(())
+    }
+
+    #[test]
+    fn precedence_decides_before_build_metadata() -> TestOutcome {
+        // A lower version whose build metadata sorts higher is still lower, and
+        // a pre-release is still before its release whatever either one's
+        // build metadata is.
+        let lower_with_larger_build = version("1.0.0+zzz")?;
+        let higher = version("1.0.1+aaa")?;
+        let pre_release_with_larger_build = version("1.0.0-rc.1+zzz")?;
+        let release_with_smaller_build = version("1.0.0+aaa")?;
+        let bare_release = version("1.0.0")?;
+
+        assert_eq!(lower_with_larger_build.cmp(&higher), Ordering::Less);
+        assert_eq!(
+            pre_release_with_larger_build.cmp(&release_with_smaller_build),
+            Ordering::Less
+        );
+        assert_eq!(
+            pre_release_with_larger_build.cmp(&bare_release),
+            Ordering::Less
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn versions_differing_only_in_build_metadata_are_different_and_ordered() -> TestOutcome {
+        // Two versions with the same numbers and pre-release and different
+        // build metadata are not equal, and `cmp` does not call them equal
+        // either, from either side.
+        let first = version("1.0.0+aaa")?;
+        let second = version("1.0.0+bbb")?;
+        let without = version("1.0.0")?;
+
+        assert_ne!(first, second);
+        assert_ne!(first.cmp(&second), Ordering::Equal);
+        assert_eq!(first.cmp(&second), second.cmp(&first).reverse());
+        assert_ne!(without, first);
+        assert_ne!(without.cmp(&first), Ordering::Equal);
+        Ok(())
+    }
+
+    #[test]
+    fn the_order_agrees_with_equality() -> TestOutcome {
+        // `cmp` is `Equal` exactly when `==` is true, over versions that are
+        // identical, differ in build metadata, or differ in precedence.
+        let texts = ["1.0.0", "1.0.0+aaa", "1.0.0+bbb", "1.0.0-rc.1", "1.0.1"];
+        for left_text in texts {
+            for right_text in texts {
+                let left = version(left_text)?;
+                let right = version(right_text)?;
+                assert_eq!(
+                    left.cmp(&right) == Ordering::Equal,
+                    left == right,
+                    "{left_text} against {right_text}"
+                );
+            }
+        }
+        assert_eq!(
+            version("1.0.0+aaa")?.cmp(&version("1.0.0+aaa")?),
+            Ordering::Equal
+        );
+        assert_eq!(version("1.0.0+aaa")?, version("1.0.0+aaa")?);
+        Ok(())
+    }
+}

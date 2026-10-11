@@ -1247,8 +1247,8 @@ it lands, as above. The instant after that last walk is the one limit (see
 `sync` makes no network request of its own: whether a skeleton is behind
 has no bearing on what it writes, so `behind` is never computed for it, and
 it reads the workspace with `cargo metadata --offline`, so a clone whose
-skeleton sources were never fetched aborts with cargo's own offline message rather
-than fetching anything on `sync`'s behalf (tested by
+locked sources were not all fetched aborts with cargo's own offline message
+rather than fetching anything on `sync`'s behalf (tested by
 `ritual/tests/sync.rs` →
 `sync_makes_no_network_request_as_observed_through_the_remote_query_log`,
 which reads the test-only remote-query log the same workspace's `check`
@@ -1719,13 +1719,24 @@ Beside a refusal of another kind the line keeps that one to fix and offers
 the table come out even then, which is the case that matters most: a
 half-written wearing is exactly what a person wants gone
 (`ritual/tests/remove_files.rs` →
-`a_wearing_whose_files_cannot_be_known_proceeds_with_keep_files`). The survey
-still runs under that flag. Whether `check` refuses the wearing decides how the
-first line names it, since a refused wearing is not a skeleton to name with a
-version, while the files themselves are left where they are whatever the survey
-made of them
+`a_wearing_whose_files_cannot_be_known_proceeds_with_keep_files`). The first
+line names what the lockfile resolved: a dependency that resolved to a skeleton
+is named with its crate and locked version, whether or not its files can be
+known, since the files are a separate question that `--keep-files` never asks.
+`--keep-files` asks nothing of the skeleton or the files: no skeleton is
+rendered and no file is compared with the work tree, so the files are left
+where they are whatever a survey would have made of them
 (`crates/skeletons-engine/src/remove/files.rs` →
-`keep_files_leaves_everything_whether_the_files_are_known_or_not`).
+`keep_files_leaves_everything_whether_the_files_are_known_or_not`, and →
+`keep_files_never_asks_for_the_files`). That is what makes it the way out for a
+wearing whose skeleton cannot be rendered or read at all, not only for one the
+survey refuses for a defect it names: a wearing whose skeleton's files can no
+longer be read is stopped all the same
+(`ritual/tests/remove_files.rs` →
+`a_wearing_whose_skeleton_cannot_be_read_is_stopped_with_keep_files`). A flag
+that deletes asks for the files exactly once
+(`crates/skeletons-engine/src/remove/files.rs` →
+`a_flag_that_deletes_asks_for_the_files_exactly_once`).
 
 **A file is deleted only on the proof `sync` asks before it overwrites one.** A
 clean work tree does not say that git could give a file back. An untracked file
@@ -1964,9 +1975,9 @@ anything is written.** The workspace is read `--locked` and only `--locked`
 first, so a lockfile that is stale or missing is refused before bringing it
 current could rewrite more of it than the skeleton, and no read made before the
 write rewrites it. What that read holds answers the refusals that are about the
-name and the manifest as they stand. The files are surveyed and planned next,
-whatever flag was typed. The work tree is asked after those, so a request that is wrong is
-refused as wrong whether or not the tree is clean, and it is the whole-tree
+name and the manifest as they stand. The files are planned next, and surveyed
+only for a flag that deletes them. The work tree is asked after those, so a
+request that is wrong is refused as wrong whether or not the tree is clean, and it is the whole-tree
 question `sync` asks, counting every uncommitted path, because the person's own
 edits would otherwise be mixed into what `remove` wrote or deleted
 (`ritual/tests/remove_refusals.rs` →
@@ -2217,12 +2228,15 @@ is never compared against and never counts as newer, whether or not it was
 made after the one locked; a repository whose remote tags releases outside
 both shapes will never see `behind` for a genuinely newer one.
 
-**`sync` needs the locked sources already fetched.** It reads the workspace
+**`sync` needs every locked source already fetched.** It reads the workspace
 with `cargo metadata --offline`, making no network request of its own, so a
-clone whose skeleton dependencies were never fetched aborts with cargo's own
-offline message rather than fetching anything on `sync`'s behalf; running
-`cargo fetch` first is the wearer's own responsibility, the same as for
-building the workspace at all.
+clone whose locked sources were not all fetched aborts with cargo's own
+offline message rather than fetching anything on `sync`'s behalf. Building the
+workspace does not fetch them all: a build leaves out packages locked for other
+platforms, and dev-dependencies, which is how `wear` adds a skeleton. Running
+`cargo fetch --locked` first, or `check`, which reads with the network allowed,
+is the wearer's own responsibility. The library's `check` reads the same way
+and needs the same.
 
 **`remove` edits the command line's own manifest and nothing else.** A
 dependency that member inherited from `[workspace.dependencies]` leaves the

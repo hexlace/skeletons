@@ -112,7 +112,8 @@ pub(crate) fn run_remove(fixture: &Fixture, arguments: &[&str]) -> Result<Report
     fixture.run(&command)
 }
 
-/// The first success line for a worn skeleton.
+/// The first success line for a wearing that resolved to a skeleton with a
+/// known crate and locked version, whether or not its files can be known.
 pub(crate) fn stopped_wearing_line(crate_name: &str, key: &str, manifest: &str) -> String {
     format!(
         "stopped wearing {crate_name} {SKELETON_VERSION}: took the dependency `{key}` and \
@@ -120,12 +121,15 @@ pub(crate) fn stopped_wearing_line(crate_name: &str, key: &str, manifest: &str) 
     )
 }
 
-/// The first success line for a wearing `check` refuses that has a dependency.
+/// The first success line for a wearing with a dependency that is no skeleton
+/// to name with a version: a dependency that is not a skeleton, or one that
+/// did not resolve to a locked package.
 pub(crate) fn took_out_line(key: &str, manifest: &str) -> String {
     format!("took the dependency `{key}` and [package.metadata.skeletons.{key}] out of {manifest}")
 }
 
-/// The first success line for a wearing `check` refuses that has no dependency.
+/// The first success line for a wearing table with no dependency declared
+/// under its key.
 pub(crate) fn no_dependency_line(key: &str, manifest: &str) -> String {
     format!(
         "took [package.metadata.skeletons.{key}] out of {manifest}; no dependency was declared \
@@ -315,6 +319,40 @@ impl ReadOnlyDirectory {
 }
 
 impl Drop for ReadOnlyDirectory {
+    fn drop(&mut self) {
+        // Best-effort: a failed test should not also fail at cleanup.
+        let _unused =
+            fs::set_permissions(&self.path, fs::Permissions::from_mode(self.original_mode));
+    }
+}
+
+/// A directory made unreadable for the length of a scenario, restored to the
+/// mode it had when dropped so the fixture can be torn down.
+pub(crate) struct UnreadableDirectory {
+    path: PathBuf,
+    original_mode: u32,
+}
+
+impl UnreadableDirectory {
+    /// Makes `path` mode `0o000`. Returns `None`, with the mode restored, when
+    /// this process can still list it (a superuser), since such a process
+    /// cannot show what an unreadable directory does.
+    pub(crate) fn make(path: &Path) -> Result<Option<Self>, Box<dyn Error>> {
+        let original_mode = fs::metadata(path)?.permissions().mode();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o000))?;
+        let guard = Self {
+            path: path.to_path_buf(),
+            original_mode,
+        };
+        match fs::read_dir(path) {
+            Ok(_) => Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Ok(Some(guard)),
+            Err(error) => Err(error.into()),
+        }
+    }
+}
+
+impl Drop for UnreadableDirectory {
     fn drop(&mut self) {
         // Best-effort: a failed test should not also fail at cleanup.
         let _unused =

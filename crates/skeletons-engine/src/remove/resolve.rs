@@ -2,35 +2,38 @@
 //!
 //! The name is a dependency key or a skeleton's crate. The candidates are every
 //! key under `[package.metadata.skeletons]` in the command line's own manifest,
-//! whether `check` reports the wearing as worn or refuses it: a table with a
-//! dependency that is no skeleton, or with none, is something `wear` could have
-//! half written and a person wants gone, so calling its key "not a key" would
-//! be false. The two keys a skeleton keeps for its own declaration are never
-//! candidates.
+//! whether its dependency resolved to a skeleton or the workspace reader
+//! refuses the wearing: a table with a dependency that is no skeleton, or with
+//! none, is something `wear` could have half written and a person wants gone,
+//! so calling its key "not a key" would be false. The two keys a skeleton keeps
+//! for its own declaration are never candidates.
 
-use super::files::Claimed;
 use super::names::{ManifestShown, WearingKey};
 use super::non_empty::NonEmpty;
 use crate::workspace::{Declared, Wearing, WearingRefusal, Workspace};
 
-/// What `check` makes of a wearing, as far as the success message needs it.
+/// What the workspace reader made of a wearing, as far as the success message
+/// needs it: whether its dependency resolved to a skeleton it can name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Standing {
-    /// The key names a worn skeleton: this crate at this locked version.
+    /// The dependency resolved to a skeleton: this crate at this locked
+    /// version. Whether anything else about the wearing is refused, its files
+    /// included, does not change that.
     Worn {
         crate_name: String,
         version: semver::Version,
     },
-    /// `check` refuses the wearing, and a dependency on this crate is
-    /// declared under the key.
+    /// The workspace reader refuses the wearing, so there is no skeleton at a
+    /// locked version to name, and a dependency on this crate is declared under
+    /// the key.
     RefusedWithDependency { crate_name: String },
-    /// `check` refuses the wearing, and no dependency is declared under the
-    /// key.
+    /// The workspace reader refuses the wearing, so there is no skeleton to
+    /// name, and no dependency is declared under the key.
     RefusedWithoutDependency,
 }
 
-/// One wearing the name might mean: the key it sits under and what `check`
-/// makes of it.
+/// One wearing the name might mean: the key it sits under and whether its
+/// dependency resolved to a skeleton.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Candidate {
     key: WearingKey,
@@ -38,7 +41,7 @@ pub(crate) struct Candidate {
 }
 
 impl Candidate {
-    /// The wearing under `key`, which `check` makes of it what `standing` says.
+    /// The wearing under `key`, whose dependency resolved as `standing` says.
     ///
     /// Nothing about the key is checked: it is read from the wearer's own
     /// manifest, where any key a table can have, the empty one included, names
@@ -54,29 +57,9 @@ impl Candidate {
         &self.key
     }
 
-    /// What `check` makes of the wearing.
+    /// Whether the wearing's dependency resolved to a skeleton, and to which.
     pub(crate) const fn standing(&self) -> &Standing {
         &self.standing
-    }
-
-    /// This candidate as `check` stands on it, given what the survey made of
-    /// the wearing's files.
-    ///
-    /// The workspace alone finds a wearing worn as soon as its dependency is a
-    /// skeleton, and what the skeleton renders is asked of the survey. A worn
-    /// skeleton the survey refuses, for an option or a render or a path, is a
-    /// wearing `check` refuses, and is not named as a skeleton that was worn.
-    pub(crate) fn according_to(self, claimed: &Claimed) -> Self {
-        match (claimed, self.standing) {
-            (Claimed::Unknown(_), Standing::Worn { crate_name, .. }) => Self {
-                key: self.key,
-                standing: Standing::RefusedWithDependency { crate_name },
-            },
-            (Claimed::Known(_) | Claimed::Unknown(_), standing) => Self {
-                key: self.key,
-                standing,
-            },
-        }
     }
 
     /// The crate the key's dependency is on, when one is declared.
@@ -113,8 +96,8 @@ pub(crate) struct Elsewhere {
 /// Every candidate in the manifest shown as `manifest`, in key order.
 ///
 /// `declared` is every dependency that manifest declares, which is how a
-/// wearing `check` refuses is told to have a dependency or not, and which
-/// crate it is on.
+/// wearing the workspace reader refuses is told to have a dependency or not,
+/// and which crate it is on.
 pub(crate) fn candidates_in(
     workspace: &Workspace,
     manifest: &ManifestShown,
@@ -284,7 +267,6 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{Candidate, Elsewhere, PickRefusal, Standing, candidates_in, pick, worn_elsewhere};
-    use crate::remove::files::{Claimed, Reason, Unknowable};
     use crate::remove::names::{ManifestShown, WearingKey};
     use crate::remove::non_empty::NonEmpty;
     use crate::skeleton::Choices;
@@ -322,49 +304,6 @@ mod tests {
 
     fn keys(picked: Result<&Candidate, PickRefusal>) -> Result<&str, PickRefusal> {
         picked.map(|candidate| candidate.key().as_str())
-    }
-
-    #[test]
-    fn a_worn_skeleton_the_survey_refuses_is_a_refused_wearing_with_its_dependency() {
-        // The workspace calls a wearing worn once its dependency is a skeleton;
-        // the survey is what refuses it for an option it does not declare. The
-        // crate stays, since the dependency is still there to be taken out.
-        let refused = Claimed::Unknown(Unknowable {
-            reasons: NonEmpty::new(
-                Reason::Refused("an option it does not declare".to_owned()),
-                Vec::new(),
-            ),
-        });
-
-        assert_eq!(
-            worn("ci", "a-skeleton").according_to(&refused).standing(),
-            &Standing::RefusedWithDependency {
-                crate_name: "a-skeleton".to_owned()
-            }
-        );
-    }
-
-    #[test]
-    fn a_wearing_the_survey_knows_the_files_of_stays_as_it_was() {
-        let known = Claimed::known(Vec::new());
-
-        assert_eq!(
-            worn("ci", "a-skeleton").according_to(&known),
-            worn("ci", "a-skeleton")
-        );
-        assert_eq!(dangling("ci").according_to(&known), dangling("ci"));
-    }
-
-    #[test]
-    fn a_wearing_with_no_dependency_stays_so_whatever_the_survey_says() {
-        let refused = Claimed::Unknown(Unknowable {
-            reasons: NonEmpty::new(
-                Reason::Refused("the table names no dependency".to_owned()),
-                Vec::new(),
-            ),
-        });
-
-        assert_eq!(dangling("ghost").according_to(&refused), dangling("ghost"));
     }
 
     #[test]
@@ -556,6 +495,30 @@ mod tests {
                 dangling("dangling"),
                 worn("lint", "b-skeleton"),
             ]
+        );
+    }
+
+    #[test]
+    fn a_dependency_that_resolved_to_a_skeleton_is_worn_at_its_crate_and_locked_version() {
+        // The standing carries the package and version the workspace reader
+        // locked for the dependency, whatever else is later found about the
+        // wearing.
+        let mut dependency = worn_dependency("ritual/Cargo.toml", "lint", "b-skeleton");
+        dependency.version = semver::Version::new(2, 3, 4);
+        let workspace = Workspace {
+            root: PathBuf::from("/workspace"),
+            wearing: vec![Wearing::Worn(dependency)],
+        };
+
+        assert_eq!(
+            candidates_in(&workspace, &manifest("ritual/Cargo.toml"), &[]),
+            [Candidate::new(
+                key("lint"),
+                Standing::Worn {
+                    crate_name: "b-skeleton".to_owned(),
+                    version: semver::Version::new(2, 3, 4),
+                }
+            )]
         );
     }
 

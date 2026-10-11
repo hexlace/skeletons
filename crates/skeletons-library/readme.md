@@ -121,6 +121,16 @@ from `PATH` only when it is not set; a value that is not valid Unicode counts
 as not set. A source that was never fetched is an error, because `check` never
 downloads one.
 
+Building the workspace is not enough to have every locked source. `cargo build`
+downloads only what it needs to build on the machine it runs on, so a package
+locked for another platform is not there, and neither is a dev-dependency, which
+is how `wear` adds a skeleton. A program that calls `check` on a machine that
+was only just set up, a CI runner for one, gets an error of which
+`is_cargo_metadata_failed` is true, and `detail()` holds cargo's words: the
+package it failed to download, and that `--offline` was specified. Run
+`cargo fetch --locked` before calling `check`. It downloads every locked source
+and leaves the lockfile as it is.
+
 `check` writes nothing in the workspace. Cargo may still write to its own cache
 under `CARGO_HOME`, as any cargo command may: it unpacks a source that was
 downloaded but is not unpacked, which cargo's automatic cache cleaning can

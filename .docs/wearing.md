@@ -352,10 +352,16 @@ cargo ritual skeletons sync
 `sync` takes no arguments. It reads the workspace the same way `check`
 does — fresh, from `cargo metadata` and the wearing tables it finds — except
 offline: it makes no network request of its own, so `behind` is never
-asked, and a clone whose skeleton sources were never fetched aborts with
+asked, and a clone whose locked sources were not all fetched aborts with
 `cargo metadata --locked --offline failed (sync makes no network request): `
 followed by cargo's own words, as an unreadable lockfile aborts `check`. The
-command names no remedy; `cargo fetch` is what the wearer runs.
+read needs every locked source, not only the skeletons', and building the
+workspace does not leave them all: `cargo build` downloads only what it needs
+to build on the machine it runs on, so a package locked for another platform is
+missing, and so is a dev-dependency, which is how `wear` adds a skeleton. The
+command names no remedy. `cargo fetch --locked` is what the wearer runs, or
+`check`, which reads the same workspace with the network allowed and so
+downloads whatever is missing.
 
 For every bone that has drifted, `sync` writes the bytes its skeleton
 renders for it, verbatim; a file that already matches is never touched. It
@@ -1210,7 +1216,9 @@ which exits with status 2 before `remove` looks at the project.
   changed or not. It is for a project that wore a large skeleton, edited a few
   of its files and now wants all of it gone.
 - **`--keep-files`** stops wearing the skeleton and leaves every claimed file
-  where it is, changed or not, and asks nothing about them.
+  where it is, changed or not. It asks nothing about the files and does not
+  render the skeleton, so it works even when the skeleton cannot be rendered or
+  read.
 
 A claimed file that is missing is nothing to delete. It is no reason to refuse
 and no reason to keep the others, and no line names it. When none of the files
@@ -1321,13 +1329,13 @@ reads the workspace after the first file is gone.
 
 **What it prints.** On success, lines on stdout: what was taken out, a line for
 each file or one for all of them, and what to commit. The first line names the
-wearing as `check` reads it. A worn skeleton is named with the version Cargo
-locked. A wearing that any `check` refusal names is not named as a skeleton, so
-the line says what was taken out, and says when there was no dependency to take.
-That is why `remove` surveys the files whatever the flag, `--keep-files`
-included: whether a `check` refusal names the wearing decides how this line
-reads, while the files themselves are still never asked about for
-`--keep-files`.
+wearing as the lockfile resolved its dependency. A dependency that resolved to
+a skeleton is named with its crate and the version Cargo locked, whether or not
+the files it claims can be known. A dependency that is no skeleton, or that
+resolved to no one locked package, and a table with no dependency have no
+skeleton to name, so the line says what was taken out, and says when there was
+no dependency to take. Which files can be known is a separate question, and
+`--keep-files` never asks it: it renders no skeleton.
 
 ```text
 stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
@@ -1335,11 +1343,10 @@ took the dependency `tidy` and [package.metadata.skeletons.tidy] out of ritual/C
 took [package.metadata.skeletons.ghost] out of ritual/Cargo.toml; no dependency was declared under `ghost`
 ```
 
-Those are the forms of the first line: a worn skeleton, a refused wearing
-that has a dependency, and a refused wearing that has none. A skeleton is named
-only when no `check` refusal names its wearing. A wearing named by any refusal,
-an overlap with another wearing included, gets the form that says what was taken
-out, even though `check` lists that skeleton with its crate and version. The
+Those are the forms of the first line: a skeleton, a dependency that is no
+skeleton or resolved to no one locked package, and a table with no dependency.
+A wearing `check` refuses for what its skeleton renders or claims, an overlap
+with another wearing included, is still named as the skeleton it resolved to. The
 last line says what to commit: the manifest always, `Cargo.lock` when this run changed it and
 git tracks it (`git add` refuses a lockfile git ignores, and a lockfile Cargo
 left alone has nothing to commit), and the deleted files when there are any. The
@@ -1532,7 +1539,8 @@ these.)
   has dropped some of its files, and deleting from what is left would be a
   guess. Each reason is the refusal's `message` as `check --json` gives it (for a
   refusal about one worn skeleton it begins with the wearing), joined by `; `.
-  `--keep-files` is the way out, since it asks nothing about the files:
+  `--keep-files` is the way out, since it renders no skeleton and asks nothing
+  about the files:
 
   ```text
   remove cannot tell which files `dependabot` claims, so it wrote nothing: <check's refusal>; fix that and run the `remove` task again, or give it --keep-files to stop wearing `dependabot` and leave every file in place

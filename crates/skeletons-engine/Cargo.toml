@@ -5,7 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-keywords.workspace = true
 description = "The engine behind skeletons and skeletons-library. Published for those two, with no stability promise: depend on one of them instead."
 readme = "readme.md"
 categories = ["development-tools"]

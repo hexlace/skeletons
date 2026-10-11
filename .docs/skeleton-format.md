@@ -37,12 +37,12 @@ Nothing under `files/` or `partials/`, at any depth, may be named
 `Cargo.toml` — file or directory — nor any name that is one name with it by
 the rule above, such as `cargo.toml`. Cargo takes a directory holding a
 `Cargo.toml` file for a package of its own and leaves the whole directory out of
-the skeleton's package, in a git repository or not. Whether it packages a
-directory of that name, or a differently cased one, depends on how the crate is
-packaged: packaged from a git repository, the directory goes in with the files
-beside it; packaged outside one, the directory holding it is left out. Either
-way the skeleton could render one way from its author's checkout and another
-from a registry.
+the skeleton's package, in a git repository or not. Whether it does the same
+for a directory of that name, or for a file or directory whose name differs
+from it only in case, depends on how the crate is packaged: from a git
+repository, the entry goes in with the files beside it; outside one, the
+directory holding it can be left out. Either way the skeleton could render one
+way from its author's checkout and another from a registry.
 
 **Cargo can leave a skeleton's files out of its package without a word.** A
 wearer of a registry dependency renders the package, not the author's

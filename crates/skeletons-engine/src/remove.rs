@@ -174,14 +174,13 @@ impl Prepared {
 /// more of it than the skeleton, and so that no read or check made here
 /// rewrites the lockfile: a refusal leaves it as it was. What that read holds
 /// answers every refusal that is about the name and the manifest as they stand,
-/// and finds the crate `remove` writes into. The files are surveyed next, under
-/// whatever flag was typed, because whether `check` refuses the wearing decides
-/// how the first success line names it, and then planned: `--keep-files` plans
-/// to touch none, so a wearing whose files cannot be known stops nothing there
-/// and every other flag refuses it. The work tree is asked after those,
-/// so a request that is wrong is refused as wrong whether or not the tree is
-/// clean, and then the manifest and lockfile are proven ones git can hand back
-/// ([`hand_back::check`]) and can be written in place ([`writable::check`]).
+/// and finds the crate `remove` writes into. The files are surveyed next and
+/// then planned: `--keep-files` plans to touch none, so a wearing whose files
+/// cannot be known stops nothing there and every other flag refuses it. The
+/// work tree is asked after those, so a request that is wrong is refused as
+/// wrong whether or not the tree is clean, and then the manifest and lockfile
+/// are proven ones git can hand back ([`hand_back::check`]) and can be written
+/// in place ([`writable::check`]).
 /// Every file that is in the work tree, and that is not the lockfile, is then
 /// asked of git ([`give_back::fate`]), and only with git's answers is it
 /// decided whether a bare run keeps the files that changed or deletes them: a
@@ -222,15 +221,13 @@ fn prepare(
             return Err(RemoveRefusal::from_pick(refusal, asked, elsewhere).into_failure());
         }
     };
-    // The survey is run whatever flag was typed: the files are its to say only
-    // when the flag would delete some, but whether `check` refuses the wearing
-    // decides how the first line names it.
+    // The survey says which files the wearing claims, or that they cannot be
+    // known; the plan below decides what the flag makes of that.
     let claimed = Claimed::of(
         &survey::survey(&prospect.workspace),
         &manifest,
         wearing.key(),
     );
-    let wearing = wearing.according_to(&claimed);
     let command_line_crate = CommandLineCrate::new(package, member, &prospect.workspace.root);
     let plan = files::plan(files_flag, claimed, &command_line_crate.lockfile_shown).map_err(
         |unknowable| {

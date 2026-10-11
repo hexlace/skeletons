@@ -112,7 +112,8 @@ pub(crate) fn run_remove(fixture: &Fixture, arguments: &[&str]) -> Result<Report
     fixture.run(&command)
 }
 
-/// The first success line for a worn skeleton.
+/// The first success line for a wearing that resolved to a skeleton with a
+/// known crate and locked version, whether or not its files can be known.
 pub(crate) fn stopped_wearing_line(crate_name: &str, key: &str, manifest: &str) -> String {
     format!(
         "stopped wearing {crate_name} {SKELETON_VERSION}: took the dependency `{key}` and \
@@ -120,12 +121,15 @@ pub(crate) fn stopped_wearing_line(crate_name: &str, key: &str, manifest: &str) 
     )
 }
 
-/// The first success line for a wearing `check` refuses that has a dependency.
+/// The first success line for a wearing with a dependency that is no skeleton
+/// to name with a version: a dependency that is not a skeleton, or one that
+/// did not resolve to a locked package.
 pub(crate) fn took_out_line(key: &str, manifest: &str) -> String {
     format!("took the dependency `{key}` and [package.metadata.skeletons.{key}] out of {manifest}")
 }
 
-/// The first success line for a wearing `check` refuses that has no dependency.
+/// The first success line for a wearing table with no dependency declared
+/// under its key.
 pub(crate) fn no_dependency_line(key: &str, manifest: &str) -> String {
     format!(
         "took [package.metadata.skeletons.{key}] out of {manifest}; no dependency was declared \

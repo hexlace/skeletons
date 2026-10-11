@@ -1719,11 +1719,11 @@ Beside a refusal of another kind the line keeps that one to fix and offers
 the table come out even then, which is the case that matters most: a
 half-written wearing is exactly what a person wants gone
 (`ritual/tests/remove_files.rs` →
-`a_wearing_whose_files_cannot_be_known_proceeds_with_keep_files`). The survey
-still runs under that flag. Whether `check` refuses the wearing decides how the
-first line names it, since a refused wearing is not a skeleton to name with a
-version, while the files themselves are left where they are whatever the survey
-made of them
+`a_wearing_whose_files_cannot_be_known_proceeds_with_keep_files`). The first
+line names what the lockfile resolved: a dependency that resolved to a skeleton
+is named with its crate and locked version, whether or not its files can be
+known, since the files are a separate question that `--keep-files` never asks.
+They are left where they are whatever the survey made of them
 (`crates/skeletons-engine/src/remove/files.rs` →
 `keep_files_leaves_everything_whether_the_files_are_known_or_not`).
 

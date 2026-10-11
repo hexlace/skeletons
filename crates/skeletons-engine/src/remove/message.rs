@@ -57,9 +57,11 @@ pub(crate) fn removed_lines(removed: &Removed<'_>) -> Vec<String> {
     lines
 }
 
-/// What was taken out of the manifest. A worn skeleton is named with its
-/// version. A wearing `check` refuses is not a skeleton to name: it says what
-/// was taken out, and says when there was no dependency to take.
+/// What was taken out of the manifest. A wearing whose dependency resolved to
+/// a skeleton is named with its crate and locked version, whether or not its
+/// files can be known. A wearing the workspace reader refuses has no skeleton
+/// at a locked version to name: it says what was taken out, and says when
+/// there was no dependency to take.
 fn taken_out_line(wearing: &Candidate, manifest: &ManifestShown) -> String {
     let (key, manifest) = (Escaped(wearing.key().as_str()), Escaped(manifest.as_str()));
     match wearing.standing() {
@@ -326,7 +328,22 @@ mod tests {
     }
 
     #[test]
-    fn a_wearing_check_refuses_that_has_a_dependency_says_what_was_taken_out() {
+    fn a_skeleton_is_named_with_its_version_when_every_file_is_left_in_place() {
+        // The `--keep-files` outcome: no file is touched, and the wearing still
+        // resolved to a skeleton at a locked version, so the line names it.
+        assert_eq!(
+            lines(&worn("ci", "a-skeleton"), &Settlement::LeftAll, TRACKED),
+            [
+                "stopped wearing a-skeleton 0.1.0: took the dependency `ci` and \
+                 [package.metadata.skeletons.ci] out of ritual/Cargo.toml",
+                "left every file it claims in place",
+                "commit ritual/Cargo.toml and Cargo.lock to record it",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_dependency_that_is_no_skeleton_says_what_was_taken_out() {
         let wearing = Candidate::new(
             key("ci"),
             Standing::RefusedWithDependency {
@@ -346,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn a_wearing_check_refuses_that_has_no_dependency_says_there_was_none() {
+    fn a_table_with_no_dependency_says_there_was_none() {
         let wearing = Candidate::new(key("ci"), Standing::RefusedWithoutDependency);
 
         assert_eq!(

@@ -1321,13 +1321,13 @@ reads the workspace after the first file is gone.
 
 **What it prints.** On success, lines on stdout: what was taken out, a line for
 each file or one for all of them, and what to commit. The first line names the
-wearing as `check` reads it. A worn skeleton is named with the version Cargo
-locked. A wearing that any `check` refusal names is not named as a skeleton, so
-the line says what was taken out, and says when there was no dependency to take.
-That is why `remove` surveys the files whatever the flag, `--keep-files`
-included: whether a `check` refusal names the wearing decides how this line
-reads, while the files themselves are still never asked about for
-`--keep-files`.
+wearing as the lockfile resolved its dependency. A dependency that resolved to
+a skeleton is named with its crate and the version Cargo locked, whether or not
+the files it claims can be known. A dependency that is no skeleton, or that
+resolved to no one locked package, and a table with no dependency have no
+skeleton to name, so the line says what was taken out, and says when there was
+no dependency to take. Which files can be known is a separate question, and
+`--keep-files` never asks it.
 
 ```text
 stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
@@ -1335,11 +1335,10 @@ took the dependency `tidy` and [package.metadata.skeletons.tidy] out of ritual/C
 took [package.metadata.skeletons.ghost] out of ritual/Cargo.toml; no dependency was declared under `ghost`
 ```
 
-Those are the forms of the first line: a worn skeleton, a refused wearing
-that has a dependency, and a refused wearing that has none. A skeleton is named
-only when no `check` refusal names its wearing. A wearing named by any refusal,
-an overlap with another wearing included, gets the form that says what was taken
-out, even though `check` lists that skeleton with its crate and version. The
+Those are the forms of the first line: a skeleton, a dependency that is no
+skeleton or resolved to no one locked package, and a table with no dependency.
+A wearing `check` refuses for what its skeleton renders or claims, an overlap
+with another wearing included, is still named as the skeleton it resolved to. The
 last line says what to commit: the manifest always, `Cargo.lock` when this run changed it and
 git tracks it (`git add` refuses a lockfile git ignores, and a lockfile Cargo
 left alone has nothing to commit), and the deleted files when there are any. The

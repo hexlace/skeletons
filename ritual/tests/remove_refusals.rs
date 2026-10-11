@@ -18,7 +18,7 @@ use support::remove::{
     MANIFEST, ONE_UNCOMMITTED_CHANGE_LINE, ReadOnlyDirectory, Worn, assert_printed, assert_refused,
     commit_line, dependency_under_key, fixture_wearing_in_another_member,
     fixture_wearing_two_skeletons_that_claim_one_path, keys_check_lists, porcelain, run_remove,
-    stopped_wearing_line, sync_and_commit, took_out_line, tree_state, wear,
+    stopped_wearing_line, sync_and_commit, tree_state, wear,
 };
 use support::wear::{COMMAND_LINE_PACKAGE, fixture_for_wearing};
 use support::{
@@ -251,8 +251,10 @@ fn an_overlap_with_the_wearing_is_refused_without_telling_the_wearer_to_run_remo
     // `remove` is how one stops wearing one of them, so the line must not send
     // the wearer back to it: bare and with `--delete-files` it names the other
     // wearing and the shared path and offers `--keep-files`, and writes
-    // nothing. `--keep-files` then stops wearing `overlap-a`, leaves
-    // `shared.txt` where it is, and `check` no longer refuses `overlap-b`.
+    // nothing. `--keep-files` then stops wearing `overlap-a`, naming its crate
+    // and version because it resolved to a skeleton even though its files
+    // cannot be known, leaves `shared.txt` where it is, and `check` no longer
+    // refuses `overlap-b`.
     let fixture = fixture_wearing_two_skeletons_that_claim_one_path()?;
     let before = tree_state(fixture.root())?;
     let line = "remove cannot tell which files `overlap-a` claims, so it wrote nothing: \
@@ -276,7 +278,7 @@ fn an_overlap_with_the_wearing_is_refused_without_telling_the_wearer_to_run_remo
     assert_printed(
         &report,
         &[
-            took_out_line("overlap-a", MANIFEST),
+            stopped_wearing_line("overlap-a", "overlap-a", MANIFEST),
             "left every file it claims in place".to_owned(),
             commit_line(MANIFEST, true, 0),
         ],

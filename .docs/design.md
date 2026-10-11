@@ -1763,10 +1763,12 @@ as well as the member's. It changes things that are not this wearing, in a
 manifest that is not this one. So the dependency under the key is taken out of
 each dependency table of the one manifest, those under `[target.…]` included,
 with `toml_edit`, and so is the wearing table, whatever it holds; a table the
-removal leaves empty goes with its header, and everything else the wearer wrote
-stays. The result is compared against an independent parse: it must be the
-original less exactly those entries, so an edit that leaves something out, puts
-something back or changes a value is refused
+removal leaves empty goes with its header, one that was already empty stays, and
+everything else the wearer wrote stays. The result is compared against an
+independent parse: it must be the original less exactly those entries and the
+tables their removal emptied, so an edit that leaves something out, puts
+something back, drops an empty table it should not have touched or changes a
+value is refused
 (`crates/skeletons-engine/src/remove/manifest.rs` →
 `removing_what_wear_wrote_gives_back_the_manifest_byte_for_byte`, →
 `a_dependency_in_each_shape_of_dependency_table_is_removed_and_nothing_else`,

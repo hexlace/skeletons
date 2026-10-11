@@ -16,8 +16,9 @@
 //! is reported with Cargo's own words.
 //!
 //! The dependency is removed from every dependency table of the manifest that
-//! declares the key, those under `[target.<name>]` too, and a dependency table
-//! it leaves empty goes with its header. Nothing else is touched: an inherited
+//! declares the key, those under `[target.<name>]` too, and a table the removal
+//! leaves empty goes with its header. A table that was empty before stays, with
+//! its comments. Nothing else is touched: an inherited
 //! `[workspace.dependencies]` entry stays.
 
 use toml_edit::{DocumentMut, Item, TableLike};
@@ -62,7 +63,7 @@ struct Edit<'text> {
 /// wearer's own, and an empty one is taken out like any other.
 ///
 /// The dependency is taken out of every dependency table that declares the key,
-/// and a table that leaves empty is taken out with its header, as is a
+/// and a table that the removal leaves empty is taken out with its header, as is a
 /// `skeletons` or `metadata` table that only held the wearing. On a manifest
 /// `wear` wrote this is its inverse: the manifest as it was before.
 ///
@@ -122,40 +123,54 @@ fn take_out_wearing_table(document: &mut DocumentMut, key: &str) -> Result<(), M
 }
 
 /// Removes `key` from every dependency table directly in `root`, and from
-/// every dependency table in a `[target.<name>]` table of it.
+/// every dependency table in a `[target.<name>]` table of it. A table goes
+/// only when taking the key out is what emptied it, so one that was empty
+/// before stays with its header and comments.
 fn take_out_dependencies(root: &mut dyn TableLike, key: &str) {
     take_out_of_dependency_tables(root, key);
     let Some(targets) = root.get_mut("target").and_then(Item::as_table_like_mut) else {
         return;
     };
-    for (_name, target) in targets.iter_mut() {
+    let was_empty = targets.is_empty();
+    let mut emptied_names = Vec::new();
+    for (name, target) in targets.iter_mut() {
         if let Some(target) = target.as_table_like_mut() {
-            take_out_of_dependency_tables(target, key);
+            if take_out_of_dependency_tables(target, key) {
+                emptied_names.push(name.to_owned());
+            }
         }
+    }
+    for name in emptied_names {
+        targets.remove(&name);
+    }
+    if !was_empty && targets.is_empty() {
+        root.remove("target");
     }
 }
 
-/// Removes `key` from each of `parent`'s dependency tables, and a dependency
-/// table that is left empty.
-fn take_out_of_dependency_tables(parent: &mut dyn TableLike, key: &str) {
+/// Removes `key` from each of `parent`'s dependency tables, and each one that
+/// holding the key made non-empty and removing it left empty. Returns whether
+/// `parent` itself went from holding something to holding nothing.
+fn take_out_of_dependency_tables(parent: &mut dyn TableLike, key: &str) -> bool {
+    let was_empty = parent.is_empty();
     for name in DEPENDENCY_TABLES {
         let emptied = parent
             .get_mut(name)
             .and_then(Item::as_table_like_mut)
-            .is_some_and(|table| {
-                table.remove(key);
-                table.is_empty()
-            });
+            .is_some_and(|table| table.remove(key).is_some() && table.is_empty());
         if emptied {
             parent.remove(name);
         }
     }
+    !was_empty && parent.is_empty()
 }
 
 /// Checks the edit's `rewritten` against its `original`, parsed by `toml`
 /// rather than by the library that wrote it: equal in value to the original
-/// less the dependency under `key` and the wearing table, once the tables the
-/// removal emptied are taken out of both.
+/// less the dependency under `key`, the wearing table, and exactly the tables
+/// that removing those emptied. Nothing is pruned from the rewritten side, so
+/// an empty table the original held that is missing from it, or one the
+/// removal emptied that is still in it, is a difference.
 fn verify(edit: &Edit<'_>, key: &str) -> Result<(), ManifestRefusal> {
     let mut expected: toml::Table =
         edit.original
@@ -166,14 +181,12 @@ fn verify(edit: &Edit<'_>, key: &str) -> Result<(), ManifestRefusal> {
     take_out_of_value(&mut expected, key).ok_or_else(|| ManifestRefusal::Defect {
         detail: "the manifest has no wearing table to take out".to_owned(),
     })?;
-    let mut actual: toml::Table =
+    let actual: toml::Table =
         edit.rewritten
             .parse()
             .map_err(|error: toml::de::Error| ManifestRefusal::Defect {
                 detail: format!("the edited manifest is not TOML: {error}"),
             })?;
-    prune_emptied(&mut expected);
-    prune_emptied(&mut actual);
     if expected == actual {
         Ok(())
     } else {
@@ -184,89 +197,53 @@ fn verify(edit: &Edit<'_>, key: &str) -> Result<(), ManifestRefusal> {
     }
 }
 
-/// Takes the wearing table and the dependency under `key` out of `table`, or
-/// returns `None` when there is no wearing table to take out.
+/// Takes the wearing table and the dependency under `key` out of `table`, and
+/// each table that held something before and holds nothing after, or returns
+/// `None` when there is no wearing table to take out.
 fn take_out_of_value(table: &mut toml::Table, key: &str) -> Option<()> {
     let [package, metadata, skeletons] = WEARING_PATH;
-    table
-        .get_mut(package)?
-        .get_mut(metadata)?
-        .get_mut(skeletons)?
-        .as_table_mut()?
-        .remove(key)?;
+    let package = table.get_mut(package)?.as_table_mut()?;
+    let metadata_table = package.get_mut(metadata)?.as_table_mut()?;
+    let skeletons_table = metadata_table.get_mut(skeletons)?.as_table_mut()?;
+    skeletons_table.remove(key)?;
+    if skeletons_table.is_empty() {
+        metadata_table.remove(skeletons);
+    }
+    if metadata_table.is_empty() {
+        package.remove(metadata);
+    }
     take_out_of_dependency_values(table, key);
     if let Some(targets) = table.get_mut("target").and_then(toml::Value::as_table_mut) {
-        for (_name, target) in targets.iter_mut() {
-            if let Some(target) = target.as_table_mut() {
-                take_out_of_dependency_values(target, key);
-            }
+        let held_something = !targets.is_empty();
+        targets.retain(|_name, target| {
+            target
+                .as_table_mut()
+                .is_none_or(|target| !take_out_of_dependency_values(target, key))
+        });
+        if held_something && targets.is_empty() {
+            table.remove("target");
         }
     }
     Some(())
 }
 
-/// Removes `key` from each dependency table directly in `table`.
-fn take_out_of_dependency_values(table: &mut toml::Table, key: &str) {
+/// Removes `key` from each dependency table directly in `table`, and each of
+/// those the removal left empty. Returns whether `table` held something before
+/// and holds nothing after.
+fn take_out_of_dependency_values(table: &mut toml::Table, key: &str) -> bool {
+    let held_something = !table.is_empty();
     for name in DEPENDENCY_TABLES {
-        if let Some(dependencies) = table.get_mut(name).and_then(toml::Value::as_table_mut) {
-            dependencies.remove(key);
-        }
-    }
-}
-
-/// Takes out of `table` every dependency table that is empty, every
-/// `[target.<name>]` table that is then empty and `target` itself, and the
-/// `skeletons` and `metadata` tables under `package` that are empty.
-fn prune_emptied(table: &mut toml::Table) {
-    prune_empty_dependency_values(table);
-    if let Some(targets) = table.get_mut("target").and_then(toml::Value::as_table_mut) {
-        for (_name, target) in targets.iter_mut() {
-            if let Some(target) = target.as_table_mut() {
-                prune_empty_dependency_values(target);
-            }
-        }
-        targets.retain(|_, target| target.as_table().is_none_or(|target| !target.is_empty()));
-    }
-    if table
-        .get("target")
-        .and_then(toml::Value::as_table)
-        .is_some_and(toml::Table::is_empty)
-    {
-        table.remove("target");
-    }
-    let [package, metadata, skeletons] = WEARING_PATH;
-    let Some(package) = table.get_mut(package).and_then(toml::Value::as_table_mut) else {
-        return;
-    };
-    let Some(metadata) = package
-        .get_mut(metadata)
-        .and_then(toml::Value::as_table_mut)
-    else {
-        return;
-    };
-    if metadata
-        .get(skeletons)
-        .and_then(toml::Value::as_table)
-        .is_some_and(toml::Table::is_empty)
-    {
-        metadata.remove(skeletons);
-    }
-    if metadata.is_empty() {
-        package.remove("metadata");
-    }
-}
-
-/// Takes out of `table` each dependency table directly in it that is empty.
-fn prune_empty_dependency_values(table: &mut toml::Table) {
-    for name in DEPENDENCY_TABLES {
-        if table
-            .get(name)
-            .and_then(toml::Value::as_table)
-            .is_some_and(toml::Table::is_empty)
-        {
+        let emptied = table
+            .get_mut(name)
+            .and_then(toml::Value::as_table_mut)
+            .is_some_and(|dependencies| {
+                dependencies.remove(key).is_some() && dependencies.is_empty()
+            });
+        if emptied {
             table.remove(name);
         }
     }
+    held_something && table.is_empty()
 }
 
 #[cfg(test)]
@@ -448,6 +425,62 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_table_that_was_empty_before_the_removal_stays_with_its_comments() {
+        // Each manifest declares the dependency in `[dev-dependencies]` and
+        // also holds an empty table the key was never in, with a comment above
+        // its header and one on or after it. Removing the wearing empties only
+        // `[dev-dependencies]`, so the other table, its header and its
+        // comments must come through byte for byte.
+        let wearing = "[package]\nname = \"c\"\n\n[package.metadata.skeletons.tidy]\n\n\
+                       [dev-dependencies]\ntidy = \"1\"\n\n";
+        for (what, kept) in [
+            (
+                "an empty dependency table",
+                "# above\n[dependencies] # beside\n# after\n",
+            ),
+            (
+                "an empty dependency table under a target",
+                "# above\n[target.'cfg(unix)'.dependencies] # beside\n# after\n",
+            ),
+            (
+                "an empty target table",
+                "# above\n[target.'cfg(unix)'] # beside\n# after\n",
+            ),
+        ] {
+            let manifest = format!("{wearing}{kept}");
+
+            let rewritten = removed(&manifest).expect("the wearing can be taken out");
+
+            assert!(rewritten.contains(kept), "{what}:\n{rewritten}");
+        }
+    }
+
+    #[test]
+    fn an_empty_metadata_neighbour_stays_when_the_wearing_goes() {
+        // The wearing table is the only thing removed from `package.metadata`,
+        // so an empty neighbour keeps `metadata` and itself.
+        let manifest = "[package]\nname = \"c\"\n\n# the neighbour\n[package.metadata.ritual]\n\n\
+                        [package.metadata.skeletons.tidy]\n";
+
+        assert_eq!(
+            removed(manifest).as_deref(),
+            Ok("[package]\nname = \"c\"\n\n# the neighbour\n[package.metadata.ritual]\n")
+        );
+    }
+
+    #[test]
+    fn a_target_table_the_removal_emptied_goes_with_the_target_above_it() {
+        let manifest = "[package]\nname = \"c\"\n[package.metadata.skeletons.tidy]\n\
+                        [target.'cfg(unix)']\n[target.'cfg(unix)'.dev-dependencies]\n\
+                        tidy = \"1\"\n";
+
+        assert_eq!(
+            removed(manifest).as_deref(),
+            Ok("[package]\nname = \"c\"\n")
+        );
+    }
+
+    #[test]
     fn a_comment_on_the_removed_entry_goes_with_it_and_other_comments_stay() {
         let manifest = "# the package\n[package]\nname = \"c\"\n\n\
                         [package.metadata.skeletons.tidy]\n\n\
@@ -607,6 +640,65 @@ mod tests {
             );
         }
         assert_eq!(verified(original, right), Ok(()));
+    }
+
+    #[test]
+    fn the_check_sees_an_empty_table_dropped_or_left_behind() {
+        // The original holds an empty `[dependencies]` the key was never in,
+        // and the key alone in `[dev-dependencies]`. The right result keeps the
+        // first and drops the second. Each wrong result is the right one with
+        // one empty table dropped that this run did not empty, or kept that it
+        // did, and each must be refused.
+        let original = "[package]\nname = \"c\"\n[package.metadata.skeletons.tidy]\n\
+                        [dependencies]\n[dev-dependencies]\ntidy = \"1\"\n\
+                        [target.a]\n[target.b.dependencies]\n";
+        let right = "[package]\nname = \"c\"\n[dependencies]\n[target.a]\n\
+                     [target.b.dependencies]\n";
+
+        for (what, rewritten) in [
+            (
+                "an unrelated empty dependency table dropped",
+                "[package]\nname = \"c\"\n[target.a]\n[target.b.dependencies]\n",
+            ),
+            (
+                "an unrelated empty target table dropped",
+                "[package]\nname = \"c\"\n[dependencies]\n[target.b.dependencies]\n",
+            ),
+            (
+                "an unrelated empty table under a target dropped",
+                "[package]\nname = \"c\"\n[dependencies]\n[target.a]\n",
+            ),
+            (
+                "the table the removal emptied kept",
+                "[package]\nname = \"c\"\n[dependencies]\n[dev-dependencies]\n[target.a]\n\
+                 [target.b.dependencies]\n",
+            ),
+        ] {
+            assert!(
+                matches!(
+                    verified(original, rewritten),
+                    Err(ManifestRefusal::Defect { .. })
+                ),
+                "{what}"
+            );
+        }
+        assert_eq!(verified(original, right), Ok(()));
+    }
+
+    #[test]
+    fn the_check_expects_the_target_tables_the_removal_emptied_to_be_gone() {
+        let original = "[package]\nname = \"c\"\n[package.metadata.skeletons.tidy]\n\
+                        [target.a.dev-dependencies]\ntidy = \"1\"\n";
+
+        assert_eq!(verified(original, "[package]\nname = \"c\"\n"), Ok(()));
+        assert!(matches!(
+            verified(original, "[package]\nname = \"c\"\n[target.a]\n"),
+            Err(ManifestRefusal::Defect { .. })
+        ));
+        assert!(matches!(
+            verified(original, "[package]\nname = \"c\"\n[target]\n"),
+            Err(ManifestRefusal::Defect { .. })
+        ));
     }
 
     /// The text `cargo add` leaves a manifest in, for the dependency `key`

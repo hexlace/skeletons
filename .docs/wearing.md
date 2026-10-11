@@ -1223,9 +1223,11 @@ directory above it. The workspace root is never removed.
 1. The manifest, edited in place. The dependency under the key comes out of
    every dependency table of the command line's manifest that declares it
    (`dependencies`, `dev-dependencies`, `build-dependencies`, and each of them
-   under a `[target.…]` table), a table that leaves empty goes with its header,
+   under a `[target.…]` table), a table that the removal leaves empty goes with
+   its header, as does a `[target.…]` table, or `target`, that it leaves empty,
    and `[package.metadata.skeletons.<key>]` comes out whatever it holds, along
-   with a `metadata` or `skeletons` table that held nothing else. A comment
+   with a `metadata` or `skeletons` table that held nothing else. A table that
+   was already empty before the removal stays, with its comments. A comment
    attached to a removed entry goes with it, and everything else stays. The
    result is compared against an independent parse of the manifest before it is
    kept: it must be the original less those entries. `cargo remove` is not used

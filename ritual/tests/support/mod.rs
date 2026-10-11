@@ -70,6 +70,7 @@ pub(crate) mod json;
 pub(crate) mod one_line;
 pub(crate) mod passthrough_plain;
 pub(crate) mod recorded_processes;
+pub(crate) mod remove;
 pub(crate) mod shell_quote;
 pub(crate) mod slow_filter;
 pub(crate) mod sync;

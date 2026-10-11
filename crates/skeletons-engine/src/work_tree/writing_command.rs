@@ -1,8 +1,8 @@
 //! Which command is asking git about the work tree, so that the questions
 //! and the refusals they lead to are worded for the command the wearer ran.
 //!
-//! `sync` and `wear` both write into the work tree and both refuse unless git
-//! can say what a write would lose. The refusals are the same refusals, and
+//! `sync`, `wear` and `remove` all write into the work tree and all refuse
+//! unless git can say what a write would lose. The refusals are the same refusals, and
 //! each names the command that wrote nothing and the remedy that runs it
 //! again, so each message takes a [`WritingCommand`] for those words.
 
@@ -13,6 +13,9 @@ pub(crate) enum WritingCommand {
     Sync,
     /// `wear`: changes the command line's own manifest and `Cargo.lock`.
     Wear,
+    /// `remove`: changes the same two files and deletes the files a skeleton
+    /// wrote.
+    Remove,
 }
 
 impl WritingCommand {
@@ -21,6 +24,7 @@ impl WritingCommand {
         match self {
             Self::Sync => "sync",
             Self::Wear => "wear",
+            Self::Remove => "remove",
         }
     }
 
@@ -35,6 +39,7 @@ impl WritingCommand {
         match self {
             Self::Sync => "run the `sync` task again",
             Self::Wear => "run the `wear` task again",
+            Self::Remove => "run the `remove` task again",
         }
     }
 
@@ -44,6 +49,7 @@ impl WritingCommand {
         match self {
             Self::Sync => "what it replaces",
             Self::Wear => "what it changes",
+            Self::Remove => "what it changes and deletes",
         }
     }
 
@@ -53,6 +59,9 @@ impl WritingCommand {
         match self {
             Self::Sync => "everything it could replace",
             Self::Wear => "the manifest it changes and any Cargo.lock git tracks",
+            Self::Remove => {
+                "the manifest it changes, any Cargo.lock git tracks and the files it deletes"
+            }
         }
     }
 }
@@ -66,6 +75,7 @@ mod tests {
         // Pins the one word the refusals share, once per command.
         assert_eq!(WritingCommand::Sync.name(), "sync");
         assert_eq!(WritingCommand::Wear.name(), "wear");
+        assert_eq!(WritingCommand::Remove.name(), "remove");
     }
 
     #[test]
@@ -80,14 +90,22 @@ mod tests {
             WritingCommand::Wear.run_again(),
             "run the `wear` task again"
         );
+        assert_eq!(
+            WritingCommand::Remove.run_again(),
+            "run the `remove` task again"
+        );
     }
 
     #[test]
     fn each_command_says_what_git_would_have_to_undo_and_hold() {
-        // The two phrases differ between the commands because `sync` replaces
-        // files and `wear` changes them in place.
+        // The phrases differ between the commands because `sync` replaces
+        // files, `wear` changes two in place and `remove` also deletes.
         assert_eq!(WritingCommand::Sync.undone_by_git(), "what it replaces");
         assert_eq!(WritingCommand::Wear.undone_by_git(), "what it changes");
+        assert_eq!(
+            WritingCommand::Remove.undone_by_git(),
+            "what it changes and deletes"
+        );
         assert_eq!(
             WritingCommand::Sync.held_by_git(),
             "everything it could replace"
@@ -95,6 +113,10 @@ mod tests {
         assert_eq!(
             WritingCommand::Wear.held_by_git(),
             "the manifest it changes and any Cargo.lock git tracks"
+        );
+        assert_eq!(
+            WritingCommand::Remove.held_by_git(),
+            "the manifest it changes, any Cargo.lock git tracks and the files it deletes"
         );
     }
 }

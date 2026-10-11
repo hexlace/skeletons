@@ -29,6 +29,8 @@ mod proof;
 pub(crate) mod test_repository;
 mod write;
 
+pub(crate) use proof::{Why, prove_held};
+
 use std::path::Path;
 
 use rituals::{Failure, Outcome, Task, clap, report as write_report};

@@ -124,6 +124,22 @@ pub fn read(directory: &Path, network: Network) -> Result<Workspace, ReadWorkspa
     Ok(from_document(&cargo_metadata::fetch(directory, network)?))
 }
 
+/// Brings `directory`'s `Cargo.lock` current, which `cargo metadata` does when
+/// it is not told `--locked`, and reads nothing else from it.
+///
+/// This is how a lockfile loses the packages only a removed dependency needed.
+/// It may write `Cargo.lock`, which is why [`read`] and `read_prospect`, which
+/// never do, are asked afterwards to prove the result.
+///
+/// # Errors
+///
+/// Returns [`ReadWorkspaceError`] when `cargo metadata` could not be run or
+/// refused.
+#[cfg(feature = "commands")]
+pub(crate) fn relock(directory: &Path) -> Result<(), ReadWorkspaceError> {
+    cargo_metadata::relock(directory)
+}
+
 /// Turns one `cargo metadata` document into every wearing table any member
 /// declares.
 ///

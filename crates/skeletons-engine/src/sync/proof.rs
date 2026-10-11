@@ -100,9 +100,10 @@ pub(crate) enum Evidence {
     Held(HeldFile),
 }
 
-/// A file [`prove`] found to hold exactly what git would check out for its
-/// index entry. The fields are private and only [`prove`] fills them, so a
-/// `HeldFile` in hand is itself the proof that rule (b) held for it.
+/// A file [`prove`] or [`prove_held`] found to hold exactly what git would
+/// check out for its index entry. The fields are private and only those two
+/// fill them, so a `HeldFile` in hand is itself the proof that rule (b) held
+/// for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HeldFile {
     object: ObjectId,
@@ -387,7 +388,35 @@ fn prove_one(work_tree: &WorkTree, write: &Write) -> Result<Result<Evidence, Why
         }
     }
 
-    let pathspec = write.path.as_str();
+    match prove_held(work_tree, &write.path)? {
+        Err(why) => Ok(Err(why)),
+        Ok(held) => Ok(Ok(Evidence::Held(held))),
+    }
+}
+
+/// Proves that the file at `path`, which is there, holds exactly what git would
+/// check out for its index entry, so `git checkout` gives every byte of it
+/// back. The outer [`Result`] is a whole-command abort (git itself could not be
+/// run); the inner one is this one path's own refusal.
+///
+/// This is the proof a file needs before it may be replaced or removed, and
+/// both commands that do either ask it: `sync` before it overwrites a drifted
+/// file, and `remove` before it deletes one. The caller has already seen that
+/// a regular file is at `path`; this asks git and reads the bytes, and reports
+/// a path that has stopped being a plain file since as
+/// [`Why::ChangedSinceSurvey`]. It asks nothing about the directories above
+/// `path`, so a caller that must refuse a file under a directory git tracks as
+/// a file asks that itself.
+///
+/// The questions are those [`prove_one`] describes, in the same order: the one
+/// index entry (a flagged, conflicted, linked or non-regular one is refused
+/// before `cat-file` runs), then what git would check out for it, then the
+/// disk, read through the survey's own walk.
+pub(crate) fn prove_held(
+    work_tree: &WorkTree,
+    path: &ClaimPath,
+) -> Result<Result<HeldFile, Why>, WorkTreeAbort> {
+    let pathspec = path.as_str();
 
     let records = match index_records::records_for(work_tree, pathspec)? {
         Err(unusable) => return Ok(Err(why_unusable(unusable))),
@@ -397,25 +426,25 @@ fn prove_one(work_tree: &WorkTree, write: &Write) -> Result<Result<Evidence, Why
         Err(why) => return Ok(Err(why)),
         Ok(found) => found,
     };
-    let checkout = match checkout_bytes_for(work_tree, &write.path, &object)? {
+    let checkout = match checkout_bytes_for(work_tree, path, &object)? {
         Err(why) => return Ok(Err(why)),
         Ok(checkout) => checkout,
     };
 
-    match disk_bytes_equal(work_tree, &write.path, &checkout) {
+    match disk_bytes_equal(work_tree, path, &checkout) {
         Err(why) => Ok(Err(why)),
         // The bytes differ, so this path is refused whatever comes next. Git
         // is asked once more, only on this refusal path, so the refusal can
         // say whether there is a checkout to bring the file back to.
         Ok(false) => {
-            let again = checkout_bytes_for(work_tree, &write.path, &object)?;
+            let again = checkout_bytes_for(work_tree, path, &object)?;
             Ok(Err(why_not_the_checkout(&checkout, again)))
         }
-        Ok(true) => Ok(Ok(Evidence::Held(HeldFile {
+        Ok(true) => Ok(Ok(HeldFile {
             object,
             mode,
             checkout: CheckoutBytes(checkout),
-        }))),
+        })),
     }
 }
 

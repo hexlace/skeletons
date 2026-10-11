@@ -1,7 +1,15 @@
-//! The one `cargo metadata` invocation this crate ever makes, and turning
-//! its output into a [`Document`] or a named abort.
+//! The one `cargo metadata` invocation this crate ever makes, in the two forms
+//! it takes, and turning its output into a [`Document`] or a named abort.
+//!
+//! [`fetch`] reads the workspace `--locked`, so a lockfile that is missing or
+//! out of date is a named abort and is never written. `relock`, which only the
+//! commands that change a manifest are built with, runs the same command without
+//! `--locked`, so that Cargo brings `Cargo.lock` current, and reads nothing from
+//! it. Both build the command and classify its failure in
+//! [`run`], so there is one argument list and one reading of what Cargo says.
 
 use std::path::Path;
+use std::process::Command;
 
 use super::Network;
 use super::schema::Document;
@@ -27,7 +35,7 @@ const SUPPORTED_FORMAT_VERSION: u64 = 1;
 /// The phrase cargo's own stderr carries when `--locked` refused to write a
 /// lockfile that was missing or out of date. Recognising it can only fail
 /// towards the verbatim [`ReadWorkspaceError::CargoMetadataFailed`] message,
-/// never towards a wrong one: [`fetch`]'s own
+/// never towards a wrong one: [`run`]'s own
 /// `if stderr.contains(CARGO_LOCKED_REFUSAL)` is the only place this
 /// constant is read, and its `else` arm is the generic, verbatim case — a
 /// cargo that rewords this phrase falls out of the `if` and into that
@@ -80,26 +88,28 @@ pub enum ReadWorkspaceError {
     },
 }
 
-/// Runs `$CARGO metadata --format-version 1 --locked --all-features` (with
-/// `--offline` too, when `network` is [`Network::Refused`]) in `directory`,
-/// and parses its output.
+/// `$CARGO metadata --format-version 1 --all-features` in `directory`, with
+/// `--offline` when `network` is [`Network::Refused`]: the arguments every
+/// reading and writing form of the command shares, to which the caller adds
+/// `--locked` or not.
 ///
-/// `directory` is used as-is — cargo itself walks up from it to find the
+/// `directory` is used as-is: cargo itself walks up from it to find the
 /// workspace root, exactly as it does for any other cargo command run from a
 /// subdirectory.
-pub(crate) fn fetch(directory: &Path, network: Network) -> Result<Document, ReadWorkspaceError> {
+fn command(directory: &Path, network: Network) -> Command {
     let mut command = cargo::command();
-    command.current_dir(directory).args([
-        "metadata",
-        "--format-version",
-        "1",
-        "--locked",
-        "--all-features",
-    ]);
+    command
+        .current_dir(directory)
+        .args(["metadata", "--format-version", "1", "--all-features"]);
     if network == Network::Refused {
         command.arg("--offline");
     }
+    command
+}
 
+/// Runs `command`, built by [`command`], and hands back what it finished with
+/// once it has succeeded; otherwise says why it did not.
+fn run(command: Command) -> Result<subprocess::Finished, ReadWorkspaceError> {
     let limits = Limits {
         // No timeout: cargo may be downloading the locked sources over the
         // network, which has no fixed bound this crate could pick without
@@ -114,23 +124,47 @@ pub(crate) fn fetch(directory: &Path, network: Network) -> Result<Document, Read
         }
     })?;
 
-    if !finished.success() {
+    if finished.success() {
+        Ok(finished)
+    } else {
         let stderr = String::from_utf8_lossy(finished.stderr_head())
             .trim_end()
             .to_owned();
-        return Err(if stderr.contains(CARGO_LOCKED_REFUSAL) {
+        Err(if stderr.contains(CARGO_LOCKED_REFUSAL) {
             ReadWorkspaceError::Lockfile
         } else {
             ReadWorkspaceError::CargoMetadataFailed { stderr }
-        });
+        })
     }
+}
 
+/// Runs `$CARGO metadata --format-version 1 --locked --all-features` (with
+/// `--offline` too, when `network` is [`Network::Refused`]) in `directory`,
+/// and parses its output.
+pub(crate) fn fetch(directory: &Path, network: Network) -> Result<Document, ReadWorkspaceError> {
+    let mut locked = command(directory, network);
+    locked.arg("--locked");
+    let finished = run(locked)?;
     match finished.stdout() {
         Err(_truncated) => Err(ReadWorkspaceError::MetadataUnreadable {
             detail: oversized_output_detail(),
         }),
         Ok(bytes) => parse(bytes),
     }
+}
+
+/// Runs `$CARGO metadata --format-version 1 --all-features` in `directory`
+/// without `--locked`, so that Cargo brings `Cargo.lock` current, and
+/// discards what it prints.
+///
+/// After a dependency line is gone from a manifest the lockfile still lists the
+/// packages only that line needed; this is the command that drops them, and
+/// it makes no index update when the lockfile already satisfies what is left.
+/// The output is not read: a document too large to read is [`fetch`]'s to
+/// refuse, and the lockfile was written before Cargo printed any of it.
+#[cfg(feature = "commands")]
+pub(crate) fn relock(directory: &Path) -> Result<(), ReadWorkspaceError> {
+    run(command(directory, Network::Allowed)).map(drop)
 }
 
 /// The message [`ReadWorkspaceError::MetadataUnreadable`] carries when
@@ -168,6 +202,8 @@ fn parse(bytes: &[u8]) -> Result<Document, ReadWorkspaceError> {
 #[cfg(test)]
 mod tests {
     use super::{CARGO_LOCKED_REFUSAL, ReadWorkspaceError, oversized_output_detail, parse};
+    #[cfg(feature = "commands")]
+    use super::{Network, fetch, relock};
 
     #[cfg(skeletons_checkout)]
     const DEMO_WORKSPACE: &str = include_str!("fixtures/demo-workspace.json");
@@ -252,5 +288,76 @@ mod tests {
             oversized_output_detail(),
             "cargo metadata printed more than 256 MiB, the most `skeletons` reads"
         );
+    }
+
+    /// A package `name` in `directory/name`, depending on each of
+    /// `dependencies` by a path to its sibling, so that cargo needs no
+    /// network and no registry to resolve it.
+    #[cfg(feature = "commands")]
+    fn write_package(directory: &std::path::Path, name: &str, dependencies: &[&str]) {
+        let package = directory.join(name);
+        std::fs::create_dir_all(package.join("src")).expect("create the package");
+        std::fs::write(package.join("src/lib.rs"), "").expect("write the source");
+        let dependency_lines = dependencies
+            .iter()
+            .map(|dependency| format!("{dependency} = {{ path = \"../{dependency}\" }}\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        let manifest = format!(
+            "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\n{dependency_lines}"
+        );
+        std::fs::write(package.join("Cargo.toml"), manifest).expect("write the manifest");
+    }
+
+    #[cfg(feature = "commands")]
+    #[test]
+    fn relocking_drops_the_packages_only_a_removed_dependency_needed() {
+        // The scenario: `app` depends on `dep`, which depends on `leaf`, and
+        // is locked. The dependency line is then taken out of the manifest,
+        // as `remove` does, so the lockfile still lists two packages nothing
+        // needs. Relocking brings it current without being told anything
+        // about what was removed, after which neither package is in the
+        // lockfile and the `--locked` read passes.
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        write_package(directory.path(), "leaf", &[]);
+        write_package(directory.path(), "dep", &["leaf"]);
+        write_package(directory.path(), "app", &["dep"]);
+        let app = directory.path().join("app");
+        relock(&app).expect("the first relock writes the lockfile");
+        let locked = std::fs::read_to_string(app.join("Cargo.lock")).expect("read the lockfile");
+        assert!(locked.contains("name = \"dep\""), "{locked}");
+        assert!(locked.contains("name = \"leaf\""), "{locked}");
+
+        std::fs::write(
+            app.join("Cargo.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .expect("take the dependency out");
+
+        relock(&app).expect("relocking succeeds");
+
+        let relocked = std::fs::read_to_string(app.join("Cargo.lock")).expect("read the lockfile");
+        assert!(!relocked.contains("name = \"dep\""), "{relocked}");
+        assert!(!relocked.contains("name = \"leaf\""), "{relocked}");
+        assert!(relocked.contains("name = \"app\""), "{relocked}");
+        fetch(&app, Network::Refused).expect("the locked read now passes");
+    }
+
+    #[cfg(feature = "commands")]
+    #[test]
+    fn relocking_a_manifest_cargo_refuses_reports_what_cargo_said() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let app = directory.path().join("app");
+        std::fs::create_dir_all(app.join("src")).expect("create the package");
+        std::fs::write(app.join("src/lib.rs"), "").expect("write the source");
+        std::fs::write(app.join("Cargo.toml"), "[package]\nname = \n").expect("write it");
+
+        let error = relock(&app).expect_err("a manifest that does not parse is refused");
+
+        let ReadWorkspaceError::CargoMetadataFailed { stderr } = error else {
+            panic!("expected CargoMetadataFailed, got {error:?}");
+        };
+        assert!(stderr.contains("Cargo.toml"), "{stderr}");
     }
 }

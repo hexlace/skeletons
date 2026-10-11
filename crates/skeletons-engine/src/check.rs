@@ -177,14 +177,15 @@ fn behind_clause(behind: usize, undetermined: usize) -> Option<String> {
 /// differs by which one is running: the lockfile remedy names the command
 /// that failed, and says what that command does with the lockfile, and a
 /// `cargo metadata` failure is worded differently for `sync`, which passes
-/// `--offline` and so has its own reason to name. `wear` reads the workspace
-/// `--locked` with the network allowed, as `check` does, so its
-/// `cargo metadata` failure is worded as `check`'s is.
+/// `--offline` and so has its own reason to name. `wear` and `remove` read the
+/// workspace `--locked` with the network allowed, as `check` does, so their
+/// `cargo metadata` failures are worded as `check`'s is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AbortingCommand {
     Check,
     Sync,
     Wear,
+    Remove,
 }
 
 impl AbortingCommand {
@@ -193,6 +194,7 @@ impl AbortingCommand {
             Self::Check => "check",
             Self::Sync => "sync",
             Self::Wear => "wear",
+            Self::Remove => "remove",
         }
     }
 }
@@ -200,15 +202,16 @@ impl AbortingCommand {
 /// The lockfile abort's message: why the command could not go on with the
 /// lockfile as it is, and the remedy that runs it again.
 ///
-/// `check` and `sync` read the lockfile and never write it; `wear` writes it,
-/// but only to add the skeleton, so a lockfile that is already stale would
-/// have more rewritten than the skeleton.
+/// `check` and `sync` read the lockfile and never write it; `wear` and
+/// `remove` write it, but only to add or take out the skeleton, so a lockfile
+/// that is already stale would have more rewritten than the skeleton.
 fn lockfile_message(command: AbortingCommand) -> String {
     let reason = match command {
         AbortingCommand::Check | AbortingCommand::Sync => {
             "`skeletons` reads it without ever writing it"
         }
         AbortingCommand::Wear => "wear changes it only to add the skeleton",
+        AbortingCommand::Remove => "remove changes it only to take the skeleton out",
     };
     format!(
         "Cargo.lock is missing or out of date, and {reason}; run `cargo update --workspace`, \
@@ -234,7 +237,7 @@ pub(crate) fn abort_message(
             (
                 "cargo-metadata-failed",
                 match command {
-                    AbortingCommand::Check | AbortingCommand::Wear => {
+                    AbortingCommand::Check | AbortingCommand::Wear | AbortingCommand::Remove => {
                         format!("cargo metadata --locked failed: {stderr}")
                     }
                     AbortingCommand::Sync => format!(
@@ -452,6 +455,7 @@ mod tests {
                 AbortingCommand::Check,
                 AbortingCommand::Sync,
                 AbortingCommand::Wear,
+                AbortingCommand::Remove,
             ] {
                 let (_kind, message) = abort_message(error, command);
                 let what = format!("{error:?} under {command:?}");
@@ -502,17 +506,35 @@ mod tests {
     }
 
     #[test]
-    fn a_wear_cargo_failure_is_worded_as_checks_is() {
-        // `wear` reads `--locked` with the network allowed, which is what
-        // `check` does, so the two name the same command.
+    fn the_remove_lockfile_remedy_says_remove_changes_it_only_to_take_the_skeleton_out() {
+        // `remove` writes `Cargo.lock` too, and only to drop what the skeleton
+        // brought in, so it says neither that the lockfile is never written
+        // nor that it is changed to add something.
+        let (kind, message) = abort_message(&ReadWorkspaceError::Lockfile, AbortingCommand::Remove);
+
+        assert_eq!(kind, "lockfile");
+        assert_eq!(
+            message,
+            "Cargo.lock is missing or out of date, and remove changes it only to take the \
+             skeleton out; run `cargo update --workspace`, then run the `remove` task again"
+        );
+    }
+
+    #[test]
+    fn a_wear_or_remove_cargo_failure_is_worded_as_checks_is() {
+        // `wear` and `remove` read `--locked` with the network allowed, which
+        // is what `check` does, so all three name the same command.
         let error = ReadWorkspaceError::CargoMetadataFailed {
             stderr: "error: no manifest".to_owned(),
         };
 
-        assert_eq!(
-            abort_message(&error, AbortingCommand::Wear),
-            abort_message(&error, AbortingCommand::Check)
-        );
+        for command in [AbortingCommand::Wear, AbortingCommand::Remove] {
+            assert_eq!(
+                abort_message(&error, command),
+                abort_message(&error, AbortingCommand::Check),
+                "{command:?}"
+            );
+        }
     }
 
     #[test]

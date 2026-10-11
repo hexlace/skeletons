@@ -41,8 +41,12 @@ use crate::work_tree::writing_command::WritingCommand;
 use crate::workspace::{self, Network, ReadWorkspaceError, Workspace};
 use confirm::Added;
 use refusal::WearRefusal;
+#[cfg(test)]
+pub(crate) use request::Key;
 use request::Request;
 use source::{Source, SourceFlags};
+#[cfg(test)]
+pub(crate) use table::with_empty_wearing_table;
 
 /// What `wear --help` says the task does.
 const ABOUT: &str = "start wearing a skeleton: add it as a dev-dependency, with an empty wearing \

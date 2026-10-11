@@ -28,15 +28,15 @@ pub fn task() -> Task {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_bundle_holds_exactly_check_sync_and_wear() {
+    fn the_bundle_holds_exactly_check_sync_wear_and_remove() {
         // Task's own Debug impl prints a bundle's `children: [names]`, and
         // is the only door onto them from outside `rituals`. What breaks if
         // this fails is every command line that mounts it: its children are
         // the commands under `skeletons`, child for child.
         let rendered = format!("{:?}", super::task());
         assert!(
-            rendered.contains(r#"children: ["check", "sync", "wear"]"#),
-            "expected exactly the check, sync and wear children; Debug was: {rendered}"
+            rendered.contains(r#"children: ["check", "sync", "wear", "remove"]"#),
+            "expected exactly the check, sync, wear and remove children; Debug was: {rendered}"
         );
     }
 }

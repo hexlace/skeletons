@@ -272,9 +272,9 @@ mod tests {
         names
     }
 
-    /// The crates this workspace releases: the bundle and the engine it is
-    /// built on.
-    const RELEASED: [&str; 2] = ["skeletons", "skeletons-engine"];
+    /// The crates this workspace releases: the bundle, the supported library,
+    /// and the engine both are built on.
+    const RELEASED: [&str; 3] = ["skeletons", "skeletons-engine", "skeletons-library"];
 
     /// The members that are `publish = false`: this repository's own command
     /// line, the command line its acceptance tests mount the bundle under
@@ -282,7 +282,7 @@ mod tests {
     const NEVER_PUBLISHED: [&str; 3] = ["skeletons-ritual", "skeletons-wearer", "xtask"];
 
     #[test]
-    fn this_workspace_releases_the_bundle_and_its_engine() {
+    fn this_workspace_releases_the_bundle_the_library_and_the_engine() {
         let members = members(&this_workspace()).expect("the metadata has the expected shape");
         let plan = plan(members, |_| Ok::<_, Infallible>(false)).expect("infallible");
         assert_eq!(names(&plan.to_publish), RELEASED);

@@ -40,7 +40,7 @@ const COMMANDS_ONLY: [&str; 6] = [
 
 /// The packages whose default build must hold none of [`COMMANDS_ONLY`]. A
 /// package that depends on the engine for its offline half is added here.
-const WITHOUT_COMMANDS: [&str; 1] = ["skeletons-engine"];
+const WITHOUT_COMMANDS: [&str; 2] = ["skeletons-engine", "skeletons-library"];
 
 /// Which features a package is asked about with.
 #[derive(Clone, Copy, Debug)]

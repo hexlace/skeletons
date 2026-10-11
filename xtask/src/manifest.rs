@@ -618,8 +618,9 @@ mod tests {
         let members = member_manifests();
         assert_eq!(
             members.len(),
-            5,
-            "skeletons, skeletons-engine, skeletons-ritual, skeletons-wearer and xtask: {members:?}"
+            6,
+            "skeletons, skeletons-engine, skeletons-library, skeletons-ritual, skeletons-wearer \
+             and xtask: {members:?}"
         );
         for manifest_path in &members {
             drift.extend(member_drift(Path::new(manifest_path)));

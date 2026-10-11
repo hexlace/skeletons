@@ -2,6 +2,7 @@
 members = [
     "crates/skeletons",
     "crates/skeletons-engine",
+    "crates/skeletons-library",
     "ritual",
     "wearer",
     "xtask",
@@ -72,7 +73,8 @@ toml_edit = { version = "0.22", default-features = false, features = [
     "display",
 ] }
 # Parsing a locked package's version, and comparing crates.io index entries
-# against it. One package, no dependencies of its own.
+# against it; also the type behind `skeletons-library`'s `Version`. One
+# package, no dependencies of its own.
 semver = { version = "1.0.28", default-features = false, features = ["std"] }
 # Decoding a git source query string (`?branch=a%2Fb`): cargo percent-encodes
 # `/` and other characters in a branch or tag name, and this is the crate
@@ -80,8 +82,9 @@ semver = { version = "1.0.28", default-features = false, features = ["std"] }
 form_urlencoded = "1.2.2"
 # Building disposable directories and files for `workspace/*`'s and `sync`'s
 # own unit tests (real symlinks, a read-only directory to fail a write
-# into). Dev-only, so it adds nothing to what a project depending on `skeletons`
-# compiles.
+# into), and the workspaces `skeletons-library`'s tests read. Dev-only, so it
+# adds nothing to what a project depending on `skeletons` or
+# `skeletons-library` compiles.
 tempfile = "3"
 # Asking crates.io's sparse index whether a registry-pinned skeleton is behind
 # (`behind/crates_io.rs`). Blocking, not async: nothing else in the engine

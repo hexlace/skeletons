@@ -11,7 +11,7 @@
 //! nobody remembered to update the doc for.
 //!
 //! It also keeps the shape of the fenced blocks in the documents it reads
-//! (`.docs/`, the two readmes and the contributing guide): a block opens with
+//! (`.docs/`, the readmes and the contributing guide): a block opens with
 //! its language, or with nothing, and never with a message pulled up onto the
 //! opening line.
 
@@ -164,6 +164,7 @@ fn documented_markdown_files() -> Result<Vec<PathBuf>, std::io::Error> {
         PathBuf::from("readme.md"),
         PathBuf::from("crates/skeletons/readme.md"),
         PathBuf::from("crates/skeletons-engine/readme.md"),
+        PathBuf::from("crates/skeletons-library/readme.md"),
         PathBuf::from("contributing.md"),
     ];
     let docs = Path::new(".docs");

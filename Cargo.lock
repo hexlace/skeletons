@@ -606,6 +606,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "skeletons-library"
+version = "0.2.0"
+dependencies = [
+ "semver",
+ "skeletons-engine",
+ "tempfile",
+]
+
+[[package]]
 name = "skeletons-ritual"
 version = "0.2.0"
 dependencies = [

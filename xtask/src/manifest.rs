@@ -3,10 +3,13 @@
 //! It is written in two kinds of place: `[workspace.package] version`, which
 //! every member inherits, and the `version` requirement on every
 //! `[workspace.dependencies]` entry that has a `path` — this workspace's own
-//! crates, which a published manifest can only find by version. Here those are
-//! `skeletons` and `skeletons-engine`; `rituals` and `rituals-core` come from
-//! crates.io at a version of their own and are never touched. The tests below
-//! check that the two kinds of site agree; this module is what keeps them
+//! crates that another member depends on, which a published manifest can only
+//! find by version. Here those are `skeletons` and `skeletons-engine`. The
+//! third published crate, `skeletons-library`, is released at the same version
+//! but nothing depends on it, so it has no entry; it and the bundle both take
+//! the engine through its entry, which is exact. `rituals` and `rituals-core`
+//! come from crates.io at a version of their own and are never touched. The
+//! tests below check that the sites agree; this module is what keeps them
 //! agreeing when the version moves.
 //!
 //! An internal requirement keeps the shape it has: a bare version (`1.2.3`)
@@ -592,11 +595,11 @@ mod tests {
         assert_eq!(
             internal,
             ["skeletons", "skeletons-engine"],
-            "the crates this workspace releases"
+            "the crates another member depends on by path"
         );
         // A command line may take any compatible version of the bundle. The
-        // engine is built against the bundle and released with it, so it is
-        // asked for at exactly the workspace version.
+        // engine is built against the bundle and the library and released
+        // with them, so it is asked for at exactly the workspace version.
         let expected = [
             ("skeletons", version.clone()),
             ("skeletons-engine", format!("={version}")),
@@ -630,5 +633,118 @@ mod tests {
             "every crate must release at the workspace version {version}:\n{}",
             drift.join("\n")
         );
+    }
+
+    /// The parsed manifest of the workspace member named `name`.
+    fn member_manifest(name: &str) -> DocumentMut {
+        member_manifests()
+            .iter()
+            .map(|path| parse(&std::fs::read_to_string(path).expect("the member manifest reads")))
+            .find(|document| document["package"]["name"].as_str() == Some(name))
+            .unwrap_or_else(|| panic!("{name} is a workspace member"))
+    }
+
+    /// What is wrong with how `manifest`'s `[dependencies]` asks for the
+    /// engine: nothing, when it is `workspace = true` and carries no `version`
+    /// or `path` of its own, however the entry is written.
+    fn engine_dependency_drift(name: &str, manifest: &DocumentMut) -> Option<String> {
+        let Some(entry) = manifest
+            .get("dependencies")
+            .and_then(|dependencies| dependencies.get("skeletons-engine"))
+            .and_then(Item::as_table_like)
+        else {
+            return Some(format!(
+                "{name} has no [dependencies] skeletons-engine, or not as a table or a key"
+            ));
+        };
+        if entry.get("workspace").and_then(Item::as_bool) != Some(true) {
+            return Some(format!(
+                "{name} does not take skeletons-engine with workspace = true"
+            ));
+        }
+        ["version", "path"].into_iter().find_map(|key| {
+            entry.get(key).map(|found| {
+                format!(
+                    "{name} gives skeletons-engine a {key} of its own ({}), which the workspace \
+                     entry alone should decide",
+                    found.to_string().trim()
+                )
+            })
+        })
+    }
+
+    #[test]
+    fn the_bundle_and_the_library_both_ask_for_exactly_the_engine_of_their_own_release() {
+        // Reads the real manifests. Both published crates that sit on the
+        // engine take it through the root `[workspace.dependencies]` entry, so
+        // that entry is the only place its version is written, and that entry
+        // is the workspace version behind an `=`: no other engine can resolve
+        // beside either crate.
+        let root = parse(ROOT_MANIFEST);
+        let version = workspace_version(&root).expect("the root manifest has a version");
+        let expected = format!("={version}");
+        let requirement = root["workspace"]["dependencies"]["skeletons-engine"]["version"]
+            .as_str()
+            .unwrap_or_default();
+        let mut drift = Vec::new();
+        if requirement != expected {
+            drift.push(format!(
+                "[workspace.dependencies] skeletons-engine requires {requirement:?}, not \
+                 {expected:?}"
+            ));
+        }
+        for name in ["skeletons", "skeletons-library"] {
+            drift.extend(engine_dependency_drift(name, &member_manifest(name)));
+        }
+        assert!(
+            drift.is_empty(),
+            "the bundle and the library must ask for exactly the engine they release with:\n{}",
+            drift.join("\n")
+        );
+    }
+
+    #[test]
+    fn a_dependent_that_gives_the_engine_a_version_or_path_of_its_own_is_found() {
+        // The check above has to see each way a crate built on the engine can
+        // step outside the workspace entry, so it is run over manifests written
+        // for the purpose: the accepted forms first, then each way of drifting.
+        let accepted = [
+            "[dependencies]\nskeletons-engine.workspace = true\n",
+            "[dependencies]\nskeletons-engine = { workspace = true, features = [\"commands\"] }\n",
+        ];
+        for text in accepted {
+            assert_eq!(
+                engine_dependency_drift("dependent", &parse(text)),
+                None,
+                "for {text:?}"
+            );
+        }
+        let refused = [
+            ("[dependencies]\n", "has no [dependencies] skeletons-engine"),
+            (
+                "[dependencies]\nskeletons-engine = \"0.1.0\"\n",
+                "has no [dependencies]",
+            ),
+            (
+                "[dependencies]\nskeletons-engine = { version = \"=0.1.0\" }\n",
+                "does not take skeletons-engine with workspace = true",
+            ),
+            (
+                "[dependencies]\nskeletons-engine = { workspace = true, version = \"0.1.0\" }\n",
+                "a version of its own (\"0.1.0\")",
+            ),
+            (
+                "[dependencies]\nskeletons-engine = { workspace = true, path = \"../engine\" }\n",
+                "a path of its own (\"../engine\")",
+            ),
+        ];
+        for (text, found) in refused {
+            let drift = engine_dependency_drift("dependent", &parse(text))
+                .unwrap_or_else(|| panic!("{text:?} is refused"));
+            assert!(
+                drift.starts_with("dependent ") && drift.contains(found),
+                "for {text:?}: {drift}"
+            );
+        }
     }
 }

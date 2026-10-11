@@ -248,7 +248,7 @@ jobs:
           body=$(cat <<EOF
           Moves every crate to ${TAG#v}: \`[workspace.package]\`, the internal requirements in \`[workspace.dependencies]\`, and \`Cargo.lock\`, by \`cargo xtask bump ${TAG}\`.
 
-          Merging this drafts the GitHub release ${TAG} at the merge commit. Write the prose at the top of the draft, then publish it: publishing creates the tag and publishes \`skeletons\` to crates.io.
+          Merging this drafts the GitHub release ${TAG} at the merge commit. Write the prose at the top of the draft, then publish it: publishing creates the tag and publishes \`skeletons\`, \`skeletons-library\` and \`skeletons-engine\` to crates.io.
 
           A workflow opened this pull request, so its CI waits for approval: approve the run, or close and reopen the pull request.
           EOF

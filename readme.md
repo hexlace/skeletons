@@ -420,6 +420,9 @@ written, and it need not be UTF-8. See
 
 - [`skeletons` on docs.rs](https://docs.rs/skeletons) is the crate's own
   page: mounting the bundle, and what `check`, `sync` and `wear` guarantee.
+- [`skeletons-library` on docs.rs](https://docs.rs/skeletons-library) is for a
+  program that wants the verdict on a workspace's files as data, rather than
+  as the commands' tables and messages.
 - [`.docs/wearing.md`](.docs/wearing.md) is the reference for a repository
   that wears skeletons: the wearing table, `wear`, where bones land, `check`
   and `sync`'s output, and every refusal.
@@ -436,8 +439,11 @@ written, and it need not be UTF-8. See
 Contributions are welcome. The process for them is being worked out as of
 September 30, 2026, and issues and pull requests are expected to open soon.
 
-The bundle is the crate in `crates/skeletons`, and it is the only crate this
-repository publishes. `ritual/` is this repository's own ritual command line,
+This repository publishes three crates, released together at one version. The
+bundle is the crate in `crates/skeletons`. `crates/skeletons-library` is the
+supported library for a program that wants the verdict as data, and
+`crates/skeletons-engine` is what both are built on, with no stability promise
+of its own. `ritual/` is this repository's own ritual command line,
 which mounts the bundle the way any project's does. It is how `skeletons` is
 worked on and tested, and it is never published. `wearer/` is a second
 command line that mounts the bundle under another key, for the acceptance

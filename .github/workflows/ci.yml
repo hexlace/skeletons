@@ -2,26 +2,30 @@
 #
 #   format   — cargo fmt --all -- --check
 #   clippy   — cargo clippy --workspace --all-targets -- -D warnings, then
-#              the same for the engine alone and for the engine and the bundle
-#              alone, on Linux and macOS
-#   test     — cargo test -p skeletons-engine, then with the bundle, then
-#              cargo test --workspace, on Linux and macOS, with the tests each
-#              platform skipped listed in the job summary
+#              the same for the engine alone, for the engine and the bundle
+#              alone, and for the library alone, on Linux and macOS
+#   test     — cargo test -p skeletons-engine, then with the bundle, then the
+#              library alone, then cargo test --workspace, on Linux and macOS,
+#              with the tests each platform skipped listed in the job summary
 #   doc      — cargo doc --workspace --no-deps --document-private-items, with
 #              rustdoc warnings fatal, then the same for the engine alone
 #   package  — cargo package --workspace: every crate packages and builds from
-#              its package alone, as crates.io would receive it, and the
-#              engine's tests pass from its unpacked package, as packaged and
-#              with its `commands` feature
+#              its package alone, as crates.io would receive it, and the tests
+#              of the three published crates pass from their unpacked
+#              packages: the engine's as packaged and with its `commands`
+#              feature, the bundle's and the library's against the unpacked
+#              engine
 #   msrv     — cargo test on the oldest toolchain `rust-version` declares
 #   deny     — cargo deny check: advisories, licences, bans and sources, as
 #              `deny.toml` sets them; weekly, advisories alone
 #
 # The engine has two configurations, without its `commands` feature and with
 # it, and each is linted, documented and tested here: a workspace build always
-# has the feature on, because the bundle asks for it. That the engine without
-# it holds none of the commands' dependencies is a test in `xtask`, which the
-# workspace test run includes.
+# has the feature on, because the bundle asks for it, and the library, which
+# does not, is linted and tested on its own so that the engine is built the
+# way a project that depends on the library builds it. That the engine without
+# the feature holds none of the commands' dependencies is a test in `xtask`,
+# which the workspace test run includes.
 #
 # Nothing here `needs` anything else, and nothing caches: no job restores a
 # cache, so none starts from anything an earlier run left behind, stale or
@@ -134,6 +138,14 @@ jobs:
         # `test the engine and the bundle alone` does for the tests.
         run: cargo clippy -p skeletons-engine -p skeletons --all-targets -- -D warnings
 
+      - name: clippy the library alone
+        # Built alone, the library compiles the engine without `commands`, which
+        # is what a project that depends on it builds. Every workspace run
+        # builds the engine with `commands` on, because the bundle is a member,
+        # so the library against the engine without the feature is linted only
+        # here.
+        run: cargo clippy -p skeletons-library --all-targets -- -D warnings
+
   test:
     name: test (${{ matrix.os }})
     if: github.event_name != 'schedule'
@@ -168,6 +180,15 @@ jobs:
         # so it can never see a test seam that only `test-util` provides and
         # the crate's own test build lacks. This run has no such unification.
         run: cargo test -p skeletons-engine -p skeletons
+
+      - name: test the library alone
+        # The library built the way a project that depends on it builds it: the
+        # engine without `commands`, which the workspace run below never sees.
+        # Its tests write their own workspaces and skeletons into temporary
+        # directories and need `git` on `PATH`, as one of them builds a
+        # repository: a red here that names a git command is a missing or
+        # unusable `git`, not a change in the library.
+        run: cargo test -p skeletons-library
 
       - name: test
         # A test whose premise does not hold on this platform prints
@@ -253,27 +274,41 @@ jobs:
         run: cargo package --workspace --locked
 
       - name: test the published package
-        # Runs the engine's tests from its unpacked package, the way anyone
-        # testing the crate crates.io serves would, once as packaged and once
-        # with its `commands` feature, the two configurations a user can
-        # build. The package leaves out the test skeletons, captures and
-        # documents some tests read, and `build.rs` compiles those tests only
-        # in a checkout; a new test that reads a left-out file without that
-        # gate fails here, where a checkout run would not notice. Run from the
-        # repository so rust-toolchain.toml still picks the compiler. A warning
-        # fails the step: clippy's `-D warnings` sees only the checkout, so an
-        # item the unpacked build leaves unused (an import for a checkout-only
-        # test) is caught here.
+        # Runs the tests of each of the three published crates from its
+        # unpacked package, the way anyone testing the crate crates.io serves
+        # would. The engine runs once as packaged and once with its `commands`
+        # feature, the two configurations a user can build. The package leaves
+        # out the test skeletons, captures and documents some tests read, and
+        # `build.rs` compiles those tests only in a checkout; a new test that
+        # reads a left-out file without that gate fails here, where a checkout
+        # run would not notice. Run from the repository so rust-toolchain.toml
+        # still picks the compiler. A warning fails the step: clippy's
+        # `-D warnings` sees only the checkout, so an item the unpacked build
+        # leaves unused (an import for a checkout-only test) is caught here.
+        #
+        # The bundle and the library ask for the engine at exactly this
+        # version, and crates.io does not have it until the release is
+        # published, so each of their tests is pointed at the unpacked engine
+        # with a `patch`. Neither runs with `--locked`: a package's lockfile
+        # names the engine as a crates.io package with a checksum, and the
+        # patch makes it a directory, so Cargo has to rewrite the lockfile and
+        # `--locked` refuses.
         shell: bash
         env:
           RUSTFLAGS: "-D warnings"
         run: |
           version=$(cargo metadata --no-deps --format-version 1 | jq -er '
             .packages[] | select(.name == "skeletons-engine") | .version')
-          tar -xzf "target/package/skeletons-engine-$version.crate" -C "$RUNNER_TEMP"
-          manifest="$RUNNER_TEMP/skeletons-engine-$version/Cargo.toml"
-          cargo test --locked --manifest-path "$manifest"
-          cargo test --locked --manifest-path "$manifest" --features commands
+          for crate in skeletons-engine skeletons skeletons-library; do
+            tar -xzf "target/package/$crate-$version.crate" -C "$RUNNER_TEMP"
+          done
+          engine="$RUNNER_TEMP/skeletons-engine-$version"
+          cargo test --locked --manifest-path "$engine/Cargo.toml"
+          cargo test --locked --manifest-path "$engine/Cargo.toml" --features commands
+          for crate in skeletons skeletons-library; do
+            cargo test --manifest-path "$RUNNER_TEMP/$crate-$version/Cargo.toml" \
+              --config "patch.crates-io.skeletons-engine.path=\"$engine\""
+          done
 
   msrv:
     name: msrv
@@ -303,11 +338,13 @@ jobs:
       - name: test on the minimum supported toolchain
         # The whole suite, not only a check: the tests build and run a command
         # line that mounts the bundle, which is what a project on the minimum
-        # version does. The engine alone follows, without its `commands`
-        # feature, because the workspace run always has it on.
+        # version does. The engine alone and the library alone follow, each
+        # without the engine's `commands` feature, because the workspace run
+        # always has it on.
         run: |
           cargo "+$MSRV" test --workspace --locked
           cargo "+$MSRV" test -p skeletons-engine --locked
+          cargo "+$MSRV" test -p skeletons-library --locked
 
   deny:
     name: deny

@@ -332,7 +332,7 @@ skeleton names why:
 | `branch-missing` | the locked branch no longer exists on the remote |
 | `unrecognised-source` | cargo reported a source this crate does not recognise at all |
 | `checkout-unreadable` | Cargo's own checkout of a branch or default-branch pin could not be read, or is not at the commit this pin actually locked |
-| `local-failure` | `skeletons` could not create the temporary directory it fetches a remote snapshot into, or the empty repository inside it — a local failure, before any network request |
+| `local-failure` | `skeletons` could not create the temporary directory it fetches a remote snapshot into, or the empty repository inside it — a local failure, before the snapshot fetch |
 | `directory-missing` | this skeleton's own package directory does not exist at all at the remote head |
 
 A `branch =` or default-branch pin's own remote head is read cheaply first

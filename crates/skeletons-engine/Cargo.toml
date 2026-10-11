@@ -13,9 +13,10 @@ categories = ["development-tools"]
 # be read from a checkout by this crate's own test suite, never to ship in the
 # published package. Cargo already leaves a subdirectory out of a package when
 # it holds its own `Cargo.toml`, but not the files beside those directories:
-# `test-skeletons/.gitattributes` would ship, and it is the file `build.rs`
-# reads as the mark of a checkout. Excluding the whole directory keeps all of
-# it out, whatever is added there later.
+# `test-skeletons/.gitattributes` would ship, and bring the directory with it.
+# `build.rs` takes the directory being there as the mark of a checkout, and
+# watches that file to notice it going. Excluding the whole directory keeps all
+# of it out, whatever is added there later.
 #
 # `src/behind/captures` is real, captured crates.io sparse-index responses.
 # `behind/index_entries.rs`'s own unit tests read them at compile time

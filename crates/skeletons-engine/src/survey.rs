@@ -1,10 +1,12 @@
 //! Rendering and comparing every worn skeleton: the one survey `check` and
 //! `sync` both work from.
 
+#[cfg(feature = "commands")]
 pub(crate) mod count;
 #[cfg(test)]
 pub(crate) mod poison;
 mod refusal;
+#[cfg(feature = "commands")]
 mod spelling;
 
 use std::collections::BTreeMap;
@@ -14,8 +16,11 @@ use crate::claim::{self, Claim, ClaimPath, Claimant, Drift};
 use crate::skeleton;
 use crate::workspace::{Wearing, Workspace, WornDependency, WornId};
 
-pub(crate) use refusal::{Refusal, join_and, option_shape_detail, unsafe_path_change_clause};
+pub(crate) use refusal::Refusal;
 pub use refusal::{RefusalKind, RefusalRecord, RefusedWearing};
+#[cfg(feature = "commands")]
+pub(crate) use refusal::{join_and, option_shape_detail, unsafe_path_change_clause};
+#[cfg(feature = "commands")]
 pub(crate) use spelling::told_apart;
 
 /// One file a worn skeleton claims: where it lives, who claims it, whether it
@@ -275,9 +280,9 @@ mod tests {
 
     use super::{RefusalKind, RefusalRecord, RefusedWearing, survey};
     use crate::skeleton::Choices;
-    use crate::workspace::{
-        OptionShapeRefusal, Pin, ShapeFound, Wearing, Workspace, WornDependency,
-    };
+    #[cfg(feature = "commands")]
+    use crate::workspace::Pin;
+    use crate::workspace::{OptionShapeRefusal, ShapeFound, Wearing, Workspace, WornDependency};
 
     /// A workspace rooted at `root` that wears the one dependency `worn`.
     fn workspace_wearing(root: PathBuf, worn: WornDependency) -> Workspace {
@@ -298,6 +303,7 @@ mod tests {
             key: "ci".to_owned(),
             package: "a-skeleton".to_owned(),
             version: semver::Version::new(0, 1, 0),
+            #[cfg(feature = "commands")]
             pin: Pin::from_source(None, &directory),
             skeleton_directory: directory,
             choices,

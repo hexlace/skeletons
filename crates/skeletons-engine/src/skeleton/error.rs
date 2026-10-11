@@ -781,12 +781,14 @@ impl RenderError {
         self.0.location.file.as_deref()
     }
 
+    #[cfg(any(test, feature = "commands"))]
     /// The 1-based line within [`Self::file`] the refusal is about, or
     /// `None` where no single line is at fault.
     pub(crate) fn line(&self) -> Option<u32> {
         self.0.location.line.map(NonZeroU32::get)
     }
 
+    #[cfg(any(test, feature = "commands"))]
     /// What is wrong.
     pub(crate) fn reason(&self) -> &Reason {
         &self.0.reason

@@ -2,18 +2,26 @@
 #
 #   format   — cargo fmt --all -- --check
 #   clippy   — cargo clippy --workspace --all-targets -- -D warnings, then
-#              the same for the engine and the bundle alone, on Linux and macOS
-#   test     — cargo test -p skeletons-engine -p skeletons, then cargo test
-#              --workspace, on Linux and macOS, with the tests each platform
-#              skipped listed in the job summary
+#              the same for the engine alone and for the engine and the bundle
+#              alone, on Linux and macOS
+#   test     — cargo test -p skeletons-engine, then with the bundle, then
+#              cargo test --workspace, on Linux and macOS, with the tests each
+#              platform skipped listed in the job summary
 #   doc      — cargo doc --workspace --no-deps --document-private-items, with
-#              rustdoc warnings fatal
+#              rustdoc warnings fatal, then the same for the engine alone
 #   package  — cargo package --workspace: every crate packages and builds from
 #              its package alone, as crates.io would receive it, and the
-#              engine's tests pass from its unpacked package
+#              engine's tests pass from its unpacked package, as packaged and
+#              with its `commands` feature
 #   msrv     — cargo test on the oldest toolchain `rust-version` declares
 #   deny     — cargo deny check: advisories, licences, bans and sources, as
 #              `deny.toml` sets them; weekly, advisories alone
+#
+# The engine has two configurations, without its `commands` feature and with
+# it, and each is linted, documented and tested here: a workspace build always
+# has the feature on, because the bundle asks for it. That the engine without
+# it holds none of the commands' dependencies is a test in `xtask`, which the
+# workspace test run includes.
 #
 # Nothing here `needs` anything else, and nothing caches: no job restores a
 # cache, so none starts from anything an earlier run left behind, stale or
@@ -109,12 +117,21 @@ jobs:
       - name: clippy -D warnings
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: clippy the engine without the commands
+        # The engine alone, with none of its features: the library side that
+        # reads a workspace and surveys it. Every run that includes the bundle
+        # builds the engine with `commands`, which the bundle turns on, so code
+        # that only compiles without the feature, such as an item the commands
+        # alone use, is linted only here.
+        run: cargo clippy -p skeletons-engine --all-targets -- -D warnings
+
       - name: clippy the engine and the bundle alone
-        # The workspace run above lints `skeletons-engine` with its `test-util`
-        # feature, which `ritual`'s dev-dependency turns on, so code that only
-        # compiles without the feature is never linted there. This run has no
-        # such unification, as `test the engine and the bundle alone` does for
-        # the tests.
+        # The pair builds the engine with its `commands` feature, which the
+        # bundle turns on, and without `test-util`. The workspace run above
+        # lints `skeletons-engine` with `test-util`, which `ritual`'s
+        # dev-dependency turns on, so code that only compiles without that
+        # feature is never linted there. This run has no such unification, as
+        # `test the engine and the bundle alone` does for the tests.
         run: cargo clippy -p skeletons-engine -p skeletons --all-targets -- -D warnings
 
   test:
@@ -136,13 +153,20 @@ jobs:
           rustup toolchain install --no-self-update
           rustup show active-toolchain
 
+      - name: test the engine without the commands
+        # The engine's own unit tests with none of its features, so the library
+        # side is tested as a project that only reads a workspace builds it.
+        # Everything behind `commands` is left out of this build, and the tests
+        # of what is left must still stand on their own.
+        run: cargo test -p skeletons-engine
+
       - name: test the engine and the bundle alone
-        # The engine's own unit tests, built without `ritual`. The workspace
-        # run below builds `skeletons-engine` with its `test-util` feature,
-        # which `ritual`'s dev-dependency turns on for every package in the
-        # build, so it can never see a test seam that only `test-util` provides
-        # and the crate's own test build lacks. This run has no such
-        # unification.
+        # The engine's own unit tests with its `commands` feature, which the
+        # bundle turns on, built without `ritual`. The workspace run below
+        # builds `skeletons-engine` with its `test-util` feature, which
+        # `ritual`'s dev-dependency turns on for every package in the build,
+        # so it can never see a test seam that only `test-util` provides and
+        # the crate's own test build lacks. This run has no such unification.
         run: cargo test -p skeletons-engine -p skeletons
 
       - name: test
@@ -198,6 +222,14 @@ jobs:
           RUSTDOCFLAGS: "-D warnings"
         run: cargo doc --workspace --no-deps --document-private-items
 
+      - name: doc the engine without the commands
+        # The workspace run has the `commands` feature on, so a doc link that
+        # crosses the feature, from an item that is always built to one that
+        # only the commands build, resolves there and breaks only here.
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc -p skeletons-engine --no-deps --document-private-items
+
   package:
     name: package
     if: github.event_name != 'schedule'
@@ -222,14 +254,16 @@ jobs:
 
       - name: test the published package
         # Runs the engine's tests from its unpacked package, the way anyone
-        # testing the crate crates.io serves would. The package leaves out the
-        # test skeletons, captures and documents some tests read, and
-        # `build.rs` compiles those tests only in a checkout; a new test that
-        # reads a left-out file without that gate fails here, where a checkout
-        # run would not notice. Run from the repository so rust-toolchain.toml
-        # still picks the compiler. A warning fails the step: clippy's
-        # `-D warnings` sees only the checkout, so an item the unpacked build
-        # leaves unused (an import for a checkout-only test) is caught here.
+        # testing the crate crates.io serves would, once as packaged and once
+        # with its `commands` feature, the two configurations a user can
+        # build. The package leaves out the test skeletons, captures and
+        # documents some tests read, and `build.rs` compiles those tests only
+        # in a checkout; a new test that reads a left-out file without that
+        # gate fails here, where a checkout run would not notice. Run from the
+        # repository so rust-toolchain.toml still picks the compiler. A warning
+        # fails the step: clippy's `-D warnings` sees only the checkout, so an
+        # item the unpacked build leaves unused (an import for a checkout-only
+        # test) is caught here.
         shell: bash
         env:
           RUSTFLAGS: "-D warnings"
@@ -237,8 +271,9 @@ jobs:
           version=$(cargo metadata --no-deps --format-version 1 | jq -er '
             .packages[] | select(.name == "skeletons-engine") | .version')
           tar -xzf "target/package/skeletons-engine-$version.crate" -C "$RUNNER_TEMP"
-          cargo test --locked \
-            --manifest-path "$RUNNER_TEMP/skeletons-engine-$version/Cargo.toml"
+          manifest="$RUNNER_TEMP/skeletons-engine-$version/Cargo.toml"
+          cargo test --locked --manifest-path "$manifest"
+          cargo test --locked --manifest-path "$manifest" --features commands
 
   msrv:
     name: msrv
@@ -268,8 +303,11 @@ jobs:
       - name: test on the minimum supported toolchain
         # The whole suite, not only a check: the tests build and run a command
         # line that mounts the bundle, which is what a project on the minimum
-        # version does.
-        run: cargo "+$MSRV" test --workspace --locked
+        # version does. The engine alone follows, without its `commands`
+        # feature, because the workspace run always has it on.
+        run: |
+          cargo "+$MSRV" test --workspace --locked
+          cargo "+$MSRV" test -p skeletons-engine --locked
 
   deny:
     name: deny

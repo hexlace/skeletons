@@ -6,6 +6,7 @@ pub(crate) fn underscored(text: &str) -> String {
     text.replace('-', "_")
 }
 
+#[cfg(any(test, feature = "commands"))]
 /// Whether `left` and `right` name the same crate, compared as Cargo compares
 /// crate names.
 ///

@@ -4,7 +4,9 @@
 mod cargo_metadata;
 mod crate_name;
 mod locate;
+#[cfg(feature = "commands")]
 mod pin;
+#[cfg(feature = "commands")]
 mod prospect;
 mod schema;
 mod wearing_table;
@@ -13,13 +15,18 @@ mod worn;
 use std::path::{Path, PathBuf};
 
 pub use cargo_metadata::ReadWorkspaceError;
+#[cfg(feature = "commands")]
 pub(crate) use crate_name::{same_crate, underscored};
 pub(crate) use locate::PackageIdentity;
+#[cfg(feature = "commands")]
 pub(crate) use pin::{CRATES_IO_SOURCE, Pin};
+#[cfg(feature = "commands")]
 pub(crate) use prospect::{Declared, Member, Prospect, SkeletonsTable, read_prospect};
+pub(crate) use wearing_table::OptionShapeRefusal;
+#[cfg(feature = "commands")]
+pub(crate) use wearing_table::RESERVED_WEARING_KEYS;
 #[cfg(test)]
 pub(crate) use wearing_table::ShapeFound;
-pub(crate) use wearing_table::{OptionShapeRefusal, RESERVED_WEARING_KEYS};
 pub use worn::WornDependency;
 pub(crate) use worn::WornId;
 
@@ -115,7 +122,7 @@ pub fn read(directory: &Path, network: Network) -> Result<Workspace, ReadWorkspa
 /// Turns one `cargo metadata` document into every wearing table any member
 /// declares.
 ///
-/// Shared by [`read`] and [`read_prospect`], so the two see a workspace
+/// Shared by [`read`] and `read_prospect`, so the two see a workspace
 /// identically and one `cargo metadata` run answers both.
 fn from_document(document: &Document) -> Workspace {
     let mut members: Vec<&Package> = document
@@ -261,6 +268,7 @@ fn read_one_wearing(
         package: skeleton.name.clone(),
         version,
         skeleton_directory: skeleton_directory.to_owned(),
+        #[cfg(feature = "commands")]
         pin: Pin::from_source(skeleton.source.as_deref(), skeleton_directory),
         choices: table.choices(),
     })

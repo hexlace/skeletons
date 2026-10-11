@@ -17,8 +17,9 @@ categories = ["command-line-interface", "development-tools"]
 [dependencies]
 # The `Task` this crate's one function returns.
 rituals.workspace = true
-# The commands themselves: this crate mounts what the engine builds.
-skeletons-engine.workspace = true
+# The commands themselves: this crate mounts what the engine builds, which the
+# engine compiles only with its `commands` feature.
+skeletons-engine = { workspace = true, features = ["commands"] }
 
 [features]
 # Forwards the engine's `test-util` feature, which compiles in the seams that

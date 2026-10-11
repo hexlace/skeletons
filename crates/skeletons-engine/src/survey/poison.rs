@@ -27,6 +27,7 @@ pub(crate) const POISON_ESCAPED: &str = "poison-head\\npoison-tail";
 /// differs from a claimed name only in case.
 pub(crate) const POISON_FOLDED: &str = "POISON-HEAD\npoison-tail";
 
+#[cfg(feature = "commands")]
 /// [`POISON`], owned, for a field that holds a `String`.
 pub(crate) fn poison() -> String {
     POISON.to_owned()

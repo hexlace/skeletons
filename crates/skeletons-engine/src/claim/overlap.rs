@@ -57,6 +57,7 @@ pub(crate) fn proper_folded_prefixes(
     (1..components.len()).map(move |length| (length, &components[..length]))
 }
 
+#[cfg(any(test, feature = "commands"))]
 /// How two colliding claim paths relate under the fold [`find_overlaps`]
 /// used to group them, so a reported overlap's own message can word each
 /// differently instead of guessing from a narrower fold of its own.
@@ -99,6 +100,7 @@ fn spelled_prefix(raw: &str, component_count: usize) -> &str {
     &raw[..end]
 }
 
+#[cfg(any(test, feature = "commands"))]
 /// Whether `shorter`'s components are a proper prefix of `longer`'s — the
 /// folded-ancestor-directory relationship [`find_overlaps`] unions two
 /// claims by, named here so [`folded_relation`] can tell it apart from an
@@ -107,6 +109,7 @@ fn is_folded_prefix(shorter: &[FoldedName], longer: &[FoldedName]) -> bool {
     shorter.len() < longer.len() && shorter == &longer[..shorter.len()]
 }
 
+#[cfg(any(test, feature = "commands"))]
 /// How `first` and `second` collide: the same relations [`find_overlaps`]
 /// unions two claims by, consulted again here so a reported overlap's own
 /// message words each one from the same fold that grouped it.

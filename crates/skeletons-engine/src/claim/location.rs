@@ -259,6 +259,7 @@ fn scan(
     })
 }
 
+#[cfg(any(test, feature = "commands"))]
 /// Whether `directory` lists an entry spelled exactly like `component` —
 /// `sync::write::verify`'s own re-check of the property [`resolve`] already
 /// enforced when it staged this same write: a write never lands under a

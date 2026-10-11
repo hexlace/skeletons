@@ -32,6 +32,7 @@ pub(crate) struct Package {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) version: String,
+    #[cfg(feature = "commands")]
     /// `null` for a path dependency; `registry+…`/`sparse+…` for a registry
     /// dependency; `git+…` for a git dependency. See `workspace/pin.rs`.
     pub(crate) source: Option<String>,
@@ -267,6 +268,7 @@ mod tests {
             .iter()
             .find(|package| package.name == "wearer")
             .expect("wearer must be in the fixture");
+        #[cfg(feature = "commands")]
         assert_eq!(wearer.source, None);
         let dependency = wearer
             .dependencies
@@ -293,6 +295,7 @@ mod tests {
             .iter()
             .find(|package| package.name == "skeleton-crate")
             .expect("skeleton-crate must be in the fixture");
+        #[cfg(feature = "commands")]
         assert_eq!(skeleton_crate.source, None);
         assert!(skeleton_crate.manifest_path.is_absolute());
     }

@@ -33,24 +33,41 @@ All of these must pass:
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy -p skeletons-engine --all-targets -- -D warnings
 cargo clippy -p skeletons-engine -p skeletons --all-targets -- -D warnings
+cargo test -p skeletons-engine
 cargo test -p skeletons-engine -p skeletons
 cargo test --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
+RUSTDOCFLAGS="-D warnings" cargo doc -p skeletons-engine --no-deps --document-private-items
 cargo deny --locked check
 ```
 
-The two `-p skeletons-engine -p skeletons` commands build the engine and the
-bundle alone. A workspace build compiles `skeletons-engine` with its
-`test-util` feature, which `ritual`'s dev-dependency turns on for every package
-in that build, so code or a test seam that depends on the feature being on or
-off is only seen by the run that has it the other way.
+The engine has two configurations. Without its `commands` feature it only
+reads a workspace and surveys it; with the feature it also holds the commands
+and everything only they use. The `-p skeletons-engine` commands build it
+without the feature, and the `-p skeletons-engine -p skeletons` commands build
+it with the feature, which the bundle turns on, and without `test-util`. A
+workspace build compiles `skeletons-engine` with the feature on, and with
+`test-util` too, which `ritual`'s dev-dependency turns on for every package in
+that build, so code or a test seam that depends on a feature being on or off
+is only seen by the run that has it the other way. A doc link from an item that
+is always built to one that only the commands build is the same kind of
+mismatch, and only the engine's own `cargo doc` sees it break.
+
+That the engine without the feature holds none of the commands' dependencies
+(the command-line framework, the network client and the TLS stack under it) is
+a test in `xtask`, which `cargo test --workspace` runs. It asks `cargo tree`
+for the engine's normal dependency graph and looks for each of them, and asks
+again with the feature on to prove the question can see them.
 
 CI runs the same, with clippy and the tests on both Linux and macOS, and
 three more: every crate is packaged and built from its package alone, as
 crates.io would receive it; the engine's tests then run from that unpacked
-package (see [Test skeletons](#test-skeletons)); and the test suite runs on
-the oldest toolchain its `rust-version` declares.
+package, as packaged and with `--features commands` (see
+[Test skeletons](#test-skeletons)); and the test suite runs on the oldest
+toolchain its `rust-version` declares, the engine without its feature
+included.
 
 ## Dependencies
 
@@ -239,10 +256,13 @@ A third seam shortens how long a local git question waits:
 `test-util` is the cargo feature that compiles those seams in, for tests only:
 a command line must never enable it outside `[dev-dependencies]`. The feature
 is `skeletons-engine`'s, where the seams are, and `skeletons` forwards it under
-the same name, which is how a project reaches it. The seams are gated on
-`#[cfg(any(test, feature = "test-util"))]`, so the engine's own unit-test build
-has them without the feature. It is never a default feature and a production
-command line never enables it. `ritual/Cargo.toml` and `wearer/Cargo.toml` are what turn it
+the same name, which is how a project reaches it. Every seam sits in the
+commands, so on the engine alone the feature changes nothing unless `commands`
+is on too; the two features are independent, and neither turns on the other.
+The seams are gated on `#[cfg(any(test, feature = "test-util"))]`, so the
+engine's own unit-test build has them without the feature. It is never a
+default feature and a production command line never enables it.
+`ritual/Cargo.toml` and `wearer/Cargo.toml` are what turn it
 on for the acceptance suites: each re-declares `skeletons` as a
 dev-dependency with `features = ["test-util"]`, and Cargo unifies that into
 the `ritual` and `wearer` binaries `cargo test` builds (the ones

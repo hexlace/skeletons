@@ -2,16 +2,24 @@
 //!
 //! ## What this crate provides
 //!
-//! [`task()`] is the group of the three commands `check`, `sync` and `wear`,
-//! which `skeletons` hands on as its own bundle.
+//! Without a feature, the public items read a workspace and report on it as
+//! data. [`read`] reads what a workspace wears, and lets cargo reach the
+//! network only when it is handed [`Network::Allowed`]. [`survey()`] renders
+//! every worn skeleton and compares what it renders with the files on disk,
+//! and writes nothing. The items they take and return carry the answer: each
+//! worn skeleton, each file it claims with its state, and each refusal with
+//! the wearings and paths it concerns.
 //!
-//! The rest of the public items read a workspace and report on it as data.
-//! [`read`] reads what a workspace wears, and lets cargo reach the network
-//! only when it is handed [`Network::Allowed`]. [`survey()`] renders every
-//! worn skeleton and compares what it renders with the files on disk, and
-//! writes nothing. The items they take and return carry the answer: each worn
-//! skeleton, each file it claims with its state, and each refusal with the
-//! wearings and paths it concerns.
+//! ## Features
+//!
+//! - `commands` adds `task()`, the group of the three commands `check`,
+//!   `sync` and `wear` that `skeletons` hands on as its own bundle, with the
+//!   command-line framework, the network client and the manifest editor they
+//!   are built on. It is off by default, and `skeletons` is the one that turns
+//!   it on.
+//! - `test-util` compiles in the seams that let a dependent's tests observe or
+//!   redirect a real network request or a real wait. Every one of them sits in
+//!   the commands, so it changes nothing without `commands`.
 
 // Every module in this crate is private, and every item shared between
 // modules is `pub(crate)`: the visibility that is true, and what rustc's
@@ -29,19 +37,27 @@
               pub(crate) is true for the rest, unreachable_pub wants it"
 )]
 
+#[cfg(feature = "commands")]
 use rituals::Task;
 
+#[cfg(feature = "commands")]
 mod behind;
 mod cargo;
+#[cfg(feature = "commands")]
 mod check;
 mod claim;
+#[cfg(feature = "commands")]
 mod current_directory;
+#[cfg(feature = "commands")]
 mod git;
 mod skeleton;
 mod subprocess;
 mod survey;
+#[cfg(feature = "commands")]
 mod sync;
+#[cfg(feature = "commands")]
 mod wear;
+#[cfg(feature = "commands")]
 mod work_tree;
 mod workspace;
 
@@ -79,6 +95,7 @@ mod doc_citations;
 // names are distinct and that none is `help`. The child list this function
 // adds is held by the unit test below and by the integration tests that run
 // a command line mounting it.
+#[cfg(feature = "commands")]
 #[must_use]
 pub fn task() -> Task {
     Task::group(
@@ -92,6 +109,7 @@ pub fn task() -> Task {
 }
 
 #[cfg(test)]
+#[cfg(feature = "commands")]
 mod tests {
     #[test]
     fn the_bundle_holds_exactly_check_sync_and_wear() {

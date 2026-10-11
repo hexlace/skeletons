@@ -34,6 +34,7 @@ const SUBPROCESS_POLL_INTERVAL_MAX: Duration = Duration::from_millis(50);
 /// one is still polled only a few times a second.
 const SUBPROCESS_POLL_INTERVAL_MIN: Duration = Duration::from_millis(1);
 
+#[cfg(feature = "commands")]
 /// The most this crate ever reads from one `git` invocation's stdout or
 /// stderr — large enough for any real repository's tag list or porcelain
 /// status, small enough that a hostile or misconfigured repository or remote
@@ -97,6 +98,7 @@ impl Truncated {
     /// tests that need to hand a classifier an `Err(Truncated)` without
     /// spawning a process large enough to actually cross a real cap.
     #[cfg(test)]
+    #[cfg(feature = "commands")]
     pub(crate) const fn for_test(cap_bytes: u64) -> Self {
         Self { cap_bytes }
     }
@@ -116,6 +118,7 @@ impl Finished {
     /// printed `stderr` and nothing else, for a sibling module's own unit
     /// tests that classify what a command said without spawning one.
     #[cfg(test)]
+    #[cfg(feature = "commands")]
     pub(crate) fn for_test(code: i32, stderr: &[u8]) -> Self {
         use std::os::unix::process::ExitStatusExt;
 
@@ -136,6 +139,7 @@ impl Finished {
         self.status.success()
     }
 
+    #[cfg(feature = "commands")]
     /// The command's own exit code, when it exited normally rather than
     /// being killed by a signal — `behind`'s git remote queries read this to
     /// tell `git ls-remote --exit-code`'s "ref not found" (2) apart from
@@ -184,6 +188,7 @@ enum SubprocessErrorKind {
 }
 
 impl SubprocessError {
+    #[cfg(any(test, feature = "commands"))]
     /// Whether this command was killed for running past its own timeout.
     ///
     /// The commands that write read it to say a git command timed out rather

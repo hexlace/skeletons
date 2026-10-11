@@ -28,6 +28,8 @@
 mod bump;
 mod contributors;
 mod manifest;
+#[cfg(test)]
+mod offline_graph;
 mod process;
 mod publish;
 mod verify;

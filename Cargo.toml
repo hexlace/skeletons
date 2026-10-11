@@ -30,7 +30,8 @@ rituals-compose = "0.2.0"
 skeletons = { path = "crates/skeletons", version = "0.2.0" }
 # The engine behind it, which the bundle and `skeletons-library` are built on.
 # The bundle and the engine are built against each other and released at one
-# version, so the requirement admits that version alone.
+# version, so the requirement admits that version alone. It names no feature:
+# the bundle asks for the engine's `commands` in its own manifest.
 skeletons-engine = { path = "crates/skeletons-engine", version = "=0.2.0" }
 # Property-based testing for the text grammars under `crates/skeletons-engine/src/skeleton`:
 # a parser needs inputs no one would think to write by hand. Dev-only, so it

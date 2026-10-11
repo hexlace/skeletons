@@ -3,7 +3,7 @@
 //! `<what is wrong>; <what to do>`).
 
 use super::super::spelling::told_apart;
-use super::{Refusal, RefusalKind};
+use super::Refusal;
 use crate::claim::{
     ClaimPath, FoldedRelation, NAME_BYTES_MAX, Overlap, TooLongName, UnsafePathCause,
     folded_relation, staging_name,
@@ -11,32 +11,7 @@ use crate::claim::{
 use crate::skeleton::{Escaped, RenderError};
 use crate::workspace::{OptionShapeRefusal, WearingRefusal, WornId};
 
-impl RefusalKind {
-    /// The word this kind is reported as: the `kind` of `check --json` and
-    /// the word `check`'s human output classifies a refusal by.
-    pub(crate) const fn word(self) -> &'static str {
-        match self {
-            Self::NotATable => "not-a-table",
-            Self::ReservedKey => "reserved-key",
-            Self::NamesNoDependency => "names-no-dependency",
-            Self::Unresolved => "unresolved",
-            Self::Ambiguous => "ambiguous",
-            Self::NotASkeleton => "not-a-skeleton",
-            Self::OptionRefused => "option-refused",
-            Self::SkeletonInvalid => "skeleton-invalid",
-            Self::Overlap => "overlap",
-            Self::UnsafePath => "unsafe-path",
-        }
-    }
-}
-
 impl Refusal {
-    /// The `kind` this refusal reports in `--json`, and the word `check`'s
-    /// human output classifies it by.
-    pub(crate) fn kind(&self) -> &'static str {
-        self.classify().word()
-    }
-
     /// The worn skeleton this refusal is about, when it is about exactly
     /// one — decides whether `check`'s human output places it inside that
     /// skeleton's own block or in the closing `refused:` list.
@@ -737,11 +712,12 @@ mod tests {
         assert_one_line, claim, kind_index, poison,
     };
     use super::{
-        Overlap, Refusal, RefusalKind, UnsafePathCause, join_and, option_shape_words,
-        overlap_message, render_text, unsafe_path_change_clause, unsafe_path_text, wearing_message,
+        Overlap, Refusal, UnsafePathCause, join_and, option_shape_words, overlap_message,
+        render_text, unsafe_path_change_clause, unsafe_path_text, wearing_message,
     };
     use crate::claim::{Claimant, TooLongName};
     use crate::skeleton::{Reason, RenderError, SkeletonIdentity};
+    use crate::survey::RefusalKind;
     use crate::workspace::{WearingRefusal, WornId};
 
     #[test]

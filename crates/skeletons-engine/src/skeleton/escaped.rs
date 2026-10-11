@@ -27,6 +27,7 @@ use std::fmt::{self, Write as _};
 /// of a refusal's file go through it.
 pub(crate) struct Escaped<'text>(pub(crate) &'text str);
 
+#[cfg(any(test, feature = "commands"))]
 impl<'text> Escaped<'text> {
     /// The same text with every non-ASCII character escaped too, in the same
     /// notation, so the result is ASCII: `é` is `\u00E9`. ASCII is written
@@ -45,10 +46,12 @@ impl fmt::Display for Escaped<'_> {
     }
 }
 
+#[cfg(any(test, feature = "commands"))]
 /// [`Escaped`] text with every non-ASCII character written as a code point;
 /// made by [`Escaped::code_points`].
 pub(crate) struct CodePoints<'text>(&'text str);
 
+#[cfg(any(test, feature = "commands"))]
 impl fmt::Display for CodePoints<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         for character in self.0.chars() {

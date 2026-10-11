@@ -1,17 +1,27 @@
 //! Why something could not be determined — every kind of refusal `check` and
 //! `sync` report, as data. The sentences they are reported in are in
-//! [`message`].
+//! `message`, which only the commands compile.
 
+#[cfg(feature = "commands")]
 mod message;
 
 use crate::claim::{Overlap, UnsafePathCause};
 use crate::skeleton::RenderError;
 use crate::workspace::{OptionShapeRefusal, WearingRefusal, WornId};
 
+#[cfg(feature = "commands")]
 pub(crate) use message::{join_and, option_shape_detail, unsafe_path_change_clause};
 
 /// One refusal: something `check`/`sync` could not determine, either about
 /// one worn skeleton or about no single one.
+#[cfg_attr(
+    not(feature = "commands"),
+    expect(
+        dead_code,
+        reason = "the detail fields are built when a workspace is surveyed and read only by \
+                  the sentences the commands print"
+    )
+)]
 pub(crate) enum Refusal {
     /// A manifest's own wearing table could not name a worn skeleton at all.
     Wearing(WearingRefusal),
@@ -71,6 +81,26 @@ pub enum RefusalKind {
     UnsafePath,
 }
 
+#[cfg(any(test, feature = "commands"))]
+impl RefusalKind {
+    /// The word this kind is reported as: the `kind` of `check --json` and
+    /// the word `check`'s human output classifies a refusal by.
+    pub(crate) const fn word(self) -> &'static str {
+        match self {
+            Self::NotATable => "not-a-table",
+            Self::ReservedKey => "reserved-key",
+            Self::NamesNoDependency => "names-no-dependency",
+            Self::Unresolved => "unresolved",
+            Self::Ambiguous => "ambiguous",
+            Self::NotASkeleton => "not-a-skeleton",
+            Self::OptionRefused => "option-refused",
+            Self::SkeletonInvalid => "skeleton-invalid",
+            Self::Overlap => "overlap",
+            Self::UnsafePath => "unsafe-path",
+        }
+    }
+}
+
 /// One wearing a refusal concerns: where a project asks to wear a skeleton.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefusedWearing {
@@ -123,6 +153,13 @@ impl Refusal {
         }
     }
 
+    /// The `kind` this refusal reports in `--json`, and the word `check`'s
+    /// human output classifies it by.
+    #[cfg(any(test, feature = "commands"))]
+    pub(crate) fn kind(&self) -> &'static str {
+        self.classify().word()
+    }
+
     /// This refusal as data: its kind, the wearings it concerns and the
     /// claimed paths it concerns.
     pub(crate) fn record(&self) -> RefusalRecord {
@@ -159,7 +196,7 @@ impl Refusal {
     /// The claimed path an `unsafe-path` refusal is about — the order more
     /// than one of a skeleton's own refusals are shown in (`check`'s own
     /// `refusals_for`). `None` for every other kind, which a skeleton never
-    /// carries more than one of at once (see [`Self::about_one_skeleton`]).
+    /// carries more than one of at once (see `Self::about_one_skeleton`).
     pub(crate) fn unsafe_path(&self) -> Option<&str> {
         match self {
             Self::UnsafePath { path, .. } => Some(path.as_str()),

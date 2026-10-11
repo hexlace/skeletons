@@ -67,6 +67,7 @@ use std::path::Path;
 
 pub(crate) use choices::{Choice, Choices};
 pub(crate) use error::{RenderError, SkeletonIdentity};
+#[cfg(feature = "commands")]
 pub(crate) use escaped::Escaped;
 // Re-exported so every other module that decides whether two names are one
 // name folds them the same way this module's own walk folds two entry names

@@ -175,6 +175,7 @@ mod tests {
             id: id.to_owned(),
             name: name.to_owned(),
             version: version.to_owned(),
+            #[cfg(feature = "commands")]
             source: None,
             manifest_path: format!("/WORKSPACE/{name}/Cargo.toml").into(),
             dependencies: Vec::new(),
@@ -190,6 +191,7 @@ mod tests {
             id: id.to_owned(),
             name: "wearer".to_owned(),
             version: "0.1.0".to_owned(),
+            #[cfg(feature = "commands")]
             source: None,
             manifest_path: "/WORKSPACE/wearer/Cargo.toml".into(),
             dependencies,

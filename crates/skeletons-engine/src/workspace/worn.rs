@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+#[cfg(feature = "commands")]
 use super::pin::Pin;
 use super::wearing_table::OptionShapeRefusal;
 use crate::skeleton::Choices;
@@ -34,6 +35,7 @@ pub struct WornDependency {
     pub version: semver::Version,
     /// The skeleton crate's own root directory: `manifest_path.parent()`.
     pub(crate) skeleton_directory: PathBuf,
+    #[cfg(feature = "commands")]
     pub(crate) pin: Pin,
     /// The wearer's recorded option values, resolved into a shape the render
     /// accepts — or the one recorded value whose TOML shape it cannot

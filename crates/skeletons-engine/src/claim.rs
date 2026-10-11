@@ -10,14 +10,14 @@ use std::path::{Path, PathBuf};
 
 pub(crate) use drift::compare;
 pub use drift::{Drift, DriftReason};
-pub(crate) use location::{
-    Located, OnDisk, TooLongName, UnsafePathCause, lists_exact_spelling, look_up, read_at_most,
-    resolve,
-};
+#[cfg(feature = "commands")]
+pub(crate) use location::{Located, OnDisk, lists_exact_spelling, look_up, read_at_most};
+pub(crate) use location::{TooLongName, UnsafePathCause, resolve};
+#[cfg(feature = "commands")]
 pub(crate) use overlap::{
-    FoldedRelation, Overlap, find_overlaps, folded_components, folded_relation,
-    proper_folded_prefixes,
+    FoldedRelation, folded_components, folded_relation, proper_folded_prefixes,
 };
+pub(crate) use overlap::{Overlap, find_overlaps};
 
 /// The suffix every staging file carries: `.<file-name>.skeletons-sync`, beside
 /// its target.
@@ -44,7 +44,7 @@ const CLAIMED_NAME_BYTES_MAX: usize = NAME_BYTES_MAX - STAGING_AFFIX_BYTES;
 /// Whether `name` is a `.git` entry, in any ASCII case: the one rule that
 /// decides both which claim names are a write into git's own directory
 /// ([`ClaimPath::from_rendering_path`]) and what marks a directory as another
-/// repository's own ([`look_up`]), so the two cannot disagree about which
+/// repository's own (`look_up`), so the two cannot disagree about which
 /// spellings count. It is only the exact name: the other spellings git reads
 /// as `.git` cannot hold a repository, and a claim at one is refused as a
 /// different cause.
@@ -52,6 +52,7 @@ pub(crate) fn is_git_directory_name(name: &str) -> bool {
     name.eq_ignore_ascii_case(".git")
 }
 
+#[cfg(any(test, feature = "commands"))]
 /// The name a staging file carries beside a target named `file_name`:
 /// `.<file_name>.skeletons-sync`. The one place that wrapping is written, so a
 /// path built to ask whether the filesystem takes a spelling for a staging
@@ -108,6 +109,22 @@ impl ClaimPath {
         &self.0
     }
 
+    /// This claim's own path, joined onto `root` as a real filesystem path —
+    /// the same join [`resolve`] walks component by component while
+    /// checking for symlinks. Used by `sync::write` to name the target it
+    /// prepares and renames into, once that walk has already vetted every
+    /// claim `sync` goes on to write.
+    pub(crate) fn to_path(&self, root: &Path) -> PathBuf {
+        let mut path = root.to_path_buf();
+        for component in self.0.split('/') {
+            path.push(component);
+        }
+        path
+    }
+}
+
+#[cfg(any(test, feature = "commands"))]
+impl ClaimPath {
     /// The staging path this claim is written at before it lands: the same
     /// directory, and the file name wrapped as `.<file-name>.skeletons-sync`.
     /// `a/b.yml` stages at `a/.b.yml.skeletons-sync`, and `b.yml` at
@@ -189,19 +206,6 @@ impl ClaimPath {
             "one ancestor for every component above the last"
         );
         ancestors
-    }
-
-    /// This claim's own path, joined onto `root` as a real filesystem path —
-    /// the same join [`resolve`] walks component by component while
-    /// checking for symlinks. Used by `sync::write` to name the target it
-    /// prepares and renames into, once that walk has already vetted every
-    /// claim `sync` goes on to write.
-    pub(crate) fn to_path(&self, root: &Path) -> PathBuf {
-        let mut path = root.to_path_buf();
-        for component in self.0.split('/') {
-            path.push(component);
-        }
-        path
     }
 }
 

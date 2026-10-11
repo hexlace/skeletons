@@ -109,6 +109,10 @@ pub struct RefusedWearing {
     /// The dependency key the wearing table sits under, or `None` when the
     /// refusal concerns the manifest's whole `skeletons` table.
     pub dependency: Option<String>,
+    /// The package the dependency under this key names, as the manifest
+    /// declares it; `None` when the manifest declares no dependency under the
+    /// key, or the refusal concerns the whole table.
+    pub package: Option<String>,
 }
 
 /// One refusal as data: what kind it is and what it concerns.
@@ -165,15 +169,25 @@ impl Refusal {
     pub(crate) fn record(&self) -> RefusalRecord {
         let (wearings, paths) = match self {
             Self::Wearing(wearing) => (vec![wearing_of(wearing)], Vec::new()),
-            Self::OptionShape { worn, .. } | Self::Render { worn, .. } => (
-                vec![refused_wearing(&worn.manifest, Some(&worn.key))],
+            Self::OptionShape { worn, skeleton, .. } | Self::Render { worn, skeleton, .. } => (
+                vec![refused_wearing(
+                    &worn.manifest,
+                    Some(&worn.key),
+                    Some(skeleton),
+                )],
                 Vec::new(),
             ),
             Self::Overlap(overlap) => (
                 overlap
                     .claimants
                     .iter()
-                    .map(|claimant| refused_wearing(&claimant.manifest, Some(&claimant.dependency)))
+                    .map(|claimant| {
+                        refused_wearing(
+                            &claimant.manifest,
+                            Some(&claimant.dependency),
+                            Some(&claimant.skeleton),
+                        )
+                    })
                     .collect(),
                 overlap
                     .paths
@@ -181,8 +195,17 @@ impl Refusal {
                     .map(|path| path.as_str().to_owned())
                     .collect(),
             ),
-            Self::UnsafePath { worn, path, .. } => (
-                vec![refused_wearing(&worn.manifest, Some(&worn.key))],
+            Self::UnsafePath {
+                worn,
+                skeleton,
+                path,
+                ..
+            } => (
+                vec![refused_wearing(
+                    &worn.manifest,
+                    Some(&worn.key),
+                    Some(skeleton),
+                )],
                 vec![path.clone()],
             ),
         };
@@ -205,37 +228,57 @@ impl Refusal {
     }
 }
 
-/// The wearing a [`WearingRefusal`] is about: the manifest and the dependency
-/// key it names, or no key where it names the manifest's whole table.
+/// The wearing a [`WearingRefusal`] is about: the manifest, the dependency
+/// key it names, or no key where it names the manifest's whole table, and the
+/// package that dependency names where one is known.
 fn wearing_of(wearing: &WearingRefusal) -> RefusedWearing {
     match wearing {
-        WearingRefusal::NotATable { manifest, key } => refused_wearing(manifest, key.as_deref()),
-        WearingRefusal::ReservedKey { manifest, key, .. } => refused_wearing(manifest, Some(key)),
+        WearingRefusal::NotATable {
+            manifest,
+            key,
+            package,
+        } => refused_wearing(manifest, key.as_deref(), package.as_deref()),
+        WearingRefusal::ReservedKey {
+            manifest,
+            key,
+            crate_name,
+        } => refused_wearing(manifest, Some(key), Some(crate_name)),
         WearingRefusal::NamesNoDependency {
             manifest,
             dependency,
-        }
-        | WearingRefusal::Unresolved {
+        } => refused_wearing(manifest, Some(dependency), None),
+        WearingRefusal::Unresolved {
             manifest,
             dependency,
-        }
-        | WearingRefusal::Ambiguous {
+            package,
+        } => refused_wearing(manifest, Some(dependency), Some(package)),
+        WearingRefusal::Ambiguous {
             manifest,
             dependency,
-            ..
+            packages,
+        } => {
+            let Some((name, _)) = packages.first() else {
+                unreachable!("a dependency is ambiguous only between several packages")
+            };
+            refused_wearing(manifest, Some(dependency), Some(name))
         }
-        | WearingRefusal::NotASkeleton {
+        WearingRefusal::NotASkeleton {
             manifest,
             dependency,
-            ..
-        } => refused_wearing(manifest, Some(dependency)),
+            package: (name, _),
+        } => refused_wearing(manifest, Some(dependency), Some(name)),
     }
 }
 
-fn refused_wearing(manifest: &str, dependency: Option<&str>) -> RefusedWearing {
+fn refused_wearing(
+    manifest: &str,
+    dependency: Option<&str>,
+    package: Option<&str>,
+) -> RefusedWearing {
     RefusedWearing {
         manifest: manifest.to_owned(),
         dependency: dependency.map(str::to_owned),
+        package: package.map(str::to_owned),
     }
 }
 
@@ -247,10 +290,11 @@ mod tests {
     use crate::survey::poison::{REFUSAL_KINDS, assert_every_kind, claim, kind_index};
     use crate::workspace::{OptionShapeRefusal, ShapeFound, WearingRefusal, WornId};
 
-    fn wearing(manifest: &str, dependency: Option<&str>) -> RefusedWearing {
+    fn wearing(manifest: &str, dependency: Option<&str>, package: Option<&str>) -> RefusedWearing {
         RefusedWearing {
             manifest: manifest.to_owned(),
             dependency: dependency.map(str::to_owned),
+            package: package.map(str::to_owned),
         }
     }
 
@@ -281,8 +325,8 @@ mod tests {
     type Sample = (&'static str, Refusal, RefusalRecord);
 
     /// The wearing member every sample but the overlap concerns.
-    fn on_member(dependency: Option<&str>) -> Vec<RefusedWearing> {
-        vec![wearing("member/Cargo.toml", dependency)]
+    fn on_member(dependency: Option<&str>, package: Option<&str>) -> Vec<RefusedWearing> {
+        vec![wearing("member/Cargo.toml", dependency, package)]
     }
 
     /// Every shape of refusal there is, each with the record it must report.
@@ -300,16 +344,22 @@ mod tests {
                 Refusal::Wearing(WearingRefusal::NotATable {
                     manifest: "member/Cargo.toml".to_owned(),
                     key: None,
+                    package: None,
                 }),
-                record(RefusalKind::NotATable, on_member(None), &[]),
+                record(RefusalKind::NotATable, on_member(None, None), &[]),
             ),
             (
                 "one wearing table that is not a table",
                 Refusal::Wearing(WearingRefusal::NotATable {
                     manifest: "member/Cargo.toml".to_owned(),
                     key: Some("ci".to_owned()),
+                    package: Some("a-crate".to_owned()),
                 }),
-                record(RefusalKind::NotATable, on_member(Some("ci")), &[]),
+                record(
+                    RefusalKind::NotATable,
+                    on_member(Some("ci"), Some("a-crate")),
+                    &[],
+                ),
             ),
             (
                 "a dependency under a reserved key",
@@ -318,7 +368,11 @@ mod tests {
                     key: "options".to_owned(),
                     crate_name: "a-crate".to_owned(),
                 }),
-                record(RefusalKind::ReservedKey, on_member(Some("options")), &[]),
+                record(
+                    RefusalKind::ReservedKey,
+                    on_member(Some("options"), Some("a-crate")),
+                    &[],
+                ),
             ),
             (
                 "a key that names no dependency",
@@ -326,15 +380,24 @@ mod tests {
                     manifest: "member/Cargo.toml".to_owned(),
                     dependency: "ci".to_owned(),
                 }),
-                record(RefusalKind::NamesNoDependency, on_member(Some("ci")), &[]),
+                record(
+                    RefusalKind::NamesNoDependency,
+                    on_member(Some("ci"), None),
+                    &[],
+                ),
             ),
             (
                 "a dependency resolved to no package",
                 Refusal::Wearing(WearingRefusal::Unresolved {
                     manifest: "member/Cargo.toml".to_owned(),
                     dependency: "ci".to_owned(),
+                    package: "a-crate".to_owned(),
                 }),
-                record(RefusalKind::Unresolved, on_member(Some("ci")), &[]),
+                record(
+                    RefusalKind::Unresolved,
+                    on_member(Some("ci"), Some("a-crate")),
+                    &[],
+                ),
             ),
             (
                 "a dependency resolved to several packages",
@@ -346,7 +409,11 @@ mod tests {
                         ("a-skeleton".to_owned(), "0.2.0".to_owned()),
                     ],
                 }),
-                record(RefusalKind::Ambiguous, on_member(Some("ci")), &[]),
+                record(
+                    RefusalKind::Ambiguous,
+                    on_member(Some("ci"), Some("a-skeleton")),
+                    &[],
+                ),
             ),
             (
                 "a package that is no skeleton",
@@ -355,7 +422,11 @@ mod tests {
                     dependency: "ci".to_owned(),
                     package: ("a-crate".to_owned(), "0.1.0".to_owned()),
                 }),
-                record(RefusalKind::NotASkeleton, on_member(Some("ci")), &[]),
+                record(
+                    RefusalKind::NotASkeleton,
+                    on_member(Some("ci"), Some("a-crate")),
+                    &[],
+                ),
             ),
         ]
     }
@@ -376,7 +447,11 @@ mod tests {
                         found: ShapeFound::Number,
                     },
                 },
-                record(RefusalKind::OptionRefused, on_member(Some("ci")), &[]),
+                record(
+                    RefusalKind::OptionRefused,
+                    on_member(Some("ci"), Some("a-skeleton")),
+                    &[],
+                ),
             ),
             (
                 "a render that refuses a choice and names no file",
@@ -391,7 +466,11 @@ mod tests {
                         },
                     ),
                 },
-                record(RefusalKind::OptionRefused, on_member(Some("ci")), &[]),
+                record(
+                    RefusalKind::OptionRefused,
+                    on_member(Some("ci"), Some("a-skeleton")),
+                    &[],
+                ),
             ),
             (
                 "a render that refuses a file of the skeleton",
@@ -401,7 +480,11 @@ mod tests {
                     version: version.clone(),
                     error: RenderError::about_file(identity(), "files/a.yml", Reason::NotUtf8),
                 },
-                record(RefusalKind::SkeletonInvalid, on_member(Some("ci")), &[]),
+                record(
+                    RefusalKind::SkeletonInvalid,
+                    on_member(Some("ci"), Some("a-skeleton")),
+                    &[],
+                ),
             ),
             (
                 "two claimants of colliding paths",
@@ -415,8 +498,8 @@ mod tests {
                 record(
                     RefusalKind::Overlap,
                     vec![
-                        wearing("one/Cargo.toml", Some("first")),
-                        wearing("two/Cargo.toml", Some("second")),
+                        wearing("one/Cargo.toml", Some("first"), Some("a-skeleton")),
+                        wearing("two/Cargo.toml", Some("second"), Some("a-skeleton")),
                     ],
                     &["a/B.yml", "a/b.yml"],
                 ),
@@ -430,7 +513,11 @@ mod tests {
                     path: "a/b.yml".to_owned(),
                     cause: UnsafePathCause::Symlink,
                 },
-                record(RefusalKind::UnsafePath, on_member(Some("ci")), &["a/b.yml"]),
+                record(
+                    RefusalKind::UnsafePath,
+                    on_member(Some("ci"), Some("a-skeleton")),
+                    &["a/b.yml"],
+                ),
             ),
         ]
     }

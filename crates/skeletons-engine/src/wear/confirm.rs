@@ -120,7 +120,7 @@ fn is_at(wearing: &Wearing, manifest: &str, key: &str) -> bool {
 /// `None` for the refusal about the whole table.
 fn refusal_location(refusal: &WearingRefusal) -> (&str, Option<&str>) {
     match refusal {
-        WearingRefusal::NotATable { manifest, key } => (manifest, key.as_deref()),
+        WearingRefusal::NotATable { manifest, key, .. } => (manifest, key.as_deref()),
         WearingRefusal::ReservedKey { manifest, key, .. } => (manifest, Some(key)),
         WearingRefusal::NamesNoDependency {
             manifest,
@@ -129,6 +129,7 @@ fn refusal_location(refusal: &WearingRefusal) -> (&str, Option<&str>) {
         | WearingRefusal::Unresolved {
             manifest,
             dependency,
+            ..
         }
         | WearingRefusal::Ambiguous {
             manifest,
@@ -248,6 +249,7 @@ mod tests {
         let unresolved = WearingRefusal::Unresolved {
             manifest: "Cargo.toml".to_owned(),
             dependency: "tidy".to_owned(),
+            package: "tidy".to_owned(),
         };
         let workspace = workspace_of(vec![Wearing::Refused(unresolved)]);
 
@@ -270,6 +272,7 @@ mod tests {
         let refusal = WearingRefusal::NotATable {
             manifest: "Cargo.toml".to_owned(),
             key: None,
+            package: None,
         };
         let workspace = workspace_of(vec![Wearing::Refused(refusal)]);
 
@@ -287,10 +290,12 @@ mod tests {
         let elsewhere = WearingRefusal::Unresolved {
             manifest: "tools/Cargo.toml".to_owned(),
             dependency: "tidy".to_owned(),
+            package: "tidy".to_owned(),
         };
         let other_key = WearingRefusal::Unresolved {
             manifest: "Cargo.toml".to_owned(),
             dependency: "other".to_owned(),
+            package: "other".to_owned(),
         };
         let workspace = workspace_of(vec![
             Wearing::Refused(elsewhere),

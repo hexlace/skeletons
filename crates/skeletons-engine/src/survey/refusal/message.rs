@@ -479,10 +479,12 @@ fn wearing_message(wearing: &WearingRefusal) -> String {
         WearingRefusal::NotATable {
             manifest,
             key: None,
+            ..
         } => skeletons_not_a_table_message(manifest),
         WearingRefusal::NotATable {
             manifest,
             key: Some(key),
+            ..
         } => skeleton_not_a_table_message(manifest, key),
         WearingRefusal::ReservedKey {
             manifest,
@@ -496,6 +498,7 @@ fn wearing_message(wearing: &WearingRefusal) -> String {
         WearingRefusal::Unresolved {
             manifest,
             dependency,
+            ..
         } => unresolved_message(manifest, dependency),
         WearingRefusal::Ambiguous {
             manifest,
@@ -1209,10 +1212,12 @@ mod tests {
             WearingRefusal::NotATable {
                 manifest: poison(),
                 key: None,
+                package: None,
             },
             WearingRefusal::NotATable {
                 manifest: poison(),
                 key: Some(poison()),
+                package: Some(poison()),
             },
             WearingRefusal::ReservedKey {
                 manifest: poison(),
@@ -1226,6 +1231,7 @@ mod tests {
             WearingRefusal::Unresolved {
                 manifest: poison(),
                 dependency: poison(),
+                package: poison(),
             },
             WearingRefusal::Ambiguous {
                 manifest: poison(),

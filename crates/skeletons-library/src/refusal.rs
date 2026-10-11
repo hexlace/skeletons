@@ -76,12 +76,14 @@ impl From<skeletons_engine::RefusalKind> for RefusalKind {
 ///
 /// A [`WornSkeleton`](crate::WornSkeleton) is a wearing that resolved to a
 /// skeleton. A `Wearing` is only the place the project asks, which is all some
-/// refusals have.
+/// refusals have, and the package its dependency names when the manifest
+/// declares one.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub struct Wearing {
     manifest: PathBuf,
     dependency_key: Option<String>,
+    package: Option<String>,
 }
 
 impl Wearing {
@@ -89,6 +91,7 @@ impl Wearing {
         Self {
             manifest: PathBuf::from(&wearing.manifest),
             dependency_key: wearing.dependency.clone(),
+            package: wearing.package.clone(),
         }
     }
 
@@ -103,6 +106,15 @@ impl Wearing {
     #[must_use]
     pub fn dependency_key(&self) -> Option<&str> {
         self.dependency_key.as_deref()
+    }
+
+    /// The package the dependency under this key names, as the manifest
+    /// declares it. `None` when the manifest declares no dependency under the
+    /// key, or the refusal is about the whole `skeletons` table. For a wearing
+    /// that resolved to a skeleton it is that skeleton's package name.
+    #[must_use]
+    pub fn package(&self) -> Option<&str> {
+        self.package.as_deref()
     }
 }
 
@@ -154,5 +166,18 @@ impl Refusal {
     #[must_use]
     pub fn paths(&self) -> &[PathBuf] {
         &self.paths
+    }
+
+    /// The package named by the one wearing of a refusal about a wearing that
+    /// resolved to no skeleton, or `None` when that wearing names none.
+    pub(crate) fn package_named(&self) -> Option<&str> {
+        assert!(
+            self.kind.concerns_unidentified_wearing(),
+            "only a refusal about an unidentified wearing has exactly one wearing"
+        );
+        let [wearing] = self.wearings.as_slice() else {
+            unreachable!("a refusal about an unidentified wearing concerns one wearing")
+        };
+        wearing.package()
     }
 }

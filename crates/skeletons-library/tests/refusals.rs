@@ -1,74 +1,19 @@
 //! What the library says about a wearing it could not check as a whole, and
 //! what `files()` and `skeletons_named` answer beside each refusal: a refused
 //! skeleton never reads as `Checked`, and a wearing that resolved to no
-//! skeleton never reads as `NotWorn`.
+//! skeleton leaves the lookup undetermined for every package it could be.
 
 mod support;
 
-use std::error::Error;
 use std::fs;
 use std::os::unix::fs::symlink;
 
-use skeletons_library::{
-    ClaimedFile, FileState, Files, Refusal, RefusalKind, Report, SkeletonsNamed, WornSkeleton,
-};
+use skeletons_library::{FileState, RefusalKind, SkeletonsNamed};
 use support::{
     DEPENDABOT_PATH, Fixture, HOUSE_NOTES_PATH, HOUSE_NOTES_RENDERED, OTHER_NOTES_PATH,
-    OTHER_NOTES_RENDERED, TestOutcome, checked_files, wearing_table, worn_once,
+    OTHER_NOTES_RENDERED, TestOutcome, checked_files, paths_of, refused, undetermined,
+    wearing_table, wearings_of, worn_once,
 };
-
-/// The manifest and dependency key of each wearing a refusal names, in order.
-fn wearings_of(refusal: &Refusal) -> Vec<(&str, Option<&str>)> {
-    refusal
-        .wearings()
-        .iter()
-        .map(|wearing| {
-            (
-                wearing.manifest().to_str().unwrap_or("?"),
-                wearing.dependency_key(),
-            )
-        })
-        .collect()
-}
-
-/// The paths a refusal names, as text.
-fn paths_of(refusal: &Refusal) -> Vec<&str> {
-    refusal
-        .paths()
-        .iter()
-        .map(|path| path.to_str().unwrap_or("?"))
-        .collect()
-}
-
-/// The refusals and the compared files of a skeleton whose files were refused.
-type RefusedFiles<'report> = (&'report [Refusal], &'report [ClaimedFile]);
-
-/// The refusals and compared files of a skeleton whose files were refused, or
-/// an error naming what `files()` answered instead.
-fn refused(skeleton: &WornSkeleton) -> Result<RefusedFiles<'_>, Box<dyn Error>> {
-    match skeleton.files() {
-        Files::Refused {
-            refusals, compared, ..
-        } => Ok((refusals, compared)),
-        other => Err(format!(
-            "expected {} to be Refused, files() answered {other:?}",
-            skeleton.dependency_key()
-        )
-        .into()),
-    }
-}
-
-/// The refusals the lookup for `package` answered as `Undetermined`, or an
-/// error naming what it answered instead.
-fn undetermined<'report>(
-    report: &'report Report,
-    package: &str,
-) -> Result<&'report [Refusal], Box<dyn Error>> {
-    match report.skeletons_named(package) {
-        SkeletonsNamed::Undetermined(refusals) => Ok(refusals),
-        other => Err(format!("expected {package} to be Undetermined, found {other:?}").into()),
-    }
-}
 
 #[test]
 fn an_option_the_skeleton_does_not_declare_refuses_the_skeleton() -> TestOutcome {
@@ -92,7 +37,7 @@ fn an_option_the_skeleton_does_not_declare_refuses_the_skeleton() -> TestOutcome
     assert_eq!(refusals[0].kind(), RefusalKind::OptionRefused);
     assert_eq!(
         wearings_of(&refusals[0]),
-        [("tools/Cargo.toml", Some("rules"))]
+        [("tools/Cargo.toml", Some("rules"), Some("house-rules"))]
     );
     assert!(refusals[0].paths().is_empty(), "{:?}", refusals[0]);
     assert!(compared.is_empty(), "{compared:?}");
@@ -124,7 +69,7 @@ fn a_symbolic_link_at_a_claimed_path_refuses_the_skeleton_and_compares_nothing()
     assert_eq!(paths_of(&refusals[0]), [DEPENDABOT_PATH]);
     assert_eq!(
         wearings_of(&refusals[0]),
-        [("tools/Cargo.toml", Some("rules"))]
+        [("tools/Cargo.toml", Some("rules"), Some("house-rules"))]
     );
     assert!(compared.is_empty(), "{compared:?}");
     Ok(())
@@ -165,8 +110,8 @@ fn a_skeleton_worn_by_two_members_is_refused_in_both_with_an_overlap_per_path() 
             assert_eq!(
                 wearings,
                 [
-                    ("more-tools/Cargo.toml", Some("rules")),
-                    ("tools/Cargo.toml", Some("rules"))
+                    ("more-tools/Cargo.toml", Some("rules"), Some("house-rules")),
+                    ("tools/Cargo.toml", Some("rules"), Some("house-rules"))
                 ]
             );
             paths.extend(paths_of(refusal));
@@ -215,8 +160,8 @@ fn two_skeletons_claiming_one_path_are_refused_but_keep_the_files_that_collide_w
         assert_eq!(
             wearings,
             [
-                ("tools/Cargo.toml", Some("more")),
-                ("tools/Cargo.toml", Some("rules"))
+                ("tools/Cargo.toml", Some("more"), Some("other-rules")),
+                ("tools/Cargo.toml", Some("rules"), Some("house-rules"))
             ]
         );
         let seen: Vec<_> = compared
@@ -252,7 +197,7 @@ fn a_wearing_table_under_a_key_no_dependency_has_makes_the_lookup_undetermined()
     assert_eq!(refusals[0].kind(), RefusalKind::NamesNoDependency);
     assert_eq!(
         wearings_of(&refusals[0]),
-        [("tools/Cargo.toml", Some("rulez"))]
+        [("tools/Cargo.toml", Some("rulez"), None)]
     );
     assert!(refusals[0].paths().is_empty(), "{:?}", refusals[0]);
     assert_eq!(report.refusals(), refusals);
@@ -273,7 +218,10 @@ fn a_skeletons_table_that_is_not_a_table_makes_the_lookup_undetermined() -> Test
     let refusals = undetermined(&report, "house-rules")?;
     assert_eq!(refusals.len(), 1, "{refusals:?}");
     assert_eq!(refusals[0].kind(), RefusalKind::NotATable);
-    assert_eq!(wearings_of(&refusals[0]), [("tools/Cargo.toml", None)]);
+    assert_eq!(
+        wearings_of(&refusals[0]),
+        [("tools/Cargo.toml", None, None)]
+    );
     Ok(())
 }
 

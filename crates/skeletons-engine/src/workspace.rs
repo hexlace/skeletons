@@ -55,10 +55,13 @@ pub(crate) enum Wearing {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WearingRefusal {
     /// `[package.metadata.skeletons]` itself, or one of its keys, is present but
-    /// not a table. `key` is `None` for the whole table.
+    /// not a table. `key` is `None` for the whole table. `package` is the
+    /// package the dependency declared under `key` names, and `None` for the
+    /// whole table or when no dependency is declared under `key`.
     NotATable {
         manifest: String,
         key: Option<String>,
+        package: Option<String>,
     },
     /// A real dependency is declared under a reserved key, `options` or
     /// `verbatim`. The JSON `dependency` field this refusal reports is that
@@ -76,10 +79,12 @@ pub(crate) enum WearingRefusal {
         manifest: String,
         dependency: String,
     },
-    /// The declared dependency resolved to no locked package.
+    /// The declared dependency resolved to no locked package. `package` is the
+    /// package the declared dependency names.
     Unresolved {
         manifest: String,
         dependency: String,
+        package: String,
     },
     /// The declared dependency resolved to more than one locked package.
     Ambiguous {
@@ -158,6 +163,7 @@ fn read_member(document: &Document, member: &Package) -> Vec<Wearing> {
             return vec![Wearing::Refused(WearingRefusal::NotATable {
                 manifest,
                 key: None,
+                package: None,
             })];
         }
     };
@@ -190,6 +196,8 @@ fn entry_refusal(
     match refusal {
         TableEntryRefusal::NotATable { key } => WearingRefusal::NotATable {
             manifest: manifest.to_owned(),
+            package: locate::find_declared(dependencies, &key)
+                .map(|declared| declared.name.clone()),
             key: Some(key),
         },
         TableEntryRefusal::ReservedKey { dependency } => {
@@ -232,6 +240,7 @@ fn read_one_wearing(
             return Wearing::Refused(WearingRefusal::Unresolved {
                 manifest: manifest.to_owned(),
                 dependency: key.to_owned(),
+                package: declared.name.clone(),
             });
         }
         Err(LocateRefusal::Ambiguous { packages }) => {
@@ -331,7 +340,9 @@ pub(crate) fn relative_to_root(root: &Path, path: &Path) -> String {
 mod tests {
     use serde_json::json;
 
-    use super::{declares_skeleton, relative_to_root};
+    use super::schema::Dependency;
+    use super::wearing_table::TableEntryRefusal;
+    use super::{WearingRefusal, declares_skeleton, entry_refusal, relative_to_root};
 
     #[test]
     fn a_package_with_a_skeletons_table_declares_a_skeleton() {
@@ -402,6 +413,60 @@ mod tests {
                 std::path::Path::new("/w/x/y")
             ),
             "../../x/y"
+        );
+    }
+
+    #[test]
+    fn a_table_that_is_not_a_table_names_the_package_of_the_dependency_under_its_key() {
+        // The dependency `tidy` is a rename of the package `house-rules`, so
+        // the refusal for the key `tidy` must name the package, never the key.
+        let dependencies = [Dependency {
+            name: "house-rules".to_owned(),
+            rename: Some("tidy".to_owned()),
+        }];
+
+        let refusal = entry_refusal(
+            "Cargo.toml",
+            &dependencies,
+            TableEntryRefusal::NotATable {
+                key: "tidy".to_owned(),
+            },
+        );
+
+        assert_eq!(
+            refusal,
+            WearingRefusal::NotATable {
+                manifest: "Cargo.toml".to_owned(),
+                key: Some("tidy".to_owned()),
+                package: Some("house-rules".to_owned()),
+            }
+        );
+    }
+
+    #[test]
+    fn a_table_that_is_not_a_table_under_an_undeclared_key_names_no_package() {
+        // Only an unrelated dependency is declared, so nothing says which
+        // package the key `tidy` was meant for.
+        let dependencies = [Dependency {
+            name: "other".to_owned(),
+            rename: None,
+        }];
+
+        let refusal = entry_refusal(
+            "Cargo.toml",
+            &dependencies,
+            TableEntryRefusal::NotATable {
+                key: "tidy".to_owned(),
+            },
+        );
+
+        assert_eq!(
+            refusal,
+            WearingRefusal::NotATable {
+                manifest: "Cargo.toml".to_owned(),
+                key: Some("tidy".to_owned()),
+                package: None,
+            }
         );
     }
 }

@@ -669,7 +669,7 @@ fn wearing_refusal_json(
     wearing: &WearingRefusal,
 ) -> RefusalJson {
     match wearing {
-        WearingRefusal::NotATable { manifest, key } => RefusalJson::NotATable {
+        WearingRefusal::NotATable { manifest, key, .. } => RefusalJson::NotATable {
             kind,
             manifest: manifest.clone(),
             dependency: key.clone(),
@@ -693,6 +693,7 @@ fn wearing_refusal_json(
         WearingRefusal::Unresolved {
             manifest,
             dependency,
+            ..
         } => RefusalJson::Unresolved {
             kind,
             manifest: manifest.clone(),
@@ -1272,6 +1273,7 @@ mod tests {
         let refusal = Refusal::Wearing(WearingRefusal::NotATable {
             manifest: "Cargo.toml".to_owned(),
             key: None,
+            package: None,
         });
         let message = refusal.message();
         let message_json = serde_json::to_string(&message).expect("a string always serializes");
@@ -1292,6 +1294,7 @@ mod tests {
         let refusal = Refusal::Wearing(WearingRefusal::NotATable {
             manifest: "Cargo.toml".to_owned(),
             key: Some("dependabot".to_owned()),
+            package: None,
         });
         let message = refusal.message();
         let message_json = serde_json::to_string(&message).expect("a string always serializes");
@@ -1358,6 +1361,7 @@ mod tests {
         let refusal = Refusal::Wearing(WearingRefusal::Unresolved {
             manifest: "Cargo.toml".to_owned(),
             dependency: "dependabot".to_owned(),
+            package: "dependabot".to_owned(),
         });
         let message = refusal.message();
         let message_json = serde_json::to_string(&message).expect("a string always serializes");

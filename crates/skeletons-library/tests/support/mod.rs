@@ -31,7 +31,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use skeletons_library::{ClaimedFile, Files, Report, SkeletonsNamed, WornSkeleton};
+use skeletons_library::{ClaimedFile, Files, Refusal, Report, SkeletonsNamed, WornSkeleton};
 use tempfile::TempDir;
 
 /// What every test returns. The error path carries only a failure to build an
@@ -156,19 +156,42 @@ impl Fixture {
     }
 
     /// Writes the member `name`, with `dependencies` under `[dependencies]` and
-    /// `metadata` after the package table, both verbatim.
+    /// `rest` after them, both verbatim: whatever follows `[dependencies]`, such
+    /// as `[build-dependencies]` or the wearing tables.
     pub(crate) fn write_member(
         &self,
         name: &str,
         dependencies: &str,
-        metadata: &str,
+        rest: &str,
     ) -> Result<(), Box<dyn Error>> {
         let manifest = format!(
             "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\
-             publish = false\n\n[dependencies]\n{dependencies}\n{metadata}"
+             publish = false\n\n[dependencies]\n{dependencies}\n{rest}"
         );
         self.write(&format!("{name}/Cargo.toml"), manifest.as_bytes())?;
         self.write(&format!("{name}/src/lib.rs"), b"")
+    }
+
+    /// Writes a crate `name` at `version` into the skeletons directory beside
+    /// the project, with an empty library and `manifest_tail` after its package
+    /// table verbatim, and returns the directory it was written to.
+    pub(crate) fn write_crate(
+        &self,
+        name: &str,
+        version: &str,
+        manifest_tail: &str,
+    ) -> Result<PathBuf, Box<dyn Error>> {
+        let directory = self.base.path().join("skeletons").join(name);
+        write_file(
+            &directory.join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"{name}\"\nversion = \"{version}\"\nedition = \"2021\"\n\
+                 publish = false\n\n{manifest_tail}"
+            )
+            .as_bytes(),
+        )?;
+        write_file(&directory.join("src/lib.rs"), b"")?;
+        Ok(directory)
     }
 
     /// Makes `Cargo.lock` with the cargo that built the tests, offline: every
@@ -295,5 +318,65 @@ pub(crate) fn checked_files(skeleton: &WornSkeleton) -> Result<&[ClaimedFile], B
             skeleton.package()
         )
         .into()),
+    }
+}
+
+/// Where a refusal puts a wearing: its manifest, its dependency key, and the
+/// package its dependency names.
+pub(crate) type WearingTriple<'refusal> =
+    (&'refusal str, Option<&'refusal str>, Option<&'refusal str>);
+
+/// The manifest, dependency key and package of each wearing a refusal names,
+/// in order.
+pub(crate) fn wearings_of(refusal: &Refusal) -> Vec<WearingTriple<'_>> {
+    refusal
+        .wearings()
+        .iter()
+        .map(|wearing| {
+            (
+                wearing.manifest().to_str().unwrap_or("?"),
+                wearing.dependency_key(),
+                wearing.package(),
+            )
+        })
+        .collect()
+}
+
+/// The paths a refusal names, as text.
+pub(crate) fn paths_of(refusal: &Refusal) -> Vec<&str> {
+    refusal
+        .paths()
+        .iter()
+        .map(|path| path.to_str().unwrap_or("?"))
+        .collect()
+}
+
+/// The refusals and the compared files of a skeleton whose files were refused.
+pub(crate) type RefusedFiles<'report> = (&'report [Refusal], &'report [ClaimedFile]);
+
+/// The refusals and compared files of a skeleton whose files were refused, or
+/// an error naming what `files()` answered instead.
+pub(crate) fn refused(skeleton: &WornSkeleton) -> Result<RefusedFiles<'_>, Box<dyn Error>> {
+    match skeleton.files() {
+        Files::Refused {
+            refusals, compared, ..
+        } => Ok((refusals, compared)),
+        other => Err(format!(
+            "expected {} to be Refused, files() answered {other:?}",
+            skeleton.dependency_key()
+        )
+        .into()),
+    }
+}
+
+/// The refusals the lookup for `package` answered as `Undetermined`, or an
+/// error naming what it answered instead.
+pub(crate) fn undetermined<'report>(
+    report: &'report Report,
+    package: &str,
+) -> Result<&'report [Refusal], Box<dyn Error>> {
+    match report.skeletons_named(package) {
+        SkeletonsNamed::Undetermined(refusals) => Ok(refusals),
+        other => Err(format!("expected {package} to be Undetermined, found {other:?}").into()),
     }
 }

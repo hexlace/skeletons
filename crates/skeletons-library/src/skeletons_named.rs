@@ -8,9 +8,10 @@ use crate::worn_skeleton::WornSkeleton;
 /// `NotWorn` is the only answer that means the workspace does not wear the
 /// package. `Undetermined` is not `NotWorn`: the refusals it holds are about
 /// wearings whose skeleton was never identified, and the package asked for may
-/// be one of them. `Worn` says nothing of the rest of the workspace: another
-/// wearing may have been refused, and [`Report::refusals`](crate::Report::refusals)
-/// holds it.
+/// be one of them. A refusal whose [`Wearing`](crate::Wearing) names another
+/// package cannot be it, so it never makes the answer `Undetermined`. `Worn`
+/// says nothing of the rest of the workspace: another wearing may have been
+/// refused, and [`Report::refusals`](crate::Report::refusals) holds it.
 ///
 /// A variant this version of a caller does not know is to be treated as
 /// `Undetermined`.
@@ -40,10 +41,12 @@ pub enum SkeletonsNamed<'report> {
     /// One skeleton per wearing of the package. Never empty, and a sub-slice of
     /// [`Report::skeletons`](crate::Report::skeletons).
     Worn(&'report [WornSkeleton]),
-    /// No wearing resolved to the package, and every wearing was identified.
+    /// No wearing resolved to the package, and no refused wearing could be it:
+    /// each one that resolved to no skeleton names another package.
     NotWorn,
-    /// No wearing resolved to the package, and these refusals each name a
-    /// wearing that resolved to no skeleton at all, any of which may be it.
-    /// Never empty.
+    /// No wearing resolved to the package, and these refusals are each about a
+    /// wearing that resolved to no skeleton and may be the package: its
+    /// [`Wearing`](crate::Wearing) names the package, or names none. Those
+    /// naming the package come first. Never empty.
     Undetermined(&'report [Refusal]),
 }

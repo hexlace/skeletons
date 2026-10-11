@@ -42,10 +42,39 @@ use crate::worn_skeleton::WornSkeleton;
 pub struct Report {
     root: PathBuf,
     skeletons: Vec<WornSkeleton>,
-    /// Refusals about a wearing that resolved to no skeleton come first, so
-    /// that [`SkeletonsNamed::Undetermined`] can borrow them as one slice.
+    /// Refusals about a wearing that resolved to no skeleton come first, those
+    /// whose wearing names no package before those that name one, so that
+    /// [`SkeletonsNamed::Undetermined`] can borrow the first group as one slice.
     refusals: Vec<Refusal>,
-    unidentified_count: usize,
+    unnamed_count: usize,
+    /// For each package an unidentified wearing names, the refusals that could
+    /// be that package: the ones naming it, then every one naming no package.
+    undetermined: BTreeMap<String, Vec<Refusal>>,
+}
+
+/// Where a refusal sits in [`Report::refusals`], in order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Group {
+    /// About a wearing that resolved to no skeleton, naming no package.
+    UnidentifiedNamingNone,
+    /// About a wearing that resolved to no skeleton, naming a package.
+    UnidentifiedNamingOne,
+    /// About worn skeletons.
+    Identified,
+}
+
+impl Group {
+    fn of(refusal: &Refusal) -> Self {
+        if refusal.kind().concerns_unidentified_wearing() {
+            if refusal.package_named().is_some() {
+                Self::UnidentifiedNamingOne
+            } else {
+                Self::UnidentifiedNamingNone
+            }
+        } else {
+            Self::Identified
+        }
+    }
 }
 
 impl Report {
@@ -93,7 +122,18 @@ impl Report {
             hand_to_skeletons(&mut skeletons, &index, record, &refusal);
             refusals.push(refusal);
         }
-        refusals.sort_by_key(|refusal| !refusal.kind().concerns_unidentified_wearing());
+        assert!(
+            refusals
+                .iter()
+                .filter(|refusal| refusal.kind().concerns_unidentified_wearing())
+                .all(|refusal| refusal.wearings().len() == 1),
+            "a refusal about a wearing that resolved to no skeleton concerns exactly one wearing"
+        );
+        refusals.sort_by_key(Group::of);
+        let unnamed_count = refusals
+            .iter()
+            .take_while(|refusal| Group::of(refusal) == Group::UnidentifiedNamingNone)
+            .count();
         let unidentified_count = refusals
             .iter()
             .take_while(|refusal| refusal.kind().concerns_unidentified_wearing())
@@ -104,12 +144,14 @@ impl Report {
                 .all(|refusal| !refusal.kind().concerns_unidentified_wearing()),
             "the sort put every refusal about an unidentified wearing first"
         );
+        let undetermined = undetermined_by_package(&refusals, unnamed_count, unidentified_count);
 
         Self {
             root: survey.root.clone(),
             skeletons,
             refusals,
-            unidentified_count,
+            unnamed_count,
+            undetermined,
         }
     }
 
@@ -130,8 +172,10 @@ impl Report {
     /// The worn skeletons whose package name is `package`, compared exactly.
     ///
     /// The name is the skeleton's package name and never the dependency key,
-    /// which belongs to the wearer. See [`SkeletonsNamed`] for what each answer
-    /// does and does not say.
+    /// which belongs to the wearer. A wearing that was refused before its
+    /// skeleton was identified makes the answer unsettled only when it names
+    /// `package` or names no package at all. See [`SkeletonsNamed`] for what
+    /// each answer does and does not say.
     ///
     /// # Examples
     ///
@@ -155,23 +199,54 @@ impl Report {
         if start < end {
             return SkeletonsNamed::Worn(&self.skeletons[start..end]);
         }
-        let unidentified = &self.refusals[..self.unidentified_count];
-        if unidentified.is_empty() {
+        if let Some(refusals) = self.undetermined.get(package) {
+            return SkeletonsNamed::Undetermined(refusals);
+        }
+        let unnamed = &self.refusals[..self.unnamed_count];
+        if unnamed.is_empty() {
             SkeletonsNamed::NotWorn
         } else {
-            SkeletonsNamed::Undetermined(unidentified)
+            SkeletonsNamed::Undetermined(unnamed)
         }
     }
 
     /// Every refusal in the workspace, in the same order on every run.
     ///
-    /// Refusals about a wearing that resolved to no skeleton come first. A
-    /// refusal that names worn skeletons is also reached through each one's
-    /// [`files`](WornSkeleton::files).
+    /// Refusals about a wearing that resolved to no skeleton come first: those
+    /// whose [`Wearing`](crate::Wearing) names no package, then those whose
+    /// wearing names one, then the rest. A refusal that names worn skeletons is
+    /// also reached through each one's [`files`](WornSkeleton::files).
     #[must_use]
     pub fn refusals(&self) -> &[Refusal] {
         &self.refusals
     }
+}
+
+/// For each package a refused unidentified wearing names, the refusals that
+/// could be that package: those naming it, in report order, then clones of the
+/// ones naming none.
+///
+/// `refusals` is sorted by [`Group`]: the first `unnamed_count` name no package
+/// and the next ones, up to `unidentified_count`, each name one.
+fn undetermined_by_package(
+    refusals: &[Refusal],
+    unnamed_count: usize,
+    unidentified_count: usize,
+) -> BTreeMap<String, Vec<Refusal>> {
+    let mut undetermined: BTreeMap<String, Vec<Refusal>> = BTreeMap::new();
+    for refusal in &refusals[unnamed_count..unidentified_count] {
+        let Some(package) = refusal.package_named() else {
+            unreachable!("the sort put every refusal naming no package before this range")
+        };
+        undetermined
+            .entry(package.to_owned())
+            .or_default()
+            .push(refusal.clone());
+    }
+    for list in undetermined.values_mut() {
+        list.extend(refusals[..unnamed_count].iter().cloned());
+    }
+    undetermined
 }
 
 /// Gives `refusal` to each worn skeleton it names, which only a refusal that

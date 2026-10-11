@@ -346,6 +346,7 @@ mod tests {
                 wearings: vec![RefusedWearing {
                     manifest: "member/Cargo.toml".to_owned(),
                     dependency: Some("ci".to_owned()),
+                    package: Some("a-skeleton".to_owned()),
                 }],
                 paths: Vec::new(),
             }]

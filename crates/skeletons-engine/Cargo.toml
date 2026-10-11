@@ -110,8 +110,8 @@ commands = [
 test-util = []
 
 # docs.rs builds with the default features, which would leave `task()`, the
-# item this crate's description is about, off the page. `test-util` stays off:
-# it compiles test seams and adds nothing to a page.
+# one public item `commands` adds, off the page. `test-util` stays off: it
+# compiles test seams and adds nothing to a page.
 [package.metadata.docs.rs]
 features = ["commands"]
 

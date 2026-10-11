@@ -7,7 +7,7 @@
 //! network only when it is handed [`Network::Allowed`]. [`survey()`] renders
 //! every worn skeleton and compares what it renders with the files on disk,
 //! and writes nothing. The items they take and return carry the answer: each
-//! worn skeleton, each file it claims that could be compared with its state,
+//! worn skeleton, each claimed file that could be compared, with its state,
 //! and each refusal with the wearings and paths it concerns.
 //!
 //! ## Features

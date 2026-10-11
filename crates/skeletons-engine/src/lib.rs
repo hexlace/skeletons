@@ -12,8 +12,8 @@
 //!
 //! ## Features
 //!
-//! - `commands` adds `task()`, the group of the three commands `check`,
-//!   `sync` and `wear` that `skeletons` hands on as its own bundle, with the
+//! - `commands` adds `task()`, the group of the commands `check`, `sync`,
+//!   `wear` and `remove` that `skeletons` hands on as its own bundle, with the
 //!   command-line framework, the network client and the manifest editor they
 //!   are built on. It is off by default, and `skeletons` is the one that turns
 //!   it on.
@@ -85,7 +85,7 @@ mod acceptance;
 #[cfg(test)]
 mod doc_citations;
 
-/// The group of the three commands `check`, `sync` and `wear`.
+/// The group of the commands `check`, `sync`, `wear` and `remove`.
 ///
 /// This is what `skeletons` hands on as its own `task()`, for a command line to
 /// mount under whatever name imports it.

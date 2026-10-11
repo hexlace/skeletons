@@ -1,5 +1,5 @@
-//! `cargo ritual skeletons check`, `sync` and `wear` all answer, and each prints
-//! exactly its help text.
+//! `cargo ritual skeletons check`, `sync`, `wear` and `remove` all answer, and
+//! each prints exactly its help text.
 //!
 //! No fixture workspace is needed: `--help` answers the same regardless of
 //! the working directory.

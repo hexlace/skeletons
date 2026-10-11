@@ -2,8 +2,8 @@
 //! or when git says the work tree is not clean, or that git does not read a
 //! file the command writes.
 //!
-//! `sync` and `wear` refuse on the same questions in the same shapes, so the
-//! messages live here once and each takes the [`WritingCommand`] that is
+//! `sync`, `wear` and `remove` refuse on the same questions in the same shapes,
+//! so the messages live here once and each takes the [`WritingCommand`] that is
 //! asking: it supplies the command's name, what it would write over and the
 //! remedy that runs it again. Nothing here names a command itself.
 

@@ -1,14 +1,18 @@
 # Wearing a skeleton
 
 A reference for wearing a skeleton: the wearing table, `wear`, which writes it,
-where bones land, what `check` and `sync` say, and every way each can refuse.
-The reasons behind each rule are in [design.md](design.md); this document is
-what a wearing repository works from directly.
+`remove`, which takes it out again, where bones land, what `check` and `sync`
+say, and every way each command can refuse. The reasons behind each rule are in
+[design.md](design.md); this document is what a wearing repository works from
+directly.
 
 The commands are written for the default dependency key, `skeletons`. A project
 that depends on `skeletons` under another key runs them under that key
-(`cargo ritual tools check`), and the tool's own messages name only `check`,
-`sync` and `wear`, so they read the same either way.
+(`cargo ritual tools check`), and the tool's own messages name only the
+`check`, `sync`, `wear` and `remove` tasks, so they read the same either way.
+The one exception is `remove`'s refusal of a crate worn under several keys,
+which has to show a command with a key in it, and shows the command as the
+command line was reached.
 
 ## The wearing table
 
@@ -874,9 +878,11 @@ added a-dependabot-skeleton 0.1.0 to ritual/Cargo.toml as the dev-dependency `de
 commit ritual/Cargo.toml and Cargo.lock, then run the `sync` task to write its files
 ```
 
-The next step names the `sync` task and nothing before it: a task is never told
-the key it is mounted under, so it cannot say how its command line reaches
-`sync`. It gives the order itself: `sync` writes only into a clean work tree, so
+The next step names the `sync` task and nothing before it. `wear` is handed its
+command line and could spell the full command, but that command holds only
+where the project's cargo alias is the binary's name, and the line reads the
+same however the command line is reached, so it names the task and the wearer
+recognises the subcommand on their own command line. It gives the order itself: `sync` writes only into a clean work tree, so
 the line says to commit the manifest it names, and `Cargo.lock` (always at the
 workspace root), before running it. When git does not track `Cargo.lock` (a
 project that ignores it), the line names the manifest alone and reads `commit
@@ -1127,6 +1133,388 @@ before putting the original back, so an edit to the manifest or the lockfile
 made by something else while `wear` runs is overwritten, and Cargo's own
 caches, which are outside the project, are not touched. Git is the undo for
 everything else, which is why the work tree has to be clean first.
+
+## Remove
+
+```text
+cargo ritual skeletons remove <KEY|CRATE> [--delete-files | --keep-files]
+```
+
+`remove` stops a repository wearing a skeleton. It takes out the two pieces
+`wear` writes, the dependency and the wearing table, brings `Cargo.lock`
+current, and deals with the files `sync` wrote. It writes into the same one
+manifest `wear` does, the command line's own, and on a manifest `wear` wrote it
+is the inverse: the manifest comes back byte for byte as it was before. It
+makes sure the project is still one Cargo can read without the wearing, and
+`check` afterwards no longer lists the skeleton.
+
+**The argument** is the wearing's dependency key or the skeleton's crate name.
+The candidates are the keys under `[package.metadata.skeletons]` in the command
+line's own manifest, **including wearings `check` refuses**: a table whose
+dependency is no skeleton, or which has no dependency at all, is something
+`wear` could have half written and a person wants gone, so calling its key
+"not a key" would be false. `options` and `verbatim` are never candidates, since
+they are a skeleton's own declaration and not a wearing. The name is read in
+this order:
+
+1. **A key wins over a crate of the same name.** Refusing such a name as
+   ambiguous would make that key impossible to remove, while the other wearing
+   is always reachable by its own key.
+2. **Otherwise a crate that exactly one key wears is that wearing.** A crate
+   name is compared exactly, with `-` and `_` not taken as the same. A wearing
+   with no dependency has no crate for a name to mean, so only its key reaches
+   it.
+3. **A crate that several keys wear is refused**, naming the keys and showing
+   the command with the first of them.
+4. **A name that is neither is refused**, listing the keys the manifest wears.
+
+A name that is worn only in a manifest other than the command line's own is
+refused too, naming that manifest (see the limits at the end of this section).
+
+**The files.** A wearing's files are the bones `check` lists for it, whether
+they match, have changed or are missing. What `remove` does with them depends
+on the flag, and the flags exclude each other: giving both is a usage error,
+which exits with status 2 before `remove` looks at the project.
+
+- **Neither flag** deletes the files when that is plainly what was asked and
+  never guesses when it is not. If every claimed file that is in the work tree
+  still matches what the skeleton renders, they are the skeleton's files,
+  unchanged, and stopping wearing it means they go: all of them are deleted. If
+  any one has changed, `remove` deletes none of them, not even the ones that
+  match, and says which have changed and where all of them are, so the project
+  can keep them as its own or clear them out by hand.
+- **`--delete-files`** deletes every claimed file that is in the work tree,
+  changed or not. It is for a project that wore a large skeleton, edited a few
+  of its files and now wants all of it gone.
+- **`--keep-files`** stops wearing the skeleton and leaves every claimed file
+  where it is, changed or not, and asks nothing about them.
+
+A claimed file that is missing is nothing to delete. It is no reason to refuse
+and no reason to keep the others, and no line names it. When none of the files
+is in the work tree, the output says so.
+
+Whatever mode deletes a file, it deletes it only if git could give it back. A clean
+work tree does not say that: an untracked file git ignores, a file git is told
+not to read from the work tree, and a file under a content filter that does not
+write back what it was handed all read clean while holding bytes no commit has.
+So each file about to be deleted is put to the proof `sync` requires before it
+overwrites one (see [Sync](#sync)): the file holds exactly what git would check
+out for its index entry. A file that passes is deleted. One that does not is
+**left in place and named, with the reason**, and the wearing is still removed.
+A file left like this does not count as changed, so it does not make a bare
+`remove` keep the others. The reasons are:
+
+| The line says | Because |
+|---|---|
+| `git does not track it` | the index has no entry for the file |
+| `it is marked skip-worktree in git's index` (or `assume-unchanged`, or both) | git is told not to read it from the work tree |
+| `it is not what git would check out for it` | its bytes differ from what git's checkout, content filter included, would write |
+| `git could not show that it holds it` | every other way the proof fails: a conflicted, linked or submodule entry, a mode other than a regular file's, a checkout that failed, a file that is not a regular file on disk, or one that has gone or changed since `remove` looked |
+
+After the files are gone, **a directory the deletion leaves empty is removed**,
+deepest first, and so is each directory above it that this empties in turn.
+Git tracks no directory, so the tree then equals a checkout of the commit the
+person makes. A directory that still holds anything stays, and so does every
+directory above it. The workspace root is never removed.
+
+**What it writes**, in this order:
+
+1. The manifest, edited in place. The dependency under the key comes out of
+   every dependency table of the command line's manifest that declares it
+   (`dependencies`, `dev-dependencies`, `build-dependencies`, and each of them
+   under a `[target.…]` table), a table that leaves empty goes with its header,
+   and `[package.metadata.skeletons.<key>]` comes out whatever it holds, along
+   with a `metadata` or `skeletons` table that held nothing else. A comment
+   attached to a removed entry goes with it, and everything else stays. The
+   result is compared against an independent parse of the manifest before it is
+   kept: it must be the original less those entries. `cargo remove` is not used
+   (see the limits at the end of this section).
+2. `Cargo.lock`, brought current by running `cargo metadata` without `--locked`,
+   which drops the package entries only the removed dependency needed and
+   rewrites the file in Cargo's own form. It makes no index update when the
+   lockfile already satisfies what is left, and it may reach the network, as
+   Cargo does, for a source the lockfile pins. Whether the run changed the
+   lockfile is observed from its bytes before and after.
+3. A read of the workspace back, `--locked`, through the reader `check` and
+   `sync` use. It proves the lockfile current and the manifest loadable, and
+   `remove` keeps what it wrote only if the reader finds no wearing table at
+   the key, worn or refused, and Cargo reports no dependency declared under it.
+4. The files. Each file to be deleted is moved into a directory the run reserves
+   at the workspace root, `.skeletons-remove`, under a number for its name, and
+   then each emptied directory is removed. Nothing is deleted yet. Only when the
+   whole run has succeeded is `.skeletons-remove` deleted, and with it the
+   files.
+
+The files go last, so the manifest is already changed when a move fails. When
+no file is to be deleted nothing is reserved and nothing is moved.
+
+**What it prints.** On success, lines on stdout: what was taken out, a line for
+each file or one for all of them, and what to commit. The first line names the
+wearing as `check` reads it. A worn skeleton is named with the version Cargo
+locked. A wearing `check` refuses is not a skeleton to name, so the line says
+what was taken out, and says when there was no dependency to take. That is why
+`remove` surveys the files whatever the flag, `--keep-files` included: whether
+`check` refuses the wearing decides how this line reads, while the files
+themselves are still never asked about for `--keep-files`.
+
+```text
+stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
+took the dependency `tidy` and [package.metadata.skeletons.tidy] out of ritual/Cargo.toml
+took [package.metadata.skeletons.ghost] out of ritual/Cargo.toml; no dependency was declared under `ghost`
+```
+
+Those are the three forms of the first line: a worn skeleton, a refused wearing
+that has a dependency, and a refused wearing that has none. The last line says
+what to commit: the manifest always, `Cargo.lock` when this run changed it and
+git tracks it (`git add` refuses a lockfile git ignores, and a lockfile Cargo
+left alone has nothing to commit), and the deleted files when there are any. The
+lines between them depend on the flag.
+
+A bare `remove` with every file matching, for a skeleton worn as `toolchain`
+that claims `rust-toolchain.toml` and `rustfmt.toml`:
+
+```text
+stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
+deleted rust-toolchain.toml
+deleted rustfmt.toml
+commit ritual/Cargo.toml, Cargo.lock and the 2 deleted files to record it
+```
+
+A bare `remove` where `rustfmt.toml` has changed. Every file that is there is
+listed in path order, a line each saying whether it matches the skeleton or has
+changed, and one summary line says why they were all kept:
+
+```text
+stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
+kept rust-toolchain.toml, which matches the skeleton
+kept rustfmt.toml, which has changed
+kept all 2 of its files, because 1 has changed from what the skeleton renders: they are the project's own now, to keep or to delete by hand
+commit ritual/Cargo.toml and Cargo.lock to record it
+```
+
+The summary counts the files that changed (`2 have changed` for two), and
+a skeleton with one file says `kept its file, because it has changed from what
+the skeleton renders: it is the project's own now, to keep or to delete by
+hand`.
+
+`remove --delete-files`, where `rust-toolchain.toml` is missing and
+`rustfmt.toml` has changed. The missing file is not named, and the changed one
+is deleted:
+
+```text
+stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
+deleted rustfmt.toml
+commit ritual/Cargo.toml, Cargo.lock and the 1 deleted file to record it
+```
+
+`remove --keep-files`:
+
+```text
+stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
+left every file it claims in place
+commit ritual/Cargo.toml and Cargo.lock to record it
+```
+
+A file git could not give back is named in the place of its `deleted` line,
+and the others are deleted as they would have been. Here `rustfmt.toml` is
+ignored by git and untracked:
+
+```text
+stopped wearing toolchain-skeleton 0.3.0: took the dependency `toolchain` and [package.metadata.skeletons.toolchain] out of ritual/Cargo.toml
+deleted rust-toolchain.toml
+left rustfmt.toml in place: git does not track it, so git could not give it back; delete it by hand if it should go
+commit ritual/Cargo.toml, Cargo.lock and the 1 deleted file to record it
+```
+
+The other reasons take the place of `git does not track it`, each word for word
+as the table above gives it, with `it is marked skip-worktree and
+assume-unchanged in git's index` for a file marked both ways. When no claimed
+file is in the work tree, the line between the first and the last is:
+
+```text
+none of its files is in the work tree, so there was nothing to delete
+```
+
+Cargo's own output is not repeated. Every name in a line is escaped, as
+everywhere in this document.
+
+**It refuses before it writes anything** when the request or the project is
+wrong, in this order. Every message below is one line on stderr after the
+command line's own prefix (`ritual: `), the process exits with status 1, and
+each ends by saying what to do. (A usage error, a missing name or both flags,
+is the argument parser's and exits with status 2 before any of these.)
+
+- the workspace cannot be read, which is `check`'s abort for the same four
+  causes (see [Refusals](#refusals)). `cargo metadata` is run `--locked`, so a
+  stale or missing lockfile is refused before bringing it current could rewrite
+  more of it than the skeleton, and the lockfile message says why `remove` would
+  otherwise write it. A `cargo metadata` failure reads as `check`'s does:
+
+  ```text
+  Cargo.lock is missing or out of date, and remove changes it only to take the skeleton out; run `cargo update --workspace`, then run the `remove` task again
+  ```
+- the command line's package is not a member of the workspace the command ran
+  in:
+
+  ```text
+  this command line is built from the package `skeletons-ritual`, which is not a member of the workspace at /path/to/workspace, so remove wrote nothing: run the `remove` task from inside the project this command line belongs to
+  ```
+- the name is neither a key of the manifest's wearings nor the crate of one.
+  The line lists the keys there are, in key order: for one key it ends
+  ``its key is `ci`, so give the `remove` task that one``, for two or more
+  ``its keys are `a`, `b` and `c`, so give the `remove` task one of them``, and
+  for none it says the manifest wears no skeleton:
+
+  ```text
+  `nope` is neither a key ritual/Cargo.toml wears a skeleton under nor the crate of one, so remove wrote nothing; its keys are `ci` and `dependabot`, so give the `remove` task one of them
+  `nope` is neither a key ritual/Cargo.toml wears a skeleton under nor the crate of one, so remove wrote nothing; its key is `ci`, so give the `remove` task that one
+  `nope` is neither a key ritual/Cargo.toml wears a skeleton under nor the crate of one, so remove wrote nothing; ritual/Cargo.toml wears no skeleton
+  ```
+- the name is worn only in a manifest other than the command line's own, as a
+  key or as a crate. The line names each manifest and key, and says which
+  manifest `remove` does change and why; it reads `those manifests` when the
+  wearings are in more than one:
+
+  ```text
+  `tidy` is worn in tools/Cargo.toml as `tidy`, and remove changes only ritual/Cargo.toml, the manifest of the package this command line is built from, so remove wrote nothing; take the dependency and the [package.metadata.skeletons.<key>] table out of that manifest by hand
+  ```
+- the name is a crate that several keys wear and the key of none. The line
+  shows the full command, with the first of the keys and the flag that was
+  typed. It is the one line that does, because it has to show a command with a
+  key in it, and the command is spelled as the command line was reached:
+
+  ```text
+  `passthrough-plain` is worn under more than one key in ritual/Cargo.toml, `ci` and `ci-next`, so remove wrote nothing; remove one by its key, such as `cargo ritual skeletons remove ci`
+  ```
+
+  With `--keep-files` typed, the command ends `remove ci --keep-files`.
+- the files the wearing claims cannot be known, and the mode would delete them
+  (neither flag, or `--delete-files`). `check` refuses the wearing, whether for
+  its own defect or because one of its bones overlaps another's, so the survey
+  has dropped some of its files, and deleting from what is left would be a
+  guess. Each reason is `check`'s own refusal message, as it stands, joined by
+  `; `. `--keep-files` is the way out, since it asks nothing about the files:
+
+  ```text
+  remove cannot tell which files `dependabot` claims, so it wrote nothing: <check's refusal>; fix that and run the `remove` task again, or give it --keep-files to stop wearing `dependabot` and leave every file in place
+  ```
+- the work tree is not clean, or git cannot be asked. This is the question
+  `sync` asks (see [Sync](#sync)), with the whole tree counted, asked after the
+  name and the files so a request that is wrong is refused as wrong whether or
+  not the tree is clean. The per-path lines are `sync`'s, on stdout, then the
+  summary on stderr, worded for `remove`:
+
+  ```text
+  ritual/Cargo.toml has uncommitted changes
+  the working tree has 1 uncommitted change, so remove wrote nothing: it writes only into a clean working tree, where git holds the manifest it changes, any Cargo.lock git tracks and the files it deletes; commit, stash or move it, then run the `remove` task again
+  ```
+
+  Outside git it reads `/path/to/workspace is not inside a git work tree, so
+  remove wrote nothing: without git there is no undo for what it changes and
+  deletes; commit the workspace to git first`. Every other git refusal is
+  `sync`'s with `remove` for `sync`, `` run the `remove` task outside a git hook
+  (the `check` task works inside one)`` in the lines about a redirecting
+  variable, and `` run the `remove` task again`` in the timed-out ones.
+- the manifest or `Cargo.lock` is a file git cannot hand back. As in `wear`, a
+  clean work tree says nothing about a file git is told not to read, so
+  `remove` asks git's index about the two files it changes. The manifest has to
+  be tracked and read from the work tree, and so does a `Cargo.lock` that git
+  tracks; an ignored or untracked `Cargo.lock` is allowed, and the last line
+  then leaves it out of what to commit:
+
+  ```text
+  ritual/Cargo.toml is marked skip-worktree in git's index, so git does not read its bytes from the work tree and would ignore what remove wrote there: run `git update-index --no-skip-worktree -- ritual/Cargo.toml`, then run the `remove` task again
+  ritual/Cargo.toml is not tracked by git, so remove wrote nothing: git could not give back what remove changes in it; run `git add -- ritual/Cargo.toml` (`git add -f -- ritual/Cargo.toml` if a .gitignore rule matches it) and commit, then run the `remove` task again
+  ```
+- the manifest, or a `Cargo.lock` that exists, cannot be written in place. The
+  manifest is rewritten in place and the undo restores in place, so either would
+  fail with the wearing already half taken out. The question is `wear`'s, an
+  open for writing that writes no byte:
+
+  ```text
+  ritual/Cargo.toml cannot be written in place, so remove wrote nothing: remove changes it in place, and the operating system refused to open it for writing: Permission denied (os error 13); make it writable, then run the `remove` task again
+  ```
+- git cannot be asked whether it could give a file back: the question that
+  decides a file's fate could not be put at all. These are the git refusals
+  above, `sync`'s lines worded for `remove`, and they come before anything is
+  written. A file git answers about, even to say it could not give the file
+  back, is not a refusal: it is left in place and named.
+- something is at `.skeletons-remove` in the workspace root, and a file is to be
+  deleted. Nothing is checked when no file is, since nothing is reserved:
+
+  ```text
+  .skeletons-remove is in the way at the workspace root, so remove wrote nothing: it moves the files it deletes there first, so that a failure can move them back; delete or move it, then run the `remove` task again
+  ```
+
+**It undoes what it did when it fails after the first write.** Everything
+`remove` writes goes through ritual's rollback, which records the manifest,
+`Cargo.lock`, and each file and directory it moves or removes, and, when the run
+returns a failure, puts them all back as they were. A file that was moved comes
+back whole, mode included, and a directory that was removed is created again.
+That is why the files are moved into `.skeletons-remove` during the run and
+deleted only after it has succeeded: rollback restores a file it wrote from its
+bytes, which would lose the mode, and records no deletion at all. When the undo
+put something back, the message ends with `; ritual put the project back as it
+found it`. When there was nothing to put back, because the run failed before it
+had changed any file, the message is the failure exactly as it was raised. When
+the undo itself fails, the message names every path that was not put back and
+says to check it before `` running the `remove` task again``, as `wear`'s does.
+
+These are the failures that come after the first write, each of which ends with
+that clause when something had been changed:
+
+```text
+remove could not read ritual/Cargo.toml to take `dependabot` out of it: <the operating system's words>
+remove could not take `dependabot` out of ritual/Cargo.toml without changing anything else in it (<what differed>); this is a defect in skeletons
+remove could not read Cargo.lock to see whether bringing it current changed it: <the operating system's words>
+remove took `dependabot` out of ritual/Cargo.toml, and Cargo refused what was left: <Cargo's words>
+remove took `dependabot` out of ritual/Cargo.toml, and reading it back still finds [package.metadata.skeletons.dependabot]; this is a defect in skeletons
+remove took `dependabot` out of ritual/Cargo.toml, and reading the workspace back no longer finds the package this command line is built from; this is a defect in skeletons
+remove took `dependabot` out of ritual/Cargo.toml, and Cargo still reports a dependency under `dependabot`: it is declared somewhere remove does not edit; take it out by hand, then run the `remove` task again
+remove could not create .skeletons-remove to move the files it deletes into: <the operating system's words>
+remove could not move rustfmt.toml out of the work tree: <the operating system's words>
+remove could not remove .github, which deleting its files left empty: <the operating system's words>
+```
+
+Cargo's words are escaped onto one line. The relock and the read back can also
+fail as the workspace read before the write does (Cargo cannot be run, its
+output cannot be read, the lockfile is missing or out of date), in those same
+words. The two that are defects in `skeletons` are returned failures and not
+panics for the reason `wear`'s are: rollback undoes a failure and does not undo
+a panic, so a panic there would leave the project half written.
+
+**One failure comes after success.** Once the run has succeeded the success
+lines are printed, and only then is `.skeletons-remove` deleted. If that fails,
+the wearing is gone and every file is out of the work tree, so nothing is put
+back, and the line is the last thing printed, after the success lines, with the
+exit status 1:
+
+```text
+remove stopped wearing `dependabot` and moved its files into .skeletons-remove, which it could not then delete: <the operating system's words>; delete .skeletons-remove by hand
+```
+
+**The limits.**
+
+- **It changes one manifest.** The command line's own is the only one `remove`
+  edits, as it is the only one `wear` writes. A dependency that member inherited
+  from `[workspace.dependencies]` leaves the member's manifest, and the entry in
+  the workspace root stays, unused. A wearing in another member is refused by
+  name, as above, and is taken out by hand.
+- **A `[features]` entry that still names the dependency's key makes Cargo
+  refuse what is left.** `remove` does not rebuild `cargo remove`'s clean-up of
+  features. The refusal is Cargo's, in Cargo's words, and the project is put
+  back; edit the feature, then run `remove` again.
+- **The holding directory has a name.** `.skeletons-remove` at the workspace
+  root is reserved while files are being deleted, and a project that has
+  something there has to move it first.
+- **It proves each file once, before it writes anything.** Between that proof
+  and the move, which waits on Cargo bringing `Cargo.lock` current, an edit
+  made by something else to a file `remove` is about to delete is moved and
+  deleted with it. Git is the undo, which is why the work tree has to be clean
+  first.
+- **The undo does not give back what rollback cannot.** A panic, and a change
+  made around the run, are the two things named under [Wear](#wear), and they
+  hold here.
 
 ## `--json`
 
@@ -1594,4 +1982,6 @@ anything — its own work-tree checks (see [Sync](#sync)) only ever run
 once the workspace itself has been read successfully. `wear` aborts the same
 way too, with `check`'s wording for a `cargo metadata` failure and its own for
 the lockfile (see [Wear](#wear), which also holds the refusals only `wear`
-makes).
+makes), and so does `remove`, with the same wording for a `cargo metadata`
+failure and its own for the lockfile (see [Remove](#remove), which also holds
+the refusals only `remove` makes).

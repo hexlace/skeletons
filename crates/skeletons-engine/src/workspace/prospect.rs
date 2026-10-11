@@ -1,10 +1,10 @@
-//! What `wear` has to know about the workspace before it writes anything: the
-//! workspace as `check` and `sync` read it, and the one member it writes into,
-//! with every dependency that member already declares.
+//! What `wear` and `remove` have to know about the workspace before they write
+//! anything: the workspace as `check` and `sync` read it, and the one member
+//! they write into, with every dependency that member already declares.
 //!
 //! Both come from the one `cargo metadata` document, so a refusal `wear` makes
-//! before `cargo add` runs is made on exactly the workspace the later read
-//! back will see.
+//! before `cargo add` runs, or `remove` before it edits the manifest, is made
+//! on exactly the workspace the later read back will see.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use super::schema::{Document, Package, as_toml_table};
 use super::{Network, ReadWorkspaceError, Workspace, cargo_metadata, from_document, locate};
 
-/// The workspace, and the member `wear` writes into, if the workspace has it.
+/// The workspace, and the member `wear` and `remove` write into, if the workspace has it.
 pub(crate) struct Prospect {
     pub(crate) workspace: Workspace,
     /// `None` when no workspace member has the package's name, which is a
@@ -20,7 +20,7 @@ pub(crate) struct Prospect {
     pub(crate) member: Option<Member>,
 }
 
-/// The workspace member `wear` writes into.
+/// The workspace member `wear` and `remove` write into.
 pub(crate) struct Member {
     /// The member's manifest as Cargo reports it, which is absolute.
     pub(crate) manifest_path: PathBuf,
@@ -78,7 +78,7 @@ pub(crate) fn read_prospect(
 /// The workspace member named `package_name`, or `None` when no member is.
 ///
 /// A dependency that happens to carry the name is not a member, so it is not
-/// found: `wear` writes only into a package of the workspace.
+/// found: `wear` and `remove` write only into a package of the workspace.
 fn member_of(document: &Document, package_name: &str) -> Option<Member> {
     let package = document
         .packages
@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn a_package_outside_the_workspace_is_not_a_member() {
         // `outside` is in `packages`, as every dependency is, but is not one of
-        // the workspace's own, so `wear` never writes into it.
+        // the workspace's own, so neither `wear` nor `remove` writes into it.
         let document = one_member("inside", "null", "");
 
         assert!(member_of(&document, "outside").is_none());
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn every_key_of_the_skeletons_table_is_kept_whatever_it_holds() {
         // A key holding a table, one holding a string and a reserved word are
-        // all keys: `wear` only asks whether its own key is among them.
+        // all keys: `wear` and `remove` only ask whether their own key is among them.
         let metadata = r#"{"skeletons": {"a": {}, "b": "text", "options": {}}}"#;
         let member = member_of(&one_member("m", metadata, ""), "m").expect("m is a member");
 

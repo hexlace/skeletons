@@ -4,9 +4,10 @@
 //! `[package.metadata.skeletons.<key>]` table out of the running command
 //! line's own manifest, brings `Cargo.lock` current, and deletes the files the
 //! skeleton wrote only when that is plainly what was asked. Every decision it
-//! makes, and every word it says, is a pure function of values in the first
-//! four of this module's children, so each is held by a test that touches no
-//! disk, no process and no git; the next three are the effects, each held by a
+//! makes, and every word it says, is a pure function of values in
+//! [`resolve`], [`files`], [`manifest`], [`refusal`], [`message`] and
+//! [`confirm`], so each is held by a test that touches no disk, no process and
+//! no git. [`give_back`] and [`deletion`] are the two effects, each held by a
 //! test against a real directory or repository:
 //!
 //! - [`resolve`] reads the name the wearer typed as a key or a crate, and
@@ -17,11 +18,11 @@
 //!   independent parse;
 //! - [`refusal`] and [`message`] are the one place each refusal, failure and
 //!   success line is worded;
+//! - [`confirm`] reads the workspace back and checks that the wearing is gone;
 //! - [`give_back`] asks git whether it could give each file back, which
 //!   settles the files [`files`] plans to delete;
 //! - [`deletion`] moves those files out of the work tree where a failure can
-//!   move them back, and deletes them for good once the run has succeeded;
-//! - [`confirm`] reads the workspace back and checks that the wearing is gone.
+//!   move them back, and deletes them for good once the run has succeeded.
 //!
 //! This module is the command. It settles everything it can refuse before it
 //! writes anything, then does all of its writing inside [`rollback::attempt`],
@@ -153,8 +154,11 @@ struct Prepared {
 /// more of it than the skeleton, and so that no read or check made here
 /// rewrites the lockfile: a refusal leaves it as it was. What that read holds
 /// answers every refusal that is about the name and the manifest as they stand,
-/// and finds the crate `remove` writes into. The files are surveyed and planned
-/// next, which `--keep-files` never does. The work tree is asked after those,
+/// and finds the crate `remove` writes into. The files are surveyed next, in
+/// every mode, because whether `check` refuses the wearing decides how the
+/// first success line names it, and then planned: `--keep-files` plans to touch
+/// none, so a wearing whose files cannot be known stops nothing there and every
+/// other mode refuses it. The work tree is asked after those,
 /// so a request that is wrong is refused as wrong whether or not the tree is
 /// clean, and then the manifest and lockfile are proven ones git can hand back
 /// ([`hand_back::check`]) and can be written in place ([`writable::check`]),

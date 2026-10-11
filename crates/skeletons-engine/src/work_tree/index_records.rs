@@ -2,9 +2,10 @@
 //! run under the shared local bounds and read through
 //! [`index_entry`](super::index_entry).
 //!
-//! `sync` asks it of every path it would write, and `wear` of the two files it
-//! changes, so the command, its bounds and the reading of its answer live here
-//! once. What a record then means for a command is that command's to say.
+//! `sync` asks it of every path it would write, `remove` of every file it
+//! would delete, and `wear` and `remove` of the two files they change, so the
+//! command, its bounds and the reading of its answer live here once. What a
+//! record then means for a command is that command's to say.
 
 use std::process::Command;
 

@@ -471,8 +471,10 @@ mod tests {
     #[test]
     fn the_lockfile_remedy_names_the_command_that_aborted_without_a_command_line() {
         // The abort message fills the subcommand from the command that
-        // aborted, and names nothing before it: the task is told neither its
-        // mount key nor how its command line is reached.
+        // aborted, and names nothing before it. `check` and `sync` are built
+        // without their command line, so neither is told its mount key or how
+        // it was reached, and the remedy is worded as the one `wear` and
+        // `remove` print, which are handed theirs.
         let expected = |command: &str| {
             format!(
                 "Cargo.lock is missing or out of date, and `skeletons` reads it without ever \

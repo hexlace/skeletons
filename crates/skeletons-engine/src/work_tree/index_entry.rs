@@ -1,8 +1,8 @@
 //! Parsing `git ls-files -v --stage -z`'s own output — one record per index
 //! entry, `<tag> SP <mode> SP <oid> SP <stage> TAB <path> NUL` — and reading
 //! the one letter that says whether git looks at the file in the work tree.
-//! `sync` proves every path it writes against these records, and `wear` the
-//! two files it changes.
+//! `sync` proves every path it writes against these records, `remove` every
+//! file it would delete, and `wear` and `remove` the two files they change.
 
 use crate::git::ObjectId;
 

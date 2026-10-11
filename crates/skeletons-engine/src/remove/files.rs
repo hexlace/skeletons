@@ -239,8 +239,10 @@ impl Outcome {
 
 /// Decides what to try with the files of one wearing.
 ///
-/// `claimed` is asked for only when the mode needs the files: `--keep-files`
-/// touches none, so it needs no survey and the closure is never called.
+/// `claimed` is called only when the mode needs to know the files:
+/// `--keep-files` touches none, so the closure is never called and files that
+/// cannot be known stop nothing. A caller that has surveyed for another reason
+/// hands the answer in through the closure all the same.
 ///
 /// # Errors
 ///
@@ -560,8 +562,9 @@ mod tests {
 
     #[test]
     fn keep_files_leaves_everything_and_never_asks_for_the_files() {
-        // `--keep-files` needs no survey, so the closure that would run one
-        // must not be called, whether the files could have been known or not.
+        // `--keep-files` has no use for the files, so the closure that would
+        // hand them over must not be called, whether they could have been
+        // known or not.
         let asked = std::cell::Cell::new(0_usize);
         let claimed = || {
             asked.set(asked.get() + 1);

@@ -3,8 +3,8 @@
 //! ## What this crate provides
 //!
 //! [`task()`] is the whole of this crate's public API, as it is for any
-//! ritual task: the bundle a project's command line mounts, holding `check`,
-//! `sync` and `wear` as its three commands.
+//! ritual task: the bundle a project's command line mounts, holding the
+//! commands `check`, `sync`, `wear` and `remove`.
 
 use rituals::Task;
 

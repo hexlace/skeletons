@@ -84,7 +84,7 @@ engine and the library without the engine's feature included.
 Three crates are published, and they release together:
 
 - `crates/skeletons-engine` is the engine: reading a workspace, rendering,
-  surveying, and, behind its `commands` feature, the three commands with
+  surveying, and, behind its `commands` feature, the commands with
   their wording. It is published only because the other two depend on it, and
   it promises no stability.
 - `crates/skeletons` is the ritual bundle a project mounts: `task()` over the

@@ -2,9 +2,9 @@
 //! and the refusals they lead to are worded for the command the wearer ran.
 //!
 //! `sync`, `wear` and `remove` all write into the work tree and all refuse
-//! unless git can say what a write would lose. The refusals are the same refusals, and
-//! each names the command that wrote nothing and the remedy that runs it
-//! again, so each message takes a [`WritingCommand`] for those words.
+//! unless git can say what a write would lose. The refusals are the same
+//! refusals, and each names the command that wrote nothing and the remedy that
+//! runs it again, so each message takes a [`WritingCommand`] for those words.
 
 /// A command that writes into the work tree and so asks git whether it may.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,11 +30,16 @@ impl WritingCommand {
 
     /// The remedy every message that ends by asking for another run gives.
     ///
-    /// It names the command as a task and nothing before it. The task is told
-    /// neither the key it is mounted under nor how its command line is reached,
-    /// so the remedy names only the subcommand, which the wearer recognises on
-    /// their own command line. It says "task" because a bare `sync` is also a
-    /// shell command that flushes buffers, prints nothing and exits 0.
+    /// It names the command as a task and nothing before it. The same line is
+    /// printed by `sync`, which is built without its command line and so is
+    /// told neither the key it is mounted under nor how it was reached, and by
+    /// `wear` and `remove`, which are handed theirs. The remedy reads the same
+    /// however the command line is reached, and the full command
+    /// `CommandLine::cargo_command` gives holds only where the project's cargo
+    /// alias is the binary's name, so the remedy names only the subcommand,
+    /// which the wearer recognises on their own command line. It says "task"
+    /// because a bare `sync` is also a shell command that flushes buffers,
+    /// prints nothing and exits 0.
     pub(crate) const fn run_again(self) -> &'static str {
         match self {
             Self::Sync => "run the `sync` task again",

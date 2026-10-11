@@ -1,6 +1,6 @@
 //! Running an external command with bounded output, and an optional bounded
-//! wait — the one place `check`, `sync` and `wear` ever spawn a process
-//! (`cargo metadata`, `cargo add` and `git`).
+//! wait — the one place `check`, `sync`, `wear` and `remove` ever spawn a
+//! process (`cargo metadata`, `cargo add` and `git`).
 //!
 //! A child's stdout and stderr are read from dedicated threads for as long
 //! as the command runs, so neither pipe can fill up and block the child

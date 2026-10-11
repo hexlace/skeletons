@@ -107,9 +107,10 @@ pub(crate) enum WearingRefusal {
 /// `Allowed` is cargo's own normal fetch of exactly what the lockfile pins, so
 /// a fresh clone whose members were never built still reads. `Refused` runs
 /// cargo with `--offline`: a clone whose sources were never fetched fails with
-/// cargo's own offline error rather than fetching them. `skeletons check` and
-/// `skeletons wear` read with `Allowed`; `skeletons sync` reads with `Refused`,
-/// because writing requires nothing beyond what is already locked.
+/// cargo's own offline error rather than fetching them. `skeletons check`,
+/// `skeletons wear` and `skeletons remove` read with `Allowed`; `skeletons sync`
+/// reads with `Refused`, because writing requires nothing beyond what is
+/// already locked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Network {
     /// Cargo may fetch a locked source it does not already have.

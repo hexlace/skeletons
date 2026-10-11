@@ -110,8 +110,11 @@ impl RefusalKind {
     }
 }
 
-impl From<skeletons_engine::RefusalKind> for RefusalKind {
-    fn from(kind: skeletons_engine::RefusalKind) -> Self {
+impl RefusalKind {
+    // A function of the crate's own rather than `From`: a trait impl naming an
+    // engine type would be public, and put `skeletons-engine` in this crate's
+    // interface.
+    fn from_engine(kind: skeletons_engine::RefusalKind) -> Self {
         match kind {
             skeletons_engine::RefusalKind::NotATable => Self::NotATable,
             skeletons_engine::RefusalKind::ReservedKey => Self::ReservedKey,
@@ -197,7 +200,7 @@ struct RefusalData {
 impl Refusal {
     pub(crate) fn from_record(record: &RefusalRecord) -> Self {
         let data = RefusalData {
-            kind: RefusalKind::from(record.kind),
+            kind: RefusalKind::from_engine(record.kind),
             wearings: record.wearings.iter().map(Wearing::from_engine).collect(),
             paths: record.paths.iter().map(PathBuf::from).collect(),
         };

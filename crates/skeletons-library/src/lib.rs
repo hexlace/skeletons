@@ -78,9 +78,12 @@ const _: () = {
 /// Nothing else is needed. The workspace need not have been built, and
 /// `directory` need not be a git repository. For a workspace whose skeletons
 /// are all `path` dependencies, `cargo generate-lockfile --offline` is enough
-/// to make the lockfile. The call writes nothing, runs no build script, needs
-/// no git, and makes no network request: a source that was never fetched is an
-/// error, never a download.
+/// to make the lockfile. The call writes nothing in the workspace, runs no
+/// build script, needs no git, and makes no network request: a source that was
+/// never fetched is an error, never a download. Cargo may still write to its
+/// own cache under `CARGO_HOME`, as any cargo command may, to unpack a source
+/// it downloaded earlier; where that cache cannot be written, every locked
+/// source must already be unpacked, as `cargo fetch` leaves it.
 ///
 /// A wearing that cannot be read is not an error. It is a [`Refusal`] in the
 /// [`Report`], and every other wearing is still reported.

@@ -3,9 +3,9 @@
 The supported way for a program to ask what [skeletons](https://github.com/hexlace/skeletons#readme)
 would say about a workspace. One function, `check`, reads a workspace and
 returns, as data, which files its worn skeletons claim and whether each one
-matches. It writes nothing, makes no network request, and says nothing in
-words: a caller decides what a drifted file or a refusal means to its own
-users.
+matches. It writes nothing in the workspace, makes no network request, and
+says nothing in words: a caller decides what a drifted file or a refusal means
+to its own users.
 
 A caller that wants the commands themselves, `check`, `sync`, `wear` and
 `remove` with their tables and messages, mounts
@@ -120,6 +120,14 @@ variable is set, exactly as given and an empty value included, and runs `cargo`
 from `PATH` only when it is not set; a value that is not valid Unicode counts
 as not set. A source that was never fetched is an error, because `check` never
 downloads one.
+
+`check` writes nothing in the workspace. Cargo may still write to its own cache
+under `CARGO_HOME`, as any cargo command may: it unpacks a source that was
+downloaded but is not unpacked, which cargo's automatic cache cleaning can
+leave behind, and in an empty `CARGO_HOME` it makes the lock file and
+directories it keeps there. Where `CARGO_HOME` cannot be written, every locked
+source must already be unpacked, as `cargo fetch` leaves it; otherwise cargo
+fails, and `check` reports it as `is_cargo_metadata_failed`.
 
 It needs nothing else. The workspace need not have been built, and its
 directory need not be a git repository. When every skeleton a workspace wears is

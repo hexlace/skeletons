@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use super::super::canonical_git_url::CanonicalGitUrl;
 use super::super::text_error::TextError;
-use super::{RawDependencies, RawDependencyTables, RawManifest, WorkspaceRoot};
+use super::{RawDependencies, RawDependencyTables, RawManifest, Unfollowed, WorkspaceRoot};
 
 /// One dependency a manifest declares, in any of its dependency tables.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +66,8 @@ struct Site<'site> {
     directory: &'site Path,
     /// The workspace a `workspace = true` declaration takes its value from.
     workspace: Option<&'site WorkspaceRoot>,
+    /// What to do with a shape Cargo loads and this reader does not follow.
+    unfollowed: Unfollowed,
 }
 
 /// One declaration's table, with the key it is written under, read by key name.
@@ -80,12 +82,14 @@ struct Written<'written> {
 pub(super) fn workspace_declarations(
     table: Option<&RawDependencies>,
     directory: &Path,
+    unfollowed: Unfollowed,
 ) -> Result<BTreeMap<String, Declaration>, TextError> {
     let site = Site {
         table: "[workspace.dependencies]",
         is_dev: false,
         directory,
         workspace: None,
+        unfollowed,
     };
     let mut declarations = BTreeMap::new();
     for (key, value) in table.into_iter().flatten() {
@@ -99,14 +103,28 @@ pub(super) fn declarations_of(
     raw: &RawManifest,
     directory: &Path,
     workspace: Option<&WorkspaceRoot>,
+    unfollowed: Unfollowed,
 ) -> Result<Vec<Declaration>, TextError> {
     let mut declarations = Vec::new();
-    collect_declarations(&raw.tables, "", directory, workspace, &mut declarations)?;
+    let reading = Reading {
+        directory,
+        workspace,
+        unfollowed,
+    };
+    collect_declarations(&raw.tables, "", &reading, &mut declarations)?;
     for (cfg, tables) in raw.target.iter().flatten() {
         let prefix = format!("target.{cfg}.");
-        collect_declarations(tables, &prefix, directory, workspace, &mut declarations)?;
+        collect_declarations(tables, &prefix, &reading, &mut declarations)?;
     }
     Ok(declarations)
+}
+
+/// What every table of one manifest shares as its dependencies are read: where the manifest is,
+/// the workspace it inherits from, and what to do with a shape this reader does not follow.
+struct Reading<'reading> {
+    directory: &'reading Path,
+    workspace: Option<&'reading WorkspaceRoot>,
+    unfollowed: Unfollowed,
 }
 
 /// Appends the declarations of `tables` to `declarations`. `prefix` is what a reader names the
@@ -114,8 +132,7 @@ pub(super) fn declarations_of(
 fn collect_declarations(
     tables: &RawDependencyTables,
     prefix: &str,
-    directory: &Path,
-    workspace: Option<&WorkspaceRoot>,
+    reading: &Reading<'_>,
     declarations: &mut Vec<Declaration>,
 ) -> Result<(), TextError> {
     let kinds = [
@@ -142,8 +159,9 @@ fn collect_declarations(
         let site = Site {
             table: &label,
             is_dev,
-            directory,
-            workspace,
+            directory: reading.directory,
+            workspace: reading.workspace,
+            unfollowed: reading.unfollowed,
         };
         for (key, value) in table.into_iter().flatten() {
             declarations.push(declaration(key, value, &site)?);
@@ -284,10 +302,17 @@ impl Written<'_> {
 
     /// The git source of the entry whose `git` is `text`, with the one reference it writes.
     ///
-    /// A URL with a query of its own is refused, an empty query included. Cargo keeps that query
-    /// in the lockfile's source, writing the reference after it, and reads the source back as
-    /// the same one; this reader reads a source's query only as one reference, so the two could
-    /// not be compared, and `?branch=dev` written with no `branch` key would lock as a branch.
+    /// A URL with a query of its own, an empty query included, is refused when the site refuses
+    /// what it does not follow. Cargo keeps that query in the lockfile's source, writing the
+    /// reference after it, and reads the source back as the same one; this reader reads a
+    /// source's query only as one reference, so the two could not be compared, and
+    /// `?branch=dev` written with no `branch` key would lock as a branch.
+    ///
+    /// When the site reads past it, the URL is kept with its query. Such a declaration is never
+    /// the source of a lock entry this reader holds: the lockfile read refuses every git source
+    /// whose query is not exactly one reference, so no entry has a URL with a query to agree
+    /// with ([`locked_source::agrees`](super::super::locked_source::agrees)). It names no worn
+    /// package, as for Cargo, where it is another source.
     fn git_source(&self, text: &str) -> Result<DeclaredSource, TextError> {
         let url = CanonicalGitUrl::parse(text).map_err(|reason| {
             TextError::unreadable(format!(
@@ -295,12 +320,15 @@ impl Written<'_> {
                 self.site.table, self.key
             ))
         })?;
-        if url.has_query() {
-            return Err(TextError::unsupported(format!(
-                "{} `{}`: `git = \"{text}\"` has a query of its own, which Cargo keeps in the \
-                 lockfile's source and this reader does not follow",
-                self.site.table, self.key
-            )));
+        match (url.has_query(), self.site.unfollowed) {
+            (true, Unfollowed::Refuse) => {
+                return Err(TextError::unsupported(format!(
+                    "{} `{}`: `git = \"{text}\"` has a query of its own, which Cargo keeps in \
+                     the lockfile's source and this reader does not follow",
+                    self.site.table, self.key
+                )));
+            }
+            (true, Unfollowed::ReadPast) | (false, Unfollowed::Refuse | Unfollowed::ReadPast) => {}
         }
         Ok(DeclaredSource::Git {
             url,
@@ -335,7 +363,7 @@ mod tests {
 
     use proptest::prelude::*;
 
-    use super::super::PackageManifest;
+    use super::super::{PackageManifest, Unfollowed};
     use super::{CanonicalGitUrl, Declaration, DeclaredSource, GitReference};
     use crate::workspace::without_cargo::text_error::TextErrorKind;
 
@@ -657,6 +685,61 @@ by_tag = { git = "https://example.invalid/g", tag = "v1" }
              of its own, which Cargo keeps in the lockfile's source and this reader does not \
              follow"
         );
+    }
+
+    #[test]
+    fn a_git_url_with_a_query_is_read_with_its_query_when_reading_past_it() {
+        // Reading past is for a reader that compares no source: the declaration is kept, under
+        // its key and the package it names, with the URL as written, query included.
+        let manifest = PackageManifest::parse_with(
+            "[package]\nname = \"a\"\n[dependencies]\n\
+             renamed = { package = \"g\", git = \"https://example.invalid/g?x=1\" }\n",
+            Path::new("/w"),
+            None,
+            Unfollowed::ReadPast,
+        )
+        .expect("a manifest Cargo reads");
+
+        let [declaration] = manifest.declarations() else {
+            panic!(
+                "expected one declaration, got {:?}",
+                manifest.declarations()
+            );
+        };
+        assert_eq!(declaration.key, "renamed");
+        assert_eq!(declaration.package, "g");
+        let DeclaredSource::Git { url, reference } = &declaration.source else {
+            panic!("expected a git source, got {:?}", declaration.source);
+        };
+        assert!(url.has_query(), "{url:?}");
+        assert_eq!(url.as_str(), "https://example.invalid/g?x=1");
+        assert_eq!(*reference, GitReference::DefaultBranch);
+    }
+
+    #[test]
+    fn reading_past_a_query_refuses_every_other_shape_cargo_refuses() {
+        // Only the query is read past. A URL Cargo does not read, and a query beside two
+        // references, are refused as when not reading past.
+        for (declaration, kind) in [
+            (
+                "g = { git = \"git@github.com:foo/bar.git\" }",
+                TextErrorKind::Unreadable,
+            ),
+            (
+                "g = { git = \"https://example.invalid/g?x=1\", branch = \"x\", tag = \"y\" }",
+                TextErrorKind::Unreadable,
+            ),
+        ] {
+            let error = PackageManifest::parse_with(
+                &format!("[package]\nname = \"a\"\n[dependencies]\n{declaration}\n"),
+                Path::new("/w"),
+                None,
+                Unfollowed::ReadPast,
+            )
+            .expect_err(declaration);
+
+            assert_eq!(error.kind(), kind, "{declaration}");
+        }
     }
 
     #[test]

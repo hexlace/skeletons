@@ -141,8 +141,23 @@ struct RawWorkspacePackage {
     edition: Option<String>,
 }
 
+/// What a read of a manifest does with a shape Cargo loads and this reader does not follow where it
+/// compares sources. Today that is a git URL with a query of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unfollowed {
+    /// Refuse the manifest as unsupported, for a reader that compares the dependency's source
+    /// with the lock's.
+    Refuse,
+    /// Read the declaration with the shape as written, for a reader that compares no source of
+    /// it. A git URL keeps its query, so it is never the URL of a locked source, which the
+    /// lockfile read refuses any query on but one reference: the declaration names no worn
+    /// package, as for Cargo, where it is another source.
+    ReadPast,
+}
+
 impl PackageManifest {
-    /// Reads a manifest's text.
+    /// Reads a manifest's text, refusing a shape Cargo loads and this reader does not follow
+    /// ([`Unfollowed::Refuse`]).
     ///
     /// `directory` is where the manifest sits, which a `path` dependency is relative to.
     /// `workspace` is the root of the workspace the manifest is a member of, which a
@@ -152,11 +167,30 @@ impl PackageManifest {
     /// # Errors
     ///
     /// Unreadable for text that is not a manifest Cargo would read, and for an inherited value
-    /// that no workspace gives. Unsupported for a `git` dependency that also writes a `path`.
+    /// that no workspace gives. Unsupported for a `git` dependency whose URL has a query of its
+    /// own, which Cargo loads.
     pub(crate) fn parse(
         text: &str,
         directory: &Path,
         workspace: Option<&WorkspaceRoot>,
+    ) -> Result<Self, TextError> {
+        Self::parse_with(text, directory, workspace, Unfollowed::Refuse)
+    }
+
+    /// Reads a manifest's text as [`parse`](Self::parse) does, handling a shape Cargo loads and
+    /// this reader does not follow as `unfollowed` says: [`Unfollowed::ReadPast`] reads it, for a
+    /// read that compares no source of what it finds. [`parse`](Self::parse) is this with
+    /// [`Unfollowed::Refuse`]. Every other refusal is as [`parse`](Self::parse) gives it.
+    ///
+    /// # Errors
+    ///
+    /// As [`parse`](Self::parse), except that [`Unfollowed::ReadPast`] never gives Unsupported for
+    /// a `git` URL's query.
+    pub(crate) fn parse_with(
+        text: &str,
+        directory: &Path,
+        workspace: Option<&WorkspaceRoot>,
+        unfollowed: Unfollowed,
     ) -> Result<Self, TextError> {
         let raw: RawManifest = toml::from_str(text).map_err(|error| {
             TextError::unreadable(format!("Cargo.toml is not a manifest: {error}"))
@@ -170,7 +204,7 @@ impl PackageManifest {
         let own_workspace = raw
             .workspace
             .as_ref()
-            .map(|section| workspace_root(section, directory))
+            .map(|section| workspace_root(section, directory, unfollowed))
             .transpose()?;
         let inherited = own_workspace.as_ref().or(workspace);
 
@@ -179,7 +213,7 @@ impl PackageManifest {
             .as_ref()
             .map(|section| package_section(section, inherited))
             .transpose()?;
-        let declarations = declarations_of(&raw, directory, inherited)?;
+        let declarations = declarations_of(&raw, directory, inherited, unfollowed)?;
         let edition = raw
             .package
             .as_ref()
@@ -237,8 +271,13 @@ impl PackageManifest {
 }
 
 /// The `[workspace]` table of the manifest in `directory`.
-fn workspace_root(section: &RawWorkspace, directory: &Path) -> Result<WorkspaceRoot, TextError> {
-    let dependencies = workspace_declarations(section.dependencies.as_ref(), directory)?;
+fn workspace_root(
+    section: &RawWorkspace,
+    directory: &Path,
+    unfollowed: Unfollowed,
+) -> Result<WorkspaceRoot, TextError> {
+    let dependencies =
+        workspace_declarations(section.dependencies.as_ref(), directory, unfollowed)?;
 
     let package_version = section
         .package

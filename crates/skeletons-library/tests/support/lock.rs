@@ -20,6 +20,7 @@
 use std::error::Error;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -88,7 +89,20 @@ pub(crate) fn lock_entry(project: &Path, name: &str) -> Result<LockEntry, Box<dy
 /// repository by `file://` URL, with its lockfile made by a cargo whose home
 /// has fetched it. The fixture's own cargo home is the one `check` needs.
 pub(crate) fn wearing_from_git() -> Result<Fixture, Box<dyn Error>> {
+    wearing_from_git_with_house_rules_tail("")
+}
+
+/// [`wearing_from_git`] where the skeleton's manifest ends with `tail` when it
+/// is committed, so that the repository the package is fetched from holds it.
+pub(crate) fn wearing_from_git_with_house_rules_tail(
+    tail: &str,
+) -> Result<Fixture, Box<dyn Error>> {
     let fixture = Fixture::new()?;
+    let mut manifest = fs::OpenOptions::new()
+        .append(true)
+        .open(fixture.house_rules_directory().join("Cargo.toml"))?;
+    manifest.write_all(tail.as_bytes())?;
+    drop(manifest);
     let url = git::commit_repository(&fixture.house_rules_directory(), &fixture.home())?;
     fixture.write_member(
         "tools",

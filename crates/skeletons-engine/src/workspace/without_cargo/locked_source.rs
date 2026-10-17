@@ -142,6 +142,32 @@ mod tests {
     }
 
     #[test]
+    fn a_git_declaration_with_a_query_of_its_own_agrees_with_no_lock_source() {
+        // A manifest read past its git query declares a URL with one, and the lockfile read
+        // refuses every source whose query is not exactly one reference, so the lock holds the
+        // same URL only without a query, or with one reference. Neither is the declared URL,
+        // because the query is part of it.
+        let declared = git_at("https://example.test/g?x=1", GitReference::DefaultBranch);
+        let on_branch = git_at(
+            "https://example.test/g?x=1",
+            GitReference::Branch("main".to_owned()),
+        );
+
+        assert!(!agrees(
+            Some(&format!("git+https://example.test/g#{COMMIT}")),
+            &declared
+        ));
+        assert!(!agrees(
+            Some(&format!("git+https://example.test/g?branch=main#{COMMIT}")),
+            &on_branch
+        ));
+        assert!(!agrees(
+            Some(&format!("git+https://example.test/g?x=1#{COMMIT}")),
+            &declared
+        ));
+    }
+
+    #[test]
     fn a_git_or_registry_declaration_is_never_locked_with_no_source() {
         assert!(!agrees(None, &git(GitReference::DefaultBranch)));
         assert!(!agrees(None, &DeclaredSource::Registry { name: None }));

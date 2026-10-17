@@ -37,7 +37,7 @@ use super::layout::Layout;
 use super::lock_entries::set_aside_entries;
 use super::locked_source;
 use super::lockfile::{LockEntry, Lockfile};
-use super::package_manifest::{Declaration, DeclaredSource};
+use super::package_manifest::{Declaration, DeclaredSource, Unfollowed};
 use super::path_package::{Inherits, read_manifest};
 use super::worn_entries::worn_entries;
 use source_kind::SourceKind;
@@ -53,10 +53,12 @@ use source_kind::SourceKind;
 /// the layout does not hold, and of each package reached from those in turn. The layout holds
 /// the packages the lock lists, and currency has judged their requirements already; the others
 /// are the ones an optional dependency no feature has enabled yet leads to. A package among
-/// them whose manifest cannot be read is passed over: Cargo does not load it until a feature
-/// enables it, and it fails then, so a refusal here would fire on workspaces Cargo reads. The
-/// packages read here do not join the layout, because currency would then ask for them in the
-/// lock.
+/// them whose manifest Cargo itself refuses is passed over: Cargo does not load it until a
+/// feature enables it, and it fails then, so a refusal here would fire on workspaces Cargo
+/// reads. A manifest Cargo loads is read whole, a git URL's own query included, and its other
+/// requirements and path dependencies are judged: nothing here compares the source of a git
+/// dependency read past, which can name no worn package. The packages read here do not join the
+/// layout, because currency would then ask for them in the lock.
 ///
 /// A requirement `semver` does not parse is passed over, as currency passes it over.
 ///
@@ -102,9 +104,12 @@ fn refuse_in_packages_reached(
         if !visited.insert(directory.clone()) {
             continue;
         }
-        // A package that cannot be read is not judged: Cargo loads it only once a feature
-        // enables it, and this reader cannot tell whether one does.
-        let Ok(manifest) = read_manifest(&directory, Inherits::Ancestors) else {
+        // A package whose manifest Cargo refuses is not judged: Cargo loads it only once a
+        // feature enables it, and this reader cannot tell whether one does. A git URL with a
+        // query of its own is not such a manifest, since Cargo loads it, so it is read past
+        // and the package's other requirements and path dependencies are judged.
+        let Ok(manifest) = read_manifest(&directory, Inherits::Ancestors, Unfollowed::ReadPast)
+        else {
             continue;
         };
         let manifest_path = directory.join(MANIFEST_FILE_NAME);

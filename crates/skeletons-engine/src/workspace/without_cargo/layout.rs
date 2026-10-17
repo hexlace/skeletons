@@ -9,7 +9,7 @@ use super::file_system::MANIFEST_FILE_NAME;
 use super::lock_entries::locked_path_dependency_names;
 use super::lockfile::Lockfile;
 use super::member_patterns;
-use super::package_manifest::{PackageManifest, WorkspaceRoot};
+use super::package_manifest::{PackageManifest, Unfollowed, WorkspaceRoot};
 use super::path_package::{Followed, Inherits, PathPackage, read_manifest};
 use super::workspace_search::{declares_workspace, excludes, nearest_above};
 
@@ -117,7 +117,7 @@ fn find_root(package_directory: &Path) -> Result<Root, ReadWithoutCargoError> {
         .map_err(|error| ReadWithoutCargoError::text(&manifest_path, &error))?;
 
     if !declares {
-        if let Some(above) = nearest_above(package_directory)? {
+        if let Some(above) = nearest_above(package_directory, Unfollowed::Refuse)? {
             if !excludes(&above.directory, above.workspace(), package_directory) {
                 return Ok(Root {
                     directory: above.directory,
@@ -248,7 +248,11 @@ fn read_member(root: &Root, directory: &Path) -> Result<PathPackage, ReadWithout
     if directory == root.directory {
         return PathPackage::from_manifest(directory, &root.manifest, true);
     }
-    let manifest = read_manifest(directory, Inherits::Workspace(root.workspace()))?;
+    let manifest = read_manifest(
+        directory,
+        Inherits::Workspace(root.workspace()),
+        Unfollowed::Refuse,
+    )?;
     if manifest.workspace().is_some() {
         return Err(ReadWithoutCargoError::unreadable(format!(
             "multiple workspace roots found in the same workspace: {} and {}",
@@ -364,7 +368,7 @@ fn read_reached(
         if by_directory.contains_key(&directory) {
             continue;
         }
-        let manifest = read_manifest(&directory, Inherits::Ancestors)?;
+        let manifest = read_manifest(&directory, Inherits::Ancestors, Unfollowed::Refuse)?;
         let package = PathPackage::from_manifest(&directory, &manifest, false)?;
         pending.extend(next(&package));
         by_directory.insert(directory, package);

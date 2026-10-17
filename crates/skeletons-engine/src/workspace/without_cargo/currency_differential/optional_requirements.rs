@@ -25,11 +25,11 @@ use super::super::fixture::{CargoHome, Fixture, GitRepository, cargo_version};
 use super::super::read::read_document;
 use super::{
     Verdict, Y_DEFAULT_ENABLES_Z, Y_OPTIONAL_Z, assert_both_say_in_home, assert_reader_refuses,
-    assert_stale_report_is_the_relocked_one_in_home, cargo_verdict_in_home, locked_members,
-    write_app,
+    assert_stale_report_is_the_relocked_one_in_home, cargo_metadata, cargo_verdict_in_home,
+    locked_members, write_app,
 };
 use crate::workspace::crates_io_source::CRATES_IO_SOURCE;
-use crate::workspace::{LockedPackageId, Network};
+use crate::workspace::{LockedPackageId, Network, ReadWorkspaceError};
 
 /// What the member `app` writes to depend on `house-rules` and to wear it, and on `y`.
 const APP_WEARS_HOUSE_RULES_AND_DEPENDS_ON_Y: &str = "[dependencies]\nhouse-rules = \"4\"\n\
@@ -145,6 +145,51 @@ fn lock_offline(fixture: &Fixture, home: &CargoHome) {
         .unwrap_or_else(|stderr| panic!("{toolchain} could not lock the workspace: {stderr}"));
 }
 
+/// A workspace like [`workspace_of_one_worn_version`], with `house-rules` 1.0.0 worn by path,
+/// where `z` writes a git dependency `foo` whose URL has a query of its own (`?x=1`) and then
+/// `z_dependencies`. `foo` is a repository Cargo has fetched into the home, so that the only
+/// thing Cargo can fail on once `z` is enabled is a version of `house-rules`. Locked with `z`
+/// off. The repository is returned too, because it is removed with it.
+fn locked_with_a_git_query_in_z(z_dependencies: &str) -> (Fixture, CargoHome, GitRepository) {
+    let repository = GitRepository::in_directory_named("foo", "repo?x=1");
+    let query_dependency = format!("foo = {{ git = \"{}\" }}", repository.url());
+    let home = CargoHome::new();
+    home.prime(std::slice::from_ref(&query_dependency));
+    let fixture = workspace_of_one_worn_version(
+        "{ path = \"../../house-rules\" }",
+        "{ path = \"../house-rules\" }",
+    );
+    fixture.package("../house-rules", "house-rules", "version = \"1.0.0\"\n");
+    fixture.package(
+        "../z",
+        "z",
+        &format!("[dependencies]\n{query_dependency}\n{z_dependencies}"),
+    );
+    let toolchain = cargo_version();
+    home.lock(&fixture.root, Network::Allowed)
+        .unwrap_or_else(|stderr| panic!("{toolchain} could not lock the workspace: {stderr}"));
+    (fixture, home, repository)
+}
+
+/// Requires that Cargo, in `home`, fails to resolve the workspace at `fixture`'s root because no
+/// version of `house-rules` meets a requirement, and not because a source could not be fetched,
+/// and that the reader refuses it with the detail `detail`.
+fn assert_cargo_cannot_select_a_version_and_reader_refuses(
+    fixture: &Fixture,
+    home: &CargoHome,
+    detail: &str,
+) {
+    let toolchain = cargo_version();
+    match cargo_metadata::fetch_in_cargo_home(&fixture.root, home.path(), home.home()) {
+        Err(ReadWorkspaceError::CargoMetadataFailed { stderr }) => assert!(
+            stderr.contains("failed to select a version for the requirement `house-rules"),
+            "cargo, on {toolchain}, failed some other way:\n{stderr}"
+        ),
+        other => panic!("cargo, on {toolchain}: expected a failed resolution, got {other:?}"),
+    }
+    assert_cargo_cannot_resolve_and_reader_refuses(fixture, home, detail);
+}
+
 #[test]
 fn an_optional_dependency_enabled_after_the_lock_that_needs_a_newer_worn_version_is_refused() {
     // The direct shape: `app` locks `house-rules` at 4.5.6 through `^4`. `z` asks for `^4.6`,
@@ -209,6 +254,74 @@ fn a_worn_git_package_asked_for_outside_its_compatible_range_is_refused() {
         &home,
         &refusal_of_the_only_version(&manifest_of(&fixture, "z"), "2", "git"),
     );
+}
+
+#[test]
+fn a_git_url_with_a_query_beside_an_unmet_requirement_on_a_worn_path_package_is_refused() {
+    // Cargo loads `z` with `foo = { git = "…/repo?x=1" }`, a URL with a query of its own, so
+    // `z`'s other requirements bind once `y` enables it: `house-rules` 1.0.0, worn by path,
+    // does not meet `^1.1`, and Cargo fails to select a version. The query is no reason for the
+    // reader to pass `z` over as a manifest Cargo refuses: it reads `z` whole and refuses the
+    // requirement, naming `z`'s manifest.
+    let (fixture, home, _repository) = locked_with_a_git_query_in_z(
+        "house-rules = { path = \"../house-rules\", version = \"1.1\" }\n",
+    );
+    enable_z(&fixture);
+
+    assert_cargo_cannot_select_a_version_and_reader_refuses(
+        &fixture,
+        &home,
+        &refusal_of_the_only_version(&manifest_of(&fixture, "z"), "1.1", "path"),
+    );
+}
+
+#[test]
+fn a_git_url_with_a_query_beside_a_requirement_in_another_range_of_a_worn_path_package_is_refused()
+{
+    // The same with `^2`, outside the range 1.0.0 is in. A path package holds one version, so
+    // Cargo fails here too, and the reader refuses it all the same.
+    let (fixture, home, _repository) = locked_with_a_git_query_in_z(
+        "house-rules = { path = \"../house-rules\", version = \"2\" }\n",
+    );
+    enable_z(&fixture);
+
+    assert_cargo_cannot_select_a_version_and_reader_refuses(
+        &fixture,
+        &home,
+        &refusal_of_the_only_version(&manifest_of(&fixture, "z"), "2", "path"),
+    );
+}
+
+#[test]
+fn a_git_url_with_a_query_above_a_package_that_asks_for_a_newer_worn_version_is_refused() {
+    // The query is in `z`, and the unmet requirement is in `x`, a package `z` depends on by
+    // path. A package passed over is never followed, so a query in `z` would hide every package
+    // below it; the reader reads `z`, follows the path and names `x`'s manifest.
+    let (fixture, home, _repository) = locked_with_a_git_query_in_z("x = { path = \"../x\" }\n");
+    fixture.package(
+        "../x",
+        "x",
+        "[dependencies]\nhouse-rules = { path = \"../house-rules\", version = \"1.1\" }\n",
+    );
+    enable_z(&fixture);
+
+    assert_cargo_cannot_select_a_version_and_reader_refuses(
+        &fixture,
+        &home,
+        &refusal_of_the_only_version(&manifest_of(&fixture, "x"), "1.1", "path"),
+    );
+}
+
+#[test]
+fn a_git_url_with_a_query_beside_a_requirement_the_worn_path_package_meets_is_reported() {
+    // The control against over-refusing: with the query beside `^1`, which 1.0.0 meets, enabling
+    // `z` only makes the lock lack `z` and `foo`, and the report is the one a relock gives.
+    let (fixture, home, _repository) = locked_with_a_git_query_in_z(
+        "house-rules = { path = \"../house-rules\", version = \"1\" }\n",
+    );
+    enable_z(&fixture);
+
+    assert_stale_report_is_the_relocked_one_in_home(&fixture, &home, &BTreeMap::new());
 }
 
 #[test]

@@ -2305,7 +2305,9 @@ the dependency, and a workspace where nothing does is refused too, though cargo
 reads it. A registry package's requirement in another range is left alone, since
 cargo adds a second version beside the locked one and the lock only needs
 rewriting. An optional path package whose manifest cannot be read is passed
-over, since cargo does not load it until a feature enables it. A requirement
+over, since cargo does not load it until a feature enables it. A git URL with a
+query of its own does not stop the walk, because cargo loads that manifest: the
+package is read whole and its other requirements are judged. A requirement
 inside a registry package's manifest is out of reach, which is the limit left:
 an unlocked registry dependency that needs a newer version of a worn package is
 a lock cargo refuses until the package is updated, the update takes the newest

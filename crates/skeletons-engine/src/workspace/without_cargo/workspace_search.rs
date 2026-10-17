@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::error::ReadWithoutCargoError;
 use super::file_system::{MANIFEST_FILE_NAME, normalized};
-use super::package_manifest::{PackageManifest, WorkspaceRoot};
+use super::package_manifest::{PackageManifest, Unfollowed, WorkspaceRoot};
 use super::text_error::TextError;
 
 /// The nearest workspace root above a directory.
@@ -43,9 +43,12 @@ pub(super) fn declares_workspace(text: &str) -> Result<bool, TextError> {
 }
 
 /// The workspace root nearest above `directory` (not `directory` itself), or `None` when no
-/// directory above holds a manifest with a `[workspace]`.
+/// directory above holds a manifest with a `[workspace]`. The root is read as `unfollowed` says,
+/// so a root whose `[workspace.dependencies]` writes a shape Cargo loads and this reader does
+/// not follow is refused or read past with the manifests beneath it.
 pub(super) fn nearest_above(
     directory: &Path,
+    unfollowed: Unfollowed,
 ) -> Result<Option<AncestorWorkspace>, ReadWithoutCargoError> {
     for ancestor in directory.ancestors().skip(1) {
         let manifest_path = ancestor.join(MANIFEST_FILE_NAME);
@@ -59,7 +62,7 @@ pub(super) fn nearest_above(
         if !declares {
             continue;
         }
-        let manifest = PackageManifest::parse(&text, ancestor, None)
+        let manifest = PackageManifest::parse_with(&text, ancestor, None, unfollowed)
             .map_err(|error| ReadWithoutCargoError::text(&manifest_path, &error))?;
         assert!(
             manifest.workspace().is_some(),
@@ -94,8 +97,11 @@ pub(super) fn excludes(
 
 /// The workspace `directory`'s package inherits from, when it is not a workspace member: the
 /// nearest root above it, unless that root excludes it.
-fn inherited_workspace(directory: &Path) -> Result<Option<WorkspaceRoot>, ReadWithoutCargoError> {
-    Ok(nearest_above(directory)?.and_then(|above| {
+fn inherited_workspace(
+    directory: &Path,
+    unfollowed: Unfollowed,
+) -> Result<Option<WorkspaceRoot>, ReadWithoutCargoError> {
+    Ok(nearest_above(directory, unfollowed)?.and_then(|above| {
         let excluded = excludes(&above.directory, above.workspace(), directory);
         (!excluded).then(|| above.workspace().clone())
     }))
@@ -106,7 +112,8 @@ fn inherited_workspace(directory: &Path) -> Result<Option<WorkspaceRoot>, ReadWi
 ///
 /// The text is read alone when it takes nothing from a workspace. When it does, the workspace it
 /// inherits from is the nearest root above `directory`, found only then, so a manifest that needs
-/// no inheritance never reads another file.
+/// no inheritance never reads another file. The text, and the root it inherits from, are read as
+/// `unfollowed` says.
 ///
 /// # Errors
 ///
@@ -116,16 +123,17 @@ pub(super) fn parse_inheriting(
     text: &str,
     directory: &Path,
     manifest_path: &Path,
+    unfollowed: Unfollowed,
 ) -> Result<PackageManifest, ReadWithoutCargoError> {
-    let alone = PackageManifest::parse(text, directory, None);
+    let alone = PackageManifest::parse_with(text, directory, None, unfollowed);
     let error = match alone {
         Ok(manifest) => return Ok(manifest),
         Err(error) => error,
     };
-    let Some(workspace) = inherited_workspace(directory)? else {
+    let Some(workspace) = inherited_workspace(directory, unfollowed)? else {
         return Err(ReadWithoutCargoError::text(manifest_path, &error));
     };
-    PackageManifest::parse(text, directory, Some(&workspace))
+    PackageManifest::parse_with(text, directory, Some(&workspace), unfollowed)
         .map_err(|error| ReadWithoutCargoError::text(manifest_path, &error))
 }
 
@@ -135,7 +143,9 @@ mod tests {
 
     use super::{declares_workspace, excludes, nearest_above, parse_inheriting};
     use crate::workspace::without_cargo::error::ReadWithoutCargoError;
-    use crate::workspace::without_cargo::package_manifest::{PackageManifest, WorkspaceRoot};
+    use crate::workspace::without_cargo::package_manifest::{
+        PackageManifest, Unfollowed, WorkspaceRoot,
+    };
 
     fn workspace(members: &[&str], exclude: &[&str]) -> WorkspaceRoot {
         let text = format!("[workspace]\nmembers = {members:?}\nexclude = {exclude:?}\n");
@@ -208,14 +218,16 @@ mod tests {
         std::fs::write(inner.join("Cargo.toml"), "[workspace]\nmembers = [\"x\"]\n")
             .expect("a manifest");
 
-        let from_inner = nearest_above(&inner).expect("readable");
+        let from_inner = nearest_above(&inner, Unfollowed::Refuse).expect("readable");
         assert_eq!(
             from_inner.map(|above| above.directory),
             Some(root),
             "the manifest in `inner` itself is not above `inner`"
         );
         assert!(
-            nearest_above(Path::new("/")).expect("readable").is_none(),
+            nearest_above(Path::new("/"), Unfollowed::Refuse)
+                .expect("readable")
+                .is_none(),
             "nothing is above the file system root"
         );
     }
@@ -228,6 +240,7 @@ mod tests {
             "[package]\nname = \"a\"\n",
             Path::new("/absent/a"),
             Path::new("/absent/a/Cargo.toml"),
+            Unfollowed::Refuse,
         )
         .expect("a manifest that inherits nothing");
 
@@ -250,10 +263,56 @@ mod tests {
             "[package]\nname = \"m\"\nversion.workspace = true\n",
             &member,
             &member.join("Cargo.toml"),
+            Unfollowed::Refuse,
         )
         .expect("a member inheriting its version");
 
         assert_eq!(manifest.package().expect("a package").version, "4.5.6");
+    }
+
+    #[test]
+    fn a_root_that_writes_a_git_query_is_read_past_only_when_asked() {
+        // A member takes `g` from a root whose `[workspace.dependencies]` gives it a git URL with
+        // a query of its own, which Cargo loads. Reading past, the member is read with that
+        // declaration; refusing, the root's query is the refusal, named as unsupported.
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let root = directory.path().canonicalize().expect("a real path");
+        let member = root.join("m");
+        std::fs::create_dir(&member).expect("a directory");
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\n[workspace.dependencies]\n\
+             g = { git = \"https://example.invalid/g?x=1\" }\n",
+        )
+        .expect("a manifest");
+        let text = "[package]\nname = \"m\"\n[dependencies]\ng.workspace = true\n";
+
+        let read_past = parse_inheriting(
+            text,
+            &member,
+            &member.join("Cargo.toml"),
+            Unfollowed::ReadPast,
+        )
+        .expect("a manifest Cargo reads");
+        let refused = parse_inheriting(
+            text,
+            &member,
+            &member.join("Cargo.toml"),
+            Unfollowed::Refuse,
+        )
+        .expect_err("the root's query is refused");
+
+        let [declaration] = read_past.declarations() else {
+            panic!(
+                "expected one declaration, got {:?}",
+                read_past.declarations()
+            );
+        };
+        assert_eq!(declaration.key, "g");
+        assert!(
+            matches!(refused, ReadWithoutCargoError::Unsupported { .. }),
+            "{refused:?}"
+        );
     }
 
     #[test]
@@ -266,6 +325,7 @@ mod tests {
             "[package]\nname = \"m\"\nversion.workspace = true\n",
             &member,
             &member.join("Cargo.toml"),
+            Unfollowed::Refuse,
         )
         .expect_err("nothing gives the version");
 

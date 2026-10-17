@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use super::error::ReadWithoutCargoError;
 use super::file_system::MANIFEST_FILE_NAME;
-use super::package_manifest::Declaration;
+use super::package_manifest::{Declaration, Unfollowed};
 use super::targets::library_name;
 use super::workspace_search::parse_inheriting;
 use crate::workspace::LockedPackageId;
@@ -26,8 +26,12 @@ pub(super) struct LocatedPackage {
 /// Reads the package `identity` from the directory `locations` holds for it.
 ///
 /// Returns `None` when the package has no files to read: no directory was given, the directory
-/// holds no readable manifest, or the manifest names another package or another version. Such a
-/// package locates nothing, and whether it is a skeleton is unknown.
+/// holds no manifest Cargo reads, or the manifest names another package or another version. Such
+/// a package locates nothing, and whether it is a skeleton is unknown.
+///
+/// A manifest Cargo loads is read whole, a git URL's own query included: the declarations are
+/// kept for their names and renames and none is compared with a source, so a shape this reader
+/// does not follow where it compares sources is no reason to call the package unlocated.
 ///
 /// # Errors
 ///
@@ -44,7 +48,8 @@ pub(super) fn read(
     let Ok(text) = std::fs::read_to_string(&manifest_path) else {
         return Ok(None);
     };
-    let Ok(manifest) = parse_inheriting(&text, directory, &manifest_path) else {
+    let Ok(manifest) = parse_inheriting(&text, directory, &manifest_path, Unfollowed::ReadPast)
+    else {
         return Ok(None);
     };
     let Some(package) = manifest.package() else {
@@ -114,6 +119,28 @@ mod tests {
         assert_eq!(package.metadata["skeletons"]["x"], 1);
         assert_eq!(package.declarations.len(), 1);
         assert_eq!(package.manifest_path, root.join("Cargo.toml"));
+    }
+
+    #[test]
+    fn a_package_whose_manifest_writes_a_git_query_in_a_dev_dependency_is_located() {
+        // Cargo loads a manifest whose git URL has a query of its own, and the caller gave the
+        // location, so the package is read, with that dependency among its declarations. Nothing
+        // is compared with its source.
+        let (_directory, root) = written();
+        let mut manifest = std::fs::read_to_string(root.join("Cargo.toml")).expect("a manifest");
+        manifest.push_str("[dev-dependencies]\nfoo = { git = \"https://example.test/foo?x=1\" }\n");
+        std::fs::write(root.join("Cargo.toml"), manifest).expect("a manifest");
+
+        let package = read(&located_at(&root), &identity("house-rules", "4.5.6"))
+            .expect("readable")
+            .expect("located");
+
+        let keys: Vec<&str> = package
+            .declarations
+            .iter()
+            .map(|declaration| declaration.key.as_str())
+            .collect();
+        assert_eq!(keys, ["serde", "foo"]);
     }
 
     #[test]

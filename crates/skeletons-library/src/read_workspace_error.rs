@@ -184,18 +184,19 @@ impl ReadWorkspaceError {
     /// `check_without_cargo` did not guess: `[patch]`, `[replace]`,
     /// `package.workspace`, one package under two dependency keys, two path
     /// packages with one name and version, a lockfile in a format other than 3
-    /// or 4, an optional dependency of a package outside the workspace, or of a
-    /// path package it reaches, that asks a worn package for a version its
-    /// locked one does not meet and cargo cannot add beside it (for a registry
-    /// package, one its compatible range could meet; for a path or git package,
-    /// any), and in a cargo configuration file a non-empty `paths`, a `[patch]`
-    /// with an entry or any `include`. [`detail`](Self::detail) names the
-    /// manifest, lockfile or configuration file and what it uses. `check` reads
-    /// such a workspace where cargo is available, except for that optional
-    /// dependency once a feature enables it, where cargo cannot resolve the
-    /// workspace and `check` fails with
-    /// [`is_cargo_metadata_failed`](Self::is_cargo_metadata_failed). The
-    /// function does not resolve features, so it refuses that dependency
+    /// or 4, a `git` URL with a query of its own, a locked git source whose
+    /// query is not one `branch`, `tag` or `rev`, an optional dependency of a
+    /// package outside the workspace, or of a path package it reaches, that
+    /// asks a worn package for a version its locked one does not meet and cargo
+    /// cannot add beside it (for a registry package, one its compatible range
+    /// could meet; for a path or git package, any), and in a cargo
+    /// configuration file a non-empty `paths`, a `[patch]` with an entry or any
+    /// `include`. [`detail`](Self::detail) names the manifest, lockfile or
+    /// configuration file and what it uses. `check` reads such a workspace
+    /// where cargo is available, except for that optional dependency once a
+    /// feature enables it, where cargo cannot resolve the workspace and `check`
+    /// fails with [`is_cargo_metadata_failed`](Self::is_cargo_metadata_failed).
+    /// The function does not resolve features, so it refuses that dependency
     /// whenever a feature could enable it, and `check` reads the workspace
     /// where nothing does. This never becomes true for `check`. The command
     /// line has no word for it.

@@ -215,17 +215,19 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 /// guessed at: `[patch]`, `[replace]`, `package.workspace`, one package under
 /// two dependency keys, two path packages with one name and version, a wearing
 /// whose own dependency is declared with `registry =`, a lockfile in a format
-/// other than 3 or 4, a non-empty `paths`, a `[patch]` with an entry or any
-/// `include` in a configuration file, and an optional dependency of a package
-/// outside the workspace, or of a path package it reaches, that asks a worn
-/// package for a version the lock does not name and cargo cannot add beside the
-/// locked one: for a package from a registry, a version in the locked version's
-/// compatible range, since a requirement in another range gets a second
-/// version; for a package from a path or a git repository, which holds only the
-/// locked version, any version. Cargo cannot resolve the workspace once a
-/// feature enables that dependency, and a relock does not help. This call does
-/// not resolve features, so it refuses when a feature could enable it: a
-/// workspace where that dependency is off is refused too, and `check` reads it.
+/// other than 3 or 4, a `git` URL with a query of its own, a locked git source
+/// whose query is not one `branch`, `tag` or `rev`, a non-empty `paths`, a
+/// `[patch]` with an entry or any `include` in a configuration file, and an
+/// optional dependency of a package outside the workspace, or of a path package
+/// it reaches, that asks a worn package for a version the lock does not name
+/// and cargo cannot add beside the locked one: for a package from a registry, a
+/// version in the locked version's compatible range, since a requirement in
+/// another range gets a second version; for a package from a path or a git
+/// repository, which holds only the locked version, any version. Cargo cannot
+/// resolve the workspace once a feature enables that dependency, and a relock
+/// does not help. This call does not resolve features, so it refuses when a
+/// feature could enable it: a workspace where that dependency is off is refused
+/// too, and `check` reads it.
 ///
 /// The call writes nothing, runs no build script, needs no git and makes no
 /// network request.

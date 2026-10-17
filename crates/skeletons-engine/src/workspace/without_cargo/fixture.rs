@@ -1,6 +1,12 @@
 //! Workspaces written into a temporary directory, for the tests of reading one without Cargo.
 
+mod cargo_home;
+mod git_repository;
+
 use std::path::{Path, PathBuf};
+
+pub(super) use cargo_home::CargoHome;
+pub(super) use git_repository::GitRepository;
 
 /// A temporary directory holding one test's packages, with a real path. The tree's root is the
 /// directory `w` in it, so that a package can sit beside the root and still be inside the

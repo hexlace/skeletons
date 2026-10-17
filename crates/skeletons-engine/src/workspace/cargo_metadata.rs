@@ -142,9 +142,26 @@ fn run(command: Command) -> Result<subprocess::Finished, ReadWorkspaceError> {
 /// `--offline` too, when `network` is [`Network::Refused`]) in `directory`,
 /// and parses its output.
 pub(crate) fn fetch(directory: &Path, network: Network) -> Result<Document, ReadWorkspaceError> {
-    let mut locked = command(directory, network);
-    locked.arg("--locked");
-    let finished = run(locked)?;
+    read_locked(command(directory, network))
+}
+
+/// [`fetch`] with Cargo given `cargo_home` as its home, offline, so that a test can lock and
+/// read a workspace whose git and registry sources sit in a home it owns. It goes through the
+/// same [`read_locked`] as [`fetch`], so what it classifies is what `check` classifies.
+#[cfg(test)]
+pub(crate) fn fetch_in_cargo_home(
+    directory: &Path,
+    cargo_home: &Path,
+) -> Result<Document, ReadWorkspaceError> {
+    let mut metadata = command(directory, Network::Refused);
+    metadata.env("CARGO_HOME", cargo_home);
+    read_locked(metadata)
+}
+
+/// Runs `metadata`, built by [`command`], with `--locked`, and parses its output.
+fn read_locked(mut metadata: Command) -> Result<Document, ReadWorkspaceError> {
+    metadata.arg("--locked");
+    let finished = run(metadata)?;
     match finished.stdout() {
         Err(_truncated) => Err(ReadWorkspaceError::MetadataUnreadable {
             detail: oversized_output_detail(),

@@ -13,12 +13,18 @@
 //! that home before the workspace is changed, and the registry is a directory of vendored
 //! crates that replaces crates.io. Cargo's verdict is read in that home, offline and `--locked`.
 //! `currency.rs` tests the same shapes against fixed lockfile text.
+//!
+//! The cases for path packages are here, and those for git and registry packages are in the
+//! files beside them.
+
+mod git;
+mod registry;
 
 use std::collections::BTreeMap;
 
 use super::differential::shape;
 use super::error::ReadWithoutCargoError;
-use super::fixture::{CargoHome, Fixture, GitRepository, cargo_version};
+use super::fixture::{CargoHome, Fixture, cargo_version};
 use super::read::read_document;
 use crate::workspace::{Network, ReadWorkspaceError, cargo_metadata};
 
@@ -481,211 +487,4 @@ fn an_optional_dependency_of_an_outsider_that_stops_being_enabled_is_reported_as
     fixture.package("../y", "y", Y_OPTIONAL_Z);
 
     assert_stale_report_is_the_relocked_one(&fixture);
-}
-
-/// Two git repositories, `g` and `h`, in a Cargo home that has already fetched every reference
-/// the cases below write. Fetching first matters: a reference the home has never seen fails
-/// offline as a missing reference, where a home that has it gives the lockfile abort the cases
-/// are about, which is what an online run sees after Cargo fetches the new reference.
-struct GitCases {
-    home: CargoHome,
-    g: GitRepository,
-    h: GitRepository,
-    /// The commit that `g`'s `main` and `v1` name.
-    first: String,
-    /// The commit that `g`'s `dev` names.
-    second: String,
-}
-
-impl GitCases {
-    fn new() -> Self {
-        let g = GitRepository::new("g");
-        let first = g.revision("main");
-        let second = g.revision("dev");
-        assert_ne!(first, second, "dev is a commit ahead of main");
-        let cases = Self {
-            home: CargoHome::new(),
-            g,
-            h: GitRepository::new("h"),
-            first,
-            second,
-        };
-        cases.home.prime(&[
-            cases.g(""),
-            cases.g("branch = \"main\""),
-            cases.g("branch = \"dev\""),
-            cases.g("tag = \"v1\""),
-            cases.g(&format!("rev = \"{}\"", cases.first)),
-            cases.g(&format!("rev = \"{}\"", cases.second)),
-            cases.h(),
-        ]);
-        cases
-    }
-
-    /// The line that depends on `g` by `reference`, as written after the URL: nothing for the
-    /// default branch, otherwise `branch = "…"`, `tag = "…"` or `rev = "…"`.
-    fn g(&self, reference: &str) -> String {
-        let separator = if reference.is_empty() { "" } else { ", " };
-        format!(
-            "g = {{ git = \"{}\"{separator}{reference} }}\n",
-            self.g.url()
-        )
-    }
-
-    /// The line that depends on `h` by its default branch.
-    fn h(&self) -> String {
-        format!("h = {{ git = \"{}\" }}\n", self.h.url())
-    }
-
-    /// Locks `app` with the dependencies `before`, changes them to `after`, and requires cargo
-    /// and the reader to say `expected` of the result.
-    fn assert_change(&self, before: &str, after: &str, expected: Verdict) {
-        let fixture = locked_members(&["app"]);
-        write_app(&fixture, &format!("[dependencies]\n{before}"));
-        let toolchain = cargo_version();
-        self.home
-            .lock(&fixture.root, Network::Allowed)
-            .unwrap_or_else(|stderr| panic!("{toolchain} could not lock the workspace: {stderr}"));
-        write_app(&fixture, &format!("[dependencies]\n{after}"));
-
-        assert_both_say_in_home(&fixture, &self.home, expected);
-    }
-
-    /// Requires cargo and the reader to say the lockfile is current for `dependencies`, just
-    /// locked.
-    fn assert_current(&self, dependencies: &str) {
-        self.assert_change(dependencies, dependencies, Verdict::Current);
-    }
-}
-
-#[test]
-fn a_git_dependency_just_locked_is_current_however_its_reference_is_spelled() {
-    // Every spelling of a git reference, locked and left alone: the default branch, a branch, a
-    // tag, a full revision and a short one.
-    let cases = GitCases::new();
-    let short = &cases.first[..7];
-
-    cases.assert_current(&cases.g(""));
-    cases.assert_current(&cases.g("branch = \"main\""));
-    cases.assert_current(&cases.g("tag = \"v1\""));
-    cases.assert_current(&cases.g(&format!("rev = \"{}\"", cases.first)));
-    cases.assert_current(&cases.g(&format!("rev = \"{short}\"")));
-}
-
-#[test]
-fn a_git_dependency_moved_to_another_branch_is_aborted() {
-    let cases = GitCases::new();
-
-    cases.assert_change(
-        &cases.g("branch = \"main\""),
-        &cases.g("branch = \"dev\""),
-        Verdict::Aborted,
-    );
-}
-
-#[test]
-fn a_git_dependency_moved_to_another_revision_is_aborted() {
-    let cases = GitCases::new();
-
-    cases.assert_change(
-        &cases.g(&format!("rev = \"{}\"", cases.first)),
-        &cases.g(&format!("rev = \"{}\"", cases.second)),
-        Verdict::Aborted,
-    );
-}
-
-#[test]
-fn a_git_dependency_moved_from_a_tag_to_a_branch_is_aborted() {
-    let cases = GitCases::new();
-
-    cases.assert_change(
-        &cases.g("tag = \"v1\""),
-        &cases.g("branch = \"dev\""),
-        Verdict::Aborted,
-    );
-}
-
-#[test]
-fn a_git_dependency_given_the_branch_it_already_followed_is_aborted() {
-    // The default branch and `branch = "main"` are the same commit, and the lockfile still
-    // records which was written, so Cargo wants it rewritten.
-    let cases = GitCases::new();
-
-    cases.assert_change(
-        &cases.g(""),
-        &cases.g("branch = \"main\""),
-        Verdict::Aborted,
-    );
-}
-
-#[test]
-fn an_added_git_dependency_is_aborted() {
-    let cases = GitCases::new();
-
-    cases.assert_change(
-        &cases.g(""),
-        &format!("{}{}", cases.g(""), cases.h()),
-        Verdict::Aborted,
-    );
-}
-
-#[test]
-fn a_removed_git_dependency_is_aborted() {
-    let cases = GitCases::new();
-
-    cases.assert_change(&cases.g(""), "", Verdict::Aborted);
-}
-
-/// A workspace whose member `app` depends on the vendored crates in `dependencies`, locked
-/// offline in a home that vendors `r` 1.4.0 and 2.1.0 and `s` 0.3.0, with the home.
-fn locked_vendored(dependencies: &str) -> (Fixture, CargoHome) {
-    let home = CargoHome::new();
-    home.vendor("r", "1.4.0");
-    home.vendor("r", "2.1.0");
-    home.vendor("s", "0.3.0");
-    let fixture = locked_members(&["app"]);
-    write_app(&fixture, &format!("[dependencies]\n{dependencies}"));
-    let toolchain = cargo_version();
-    home.lock(&fixture.root, Network::Refused)
-        .unwrap_or_else(|stderr| panic!("{toolchain} could not lock the workspace: {stderr}"));
-    (fixture, home)
-}
-
-#[test]
-fn a_registry_dependency_just_locked_is_current() {
-    let (fixture, home) = locked_vendored("r = \"1\"\n");
-
-    assert_both_say_in_home(&fixture, &home, Verdict::Current);
-}
-
-#[test]
-fn a_registry_requirement_changed_to_one_the_lock_does_not_meet_is_aborted() {
-    let (fixture, home) = locked_vendored("r = \"1\"\n");
-    write_app(&fixture, "[dependencies]\nr = \"2\"\n");
-
-    assert_both_say_in_home(&fixture, &home, Verdict::Aborted);
-}
-
-#[test]
-fn a_registry_requirement_narrowed_to_one_the_lock_still_meets_is_current() {
-    let (fixture, home) = locked_vendored("r = \"1\"\n");
-    write_app(&fixture, "[dependencies]\nr = \"1.4\"\n");
-
-    assert_both_say_in_home(&fixture, &home, Verdict::Current);
-}
-
-#[test]
-fn an_added_registry_dependency_is_aborted() {
-    let (fixture, home) = locked_vendored("r = \"1\"\n");
-    write_app(&fixture, "[dependencies]\nr = \"1\"\ns = \"0.3\"\n");
-
-    assert_both_say_in_home(&fixture, &home, Verdict::Aborted);
-}
-
-#[test]
-fn a_removed_registry_dependency_is_aborted() {
-    let (fixture, home) = locked_vendored("r = \"1\"\n");
-    write_app(&fixture, "");
-
-    assert_both_say_in_home(&fixture, &home, Verdict::Aborted);
 }

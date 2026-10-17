@@ -136,7 +136,33 @@ fn find_root(package_directory: &Path) -> Result<Root, ReadWithoutCargoError> {
 fn read_packages(root: &Root) -> Result<Vec<PathPackage>, ReadWithoutCargoError> {
     let mut by_directory: BTreeMap<PathBuf, PathPackage> = BTreeMap::new();
     read_members(root, &mut by_directory)?;
+    let member_count = by_directory.len();
+    assert!(
+        by_directory.values().all(|package| package.is_member),
+        "read_members reads members and nothing else"
+    );
     read_outsiders(&mut by_directory)?;
+
+    // The map is keyed by directory, so a directory holds one package; the key must be that
+    // package's own directory, or a lookup by directory would find another package's entry.
+    for (directory, package) in &by_directory {
+        assert!(
+            *directory == package.directory,
+            "a package is held under its own directory"
+        );
+    }
+    assert!(
+        by_directory
+            .values()
+            .filter(|package| package.is_member)
+            .count()
+            == member_count,
+        "a package read as an outsider is not a member, and no member is read as one"
+    );
+    assert!(
+        by_directory.len() >= member_count,
+        "reading outsiders only adds packages"
+    );
     Ok(by_directory.into_values().collect())
 }
 
@@ -254,6 +280,20 @@ mod tests {
             panic!("expected an unreadable manifest, got {error:?}");
         };
         detail
+    }
+
+    #[test]
+    fn a_member_may_sit_outside_the_root() {
+        // A `members` entry such as `../far` names a directory above the root, and Cargo reads
+        // the package there as a member, so a member's directory is not always under the root.
+        let tree = Tree::new();
+        tree.write("Cargo.toml", "[workspace]\nmembers = [\"../far\"]\n");
+        tree.package("../far", "far", "workspace = \"../w\"\n");
+
+        let found = tree.discover("").expect("a workspace");
+
+        assert_eq!(found.len(), 1);
+        assert!(found[0].1, "the package outside the root is a member");
     }
 
     #[test]

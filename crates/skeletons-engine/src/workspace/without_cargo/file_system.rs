@@ -33,6 +33,21 @@ pub(super) fn normalized(path: &Path) -> PathBuf {
         result.components().all(|part| part != Component::CurDir),
         "a normalized path holds no current-directory component"
     );
+    // A `..` is kept only with nothing but `..` before it, so it is gone from an absolute path,
+    // whose first component is the root.
+    assert!(
+        result
+            .components()
+            .skip_while(|part| *part == Component::ParentDir)
+            .all(|part| part != Component::ParentDir),
+        "a parent component survives only at the start of a path, before any other component"
+    );
+    if path.is_absolute() {
+        assert!(
+            result.is_absolute(),
+            "the root is kept, so an absolute path stays absolute"
+        );
+    }
     result
 }
 

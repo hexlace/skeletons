@@ -22,14 +22,20 @@ pub(super) fn every_entry_is_reached(
     // Each entry is pushed at most once, when it is first reached, a root included however many
     // times `roots` names it, so the stack holds at most `entry_count` entries and the loop runs
     // at most `entry_count` times.
+    let mut reached_count: usize = 0;
     for &root in roots {
         assert!(root < entry_count, "a root is the position of an entry");
         if !reached[root] {
             reached[root] = true;
+            reached_count += 1;
             pending.push(root);
         }
     }
     while let Some(index) = pending.pop() {
+        assert!(
+            index < entry_count,
+            "only the position of an entry was ever pushed"
+        );
         for &dependency in lockfile.entries()[index].dependency_indexes() {
             assert!(
                 dependency < entry_count,
@@ -37,9 +43,18 @@ pub(super) fn every_entry_is_reached(
             );
             if !set_aside.contains(&dependency) && !reached[dependency] {
                 reached[dependency] = true;
+                reached_count += 1;
                 pending.push(dependency);
             }
         }
+        assert!(
+            reached_count <= entry_count,
+            "an entry is marked reached once, so no more entries are reached than exist"
+        );
+        assert!(
+            pending.len() <= reached_count,
+            "an entry is pushed only as it is marked reached"
+        );
     }
 
     (0..entry_count).all(|index| reached[index] || set_aside.contains(&index))

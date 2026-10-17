@@ -87,8 +87,14 @@ impl TestRepository {
         command
             .current_dir(self.path())
             .env("HOME", self.home.path())
-            .env_remove("GIT_CONFIG_GLOBAL")
+            // The global configuration is the empty file, not just unset:
+            // an unset one falls back to `$XDG_CONFIG_HOME/git/config`
+            // and `$HOME/.gitconfig`. `command` above already removes
+            // `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`.
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env_remove("XDG_CONFIG_HOME")
             .env_remove("GIT_CONFIG_SYSTEM")
+            .env_remove("GIT_CONFIG_COUNT")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .args([
                 // A detached maintenance child outliving the command that
@@ -260,6 +266,7 @@ impl TestCommand {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::ffi::OsStr;
     use std::path::PathBuf;
 
     use super::{TestRepository, describe_difference};
@@ -309,6 +316,44 @@ mod tests {
         );
         assert!(!description.contains("same"), "{description}");
         assert!(!description.contains("SECRET"), "{description}");
+    }
+
+    #[test]
+    fn every_fixture_git_command_takes_no_configuration_or_repository_from_the_environment() {
+        // The command is built and inspected without being run, so the test does not depend on
+        // what this process's environment holds: each variable that would bring in a
+        // configuration file, a configuration value or another repository must be recorded as
+        // removed (`None`), and the global configuration as the empty file `/dev/null`, so that
+        // no `~/.gitconfig` or `$XDG_CONFIG_HOME/git/config` can be read.
+        let repository = TestRepository::new();
+
+        let command = repository.git(&["status"]).command;
+        let environment: BTreeMap<&OsStr, Option<&OsStr>> = command.get_envs().collect();
+
+        for removed in [
+            "XDG_CONFIG_HOME",
+            "GIT_CONFIG_SYSTEM",
+            "GIT_CONFIG_COUNT",
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+        ] {
+            assert_eq!(
+                environment.get(OsStr::new(removed)),
+                Some(&None),
+                "{removed} must be removed from the environment of git"
+            );
+        }
+        assert_eq!(
+            environment.get(OsStr::new("GIT_CONFIG_GLOBAL")),
+            Some(&Some(OsStr::new("/dev/null"))),
+            "the global configuration is the empty file"
+        );
+        assert_eq!(
+            environment.get(OsStr::new("GIT_CONFIG_NOSYSTEM")),
+            Some(&Some(OsStr::new("1"))),
+            "the system configuration is not read"
+        );
     }
 
     #[test]

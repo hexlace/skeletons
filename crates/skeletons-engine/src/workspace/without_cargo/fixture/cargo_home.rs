@@ -19,12 +19,16 @@ const VENDORED_CHECKSUM: &str = "{\"files\":{},\"package\":null}";
 /// workspace read afterwards meets Cargo's own verdict on its lockfile.
 pub(in crate::workspace::without_cargo) struct CargoHome {
     directory: tempfile::TempDir,
+    /// A `HOME` that holds no configuration, for the Cargo this home runs: Cargo's git reads
+    /// `~/.gitconfig` through it.
+    home: tempfile::TempDir,
 }
 
 impl CargoHome {
     pub(in crate::workspace::without_cargo) fn new() -> Self {
         Self {
             directory: tempfile::tempdir().expect("a temporary directory"),
+            home: tempfile::tempdir().expect("a temporary directory"),
         }
     }
 
@@ -86,11 +90,8 @@ impl CargoHome {
         directory: &Path,
         network: Network,
     ) -> Result<(), String> {
-        let mut generate = crate::cargo::command();
-        generate
-            .current_dir(directory)
-            .env("CARGO_HOME", self.path())
-            .arg("generate-lockfile");
+        let mut generate = self.cargo_command();
+        generate.current_dir(directory).arg("generate-lockfile");
         match network {
             Network::Refused => {
                 generate.arg("--offline");
@@ -109,7 +110,60 @@ impl CargoHome {
         }
     }
 
+    /// A cargo command with this home as `CARGO_HOME` and a `HOME` of its own, so that the user's
+    /// `~/.gitconfig` is never read when Cargo fetches a git source.
+    fn cargo_command(&self) -> std::process::Command {
+        let mut command = crate::cargo::command();
+        command
+            .env("CARGO_HOME", self.path())
+            .env("HOME", self.home.path());
+        command
+    }
+
     fn vendored(&self) -> PathBuf {
         self.path().join("vendor")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::ffi::OsStr;
+
+    use super::CargoHome;
+
+    #[test]
+    fn the_cargo_command_has_a_home_of_its_own_and_this_cargo_home() {
+        // Cargo reads git's configuration through `HOME` when it fetches a git source, so the
+        // command must not inherit the running user's. The command is built and inspected
+        // without being run: its `HOME` must be the empty directory this home owns, which is not
+        // its `CARGO_HOME`, and its `CARGO_HOME` must be this home.
+        let cargo_home = CargoHome::new();
+
+        let command = cargo_home.cargo_command();
+        let environment: BTreeMap<&OsStr, Option<&OsStr>> = command.get_envs().collect();
+
+        assert_eq!(
+            environment.get(OsStr::new("HOME")),
+            Some(&Some(cargo_home.home.path().as_os_str())),
+            "HOME is the directory of its own"
+        );
+        assert_eq!(
+            environment.get(OsStr::new("CARGO_HOME")),
+            Some(&Some(cargo_home.path().as_os_str())),
+            "CARGO_HOME is this home"
+        );
+        assert_ne!(
+            cargo_home.home.path(),
+            cargo_home.path(),
+            "the two directories are separate"
+        );
+        assert_eq!(
+            std::fs::read_dir(cargo_home.home.path())
+                .expect("the home directory exists")
+                .count(),
+            0,
+            "the home holds no configuration"
+        );
     }
 }

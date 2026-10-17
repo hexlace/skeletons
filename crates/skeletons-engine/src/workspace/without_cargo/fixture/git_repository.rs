@@ -5,6 +5,17 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
+/// The variables removed from the environment of every git command: the ones that point git at a
+/// configuration file or value, or at a repository, other than the fixture's own.
+const REMOVED_VARIABLES: [&str; 6] = [
+    "XDG_CONFIG_HOME",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_COUNT",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+];
+
 /// A git repository with one package in it, in the shape the git source cases need: the branch
 /// `main` at the first commit, the tag `v1` on it, and the branch `dev` one commit ahead.
 ///
@@ -65,14 +76,27 @@ impl GitRepository {
         self.git(&["commit", "--quiet", "--message", message]);
     }
 
-    /// Runs git in the repository with `arguments`, and gives what it printed.
-    fn git(&self, arguments: &[&str]) -> String {
-        let output = Command::new("git")
+    /// A git command in the repository that takes nothing from the environment of the process
+    /// that runs it: a `HOME` of its own, the global configuration the empty file `/dev/null`,
+    /// and no system configuration, configuration directory, configuration value or repository
+    /// location, each of which would bring in the machine's settings or another repository.
+    fn command(&self) -> Command {
+        let mut command = Command::new("git");
+        command
             .current_dir(self.path())
             .env("HOME", self.home.path())
-            .env_remove("GIT_CONFIG_GLOBAL")
-            .env_remove("GIT_CONFIG_SYSTEM")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1");
+        for variable in REMOVED_VARIABLES {
+            command.env_remove(variable);
+        }
+        command
+    }
+
+    /// Runs git in the repository with `arguments`, and gives what it printed.
+    fn git(&self, arguments: &[&str]) -> String {
+        let output = self
+            .command()
             .args([
                 // A background maintenance process would change the repository under a test
                 // that believes it is quiescent.
@@ -100,5 +124,51 @@ impl GitRepository {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::ffi::OsStr;
+
+    use super::GitRepository;
+
+    #[test]
+    fn the_git_command_takes_no_configuration_or_repository_from_the_environment() {
+        // The command is built and inspected without being run, so the test does not depend on
+        // what this process's environment holds: each variable that would bring in a
+        // configuration file, a configuration value or another repository must be recorded as
+        // removed (`None`), and the global configuration as the empty file `/dev/null`, so that
+        // no `~/.gitconfig` or `$XDG_CONFIG_HOME/git/config` can be read.
+        let repository = GitRepository::new("p");
+
+        let command = repository.command();
+        let environment: BTreeMap<&OsStr, Option<&OsStr>> = command.get_envs().collect();
+
+        for removed in [
+            "XDG_CONFIG_HOME",
+            "GIT_CONFIG_SYSTEM",
+            "GIT_CONFIG_COUNT",
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+        ] {
+            assert_eq!(
+                environment.get(OsStr::new(removed)),
+                Some(&None),
+                "{removed} must be removed from the environment of git"
+            );
+        }
+        assert_eq!(
+            environment.get(OsStr::new("GIT_CONFIG_GLOBAL")),
+            Some(&Some(OsStr::new("/dev/null"))),
+            "the global configuration is the empty file"
+        );
+        assert_eq!(
+            environment.get(OsStr::new("GIT_CONFIG_NOSYSTEM")),
+            Some(&Some(OsStr::new("1"))),
+            "the system configuration is not read"
+        );
     }
 }

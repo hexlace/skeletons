@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
+use super::cargo_configuration::{self, HomeVariables, cargo_home_directory};
 use super::currency::verify_lockfile_is_current;
 use super::document;
 use super::error::ReadWithoutCargoError;
@@ -20,7 +21,14 @@ const LOCKFILE_NAME: &str = "Cargo.lock";
 ///
 /// The result is what [`read`](crate::read) gives for the same files, or, in the one stale shape
 /// the lockfile can be in, what it gives once Cargo brings the lock up to date: every wearing
-/// table any member declares. No Cargo and no Cargo home is needed.
+/// table any member declares. No Cargo is needed, and a Cargo home need not exist.
+///
+/// Cargo's configuration files are read as Cargo reads them, because three things in them change
+/// what Cargo reads: `.cargo/config`, or `.cargo/config.toml` when there is no `config`, in
+/// `directory` and in each directory above it, and then the Cargo home's `config` or
+/// `config.toml`. The home is `CARGO_HOME` when that is set and not empty, taken from
+/// `directory` when relative, and otherwise `.cargo` in a `HOME` that is set and not empty. Only
+/// those two variables are read, and nothing is read when neither is set.
 ///
 /// `directory` may be any directory at or below the workspace; the manifests above it are found
 /// as Cargo finds them. `locations` says where the files of each locked package with a `source`
@@ -33,18 +41,31 @@ const LOCKFILE_NAME: &str = "Cargo.lock";
 /// # Errors
 ///
 /// [`ReadWithoutCargoError::DirectoryNotFound`] when `directory` cannot be read,
-/// [`ReadWithoutCargoError::ManifestUnreadable`] when a manifest or the lockfile cannot be, or
-/// Cargo refuses it too (a virtual workspace with no members is one),
+/// [`ReadWithoutCargoError::ManifestUnreadable`] when a manifest, the lockfile or a configuration
+/// file cannot be, or Cargo refuses it too (a virtual workspace with no members, and a
+/// configuration file that is not TOML, are two),
 /// [`ReadWithoutCargoError::Unsupported`] when the workspace uses something only Cargo reads
 /// (`[patch]`, `[replace]`, `package.workspace`, one package under two dependency keys, a lockfile
-/// format other than 3 and 4), and [`ReadWithoutCargoError::Lockfile`] when `Cargo.lock` is
-/// missing or out of date. A missing `Cargo.lock` is that last error even when the workspace also
-/// uses something only Cargo reads.
+/// format other than 3 and 4, and in a configuration file `paths`, `[patch]` or `include`), and
+/// [`ReadWithoutCargoError::Lockfile`] when `Cargo.lock` is missing or out of date. A missing
+/// `Cargo.lock` is that last error even when the workspace also uses something only Cargo reads.
 pub fn read_without_cargo(
     directory: &Path,
     locations: &BTreeMap<LockedPackageId, PathBuf>,
 ) -> Result<Workspace, ReadWithoutCargoError> {
-    Ok(from_document(&read_document(directory, locations)?))
+    read_workspace(directory, locations, &HomeVariables::from_process())
+}
+
+/// [`read_without_cargo`] with the variables that find the Cargo home given, so that a test reads
+/// a home of its own and not the one of whoever runs it.
+pub(super) fn read_workspace(
+    directory: &Path,
+    locations: &BTreeMap<LockedPackageId, PathBuf>,
+    variables: &HomeVariables,
+) -> Result<Workspace, ReadWithoutCargoError> {
+    Ok(from_document(&read_document(
+        directory, locations, variables,
+    )?))
 }
 
 /// The document [`read_without_cargo`] builds its workspace from, which stands in for the one
@@ -53,8 +74,14 @@ pub fn read_without_cargo(
 pub(super) fn read_document(
     directory: &Path,
     locations: &BTreeMap<LockedPackageId, PathBuf>,
+    variables: &HomeVariables,
 ) -> Result<Document, ReadWithoutCargoError> {
     let start = canonical_directory(directory)?;
+    // Cargo fails on a configuration file it cannot read before it looks at anything else, so
+    // the files are read first. What they ask of Cargo that this reader does not follow is
+    // refused only after the lockfile is found and parsed, as with every other refusal.
+    let cargo_home = cargo_home_directory(variables, &start);
+    let configuration = cargo_configuration::read(&start, cargo_home.as_deref())?;
     let layout = layout::discover(&start)?;
     let (lockfile_path, lockfile_text) = lockfile_text(&layout.root_directory)?;
     let lockfile = Lockfile::parse(&lockfile_text)
@@ -63,6 +90,7 @@ pub(super) fn read_document(
     // feature enabled, so it is read before the packages are final, and the check for shapes
     // only Cargo reads follows, to cover every package on disk.
     let layout = layout::follow_locked_optional_dependencies(layout, &lockfile)?;
+    configuration.refuse_what_only_cargo_follows()?;
     unsupported::check(&layout)?;
     verify_lockfile_is_current(&lockfile, &layout.packages)?;
     document::build(&layout, &lockfile, locations)
@@ -101,7 +129,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
-    use super::read_without_cargo;
+    use super::read_workspace;
+    use crate::workspace::without_cargo::cargo_configuration::HomeVariables;
     use crate::workspace::without_cargo::error::ReadWithoutCargoError;
     use crate::workspace::without_cargo::fixture::Fixture;
     use crate::workspace::{LockedPackageId, Wearing, WearingRefusal, Workspace};
@@ -147,7 +176,7 @@ mod tests {
     }
 
     fn read(fixture: &Fixture) -> Result<Workspace, ReadWithoutCargoError> {
-        read_without_cargo(&fixture.root, &BTreeMap::new())
+        read_workspace(&fixture.root, &BTreeMap::new(), &HomeVariables::unset())
     }
 
     /// The worn dependencies of `workspace` as `manifest key package version`, and its refusals.
@@ -235,7 +264,8 @@ mod tests {
             fixture.root.join("../checkout"),
         )]);
 
-        let workspace = read_without_cargo(&fixture.root, &locations).expect("a workspace");
+        let workspace = read_workspace(&fixture.root, &locations, &HomeVariables::unset())
+            .expect("a workspace");
 
         assert_eq!(
             outcomes(&workspace),
@@ -250,9 +280,13 @@ mod tests {
     fn a_directory_that_does_not_exist_is_not_found() {
         let fixture = Fixture::new();
 
-        let error = read_without_cargo(&fixture.root.join("absent"), &BTreeMap::new())
-            .err()
-            .expect("nothing is there");
+        let error = read_workspace(
+            &fixture.root.join("absent"),
+            &BTreeMap::new(),
+            &HomeVariables::unset(),
+        )
+        .err()
+        .expect("nothing is there");
 
         assert!(
             matches!(error, ReadWithoutCargoError::DirectoryNotFound { .. }),
@@ -265,9 +299,13 @@ mod tests {
         let fixture = Fixture::new();
         fixture.write("Cargo.toml", "[workspace]\n");
 
-        let error = read_without_cargo(&fixture.root.join("Cargo.toml"), &BTreeMap::new())
-            .err()
-            .expect("a file");
+        let error = read_workspace(
+            &fixture.root.join("Cargo.toml"),
+            &BTreeMap::new(),
+            &HomeVariables::unset(),
+        )
+        .err()
+        .expect("a file");
 
         assert!(
             matches!(error, ReadWithoutCargoError::DirectoryNotFound { .. }),
@@ -499,6 +537,112 @@ mod tests {
         assert!(detail_of(error).contains("Cargo.lock"));
     }
 
+    /// A wearer of a path skeleton, with a lockfile that is current, and `text` as the
+    /// configuration file of the workspace root.
+    fn wearer_with_configuration(text: &str) -> Fixture {
+        let fixture = wearer(
+            "{ path = \"../house-rules\" }",
+            &lock_of_app_and_skeleton(None),
+        );
+        write_skeleton(&fixture, "house-rules");
+        fixture.write(".cargo/config.toml", text);
+        fixture
+    }
+
+    #[test]
+    fn a_configuration_file_asking_for_what_only_cargo_follows_is_unsupported() {
+        let fixture = wearer_with_configuration("paths = [\"../override\"]\n");
+
+        let error = read(&fixture).err().expect("a paths override");
+
+        assert_eq!(
+            error,
+            ReadWithoutCargoError::unsupported(format!(
+                "`paths` in {}",
+                fixture.root.join(".cargo/config.toml").display()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_configuration_that_changes_nothing_is_read_past() {
+        let fixture = wearer_with_configuration("[source.crates-io]\nreplace-with = \"v\"\n");
+
+        assert!(read(&fixture).is_ok());
+    }
+
+    #[test]
+    fn a_missing_or_unreadable_lockfile_wins_over_a_configuration_refusal() {
+        // Cargo's `--locked` aborts on the lockfile before it resolves anything a configuration
+        // file asks for, so the lockfile's error is the one given.
+        let missing = wearer_with_configuration("paths = [\"../override\"]\n");
+        std::fs::remove_file(missing.root.join("Cargo.lock")).expect("remove the lockfile");
+        let unparsable = wearer_with_configuration("paths = [\"../override\"]\n");
+        unparsable.write("Cargo.lock", "not [toml");
+
+        assert_eq!(
+            read(&missing).err().expect("no lockfile"),
+            ReadWithoutCargoError::Lockfile
+        );
+        let error = read(&unparsable).err().expect("not TOML");
+        assert!(detail_of(error).contains("Cargo.lock"));
+    }
+
+    #[test]
+    fn a_configuration_file_that_is_not_toml_is_unreadable_before_the_lockfile_is_looked_at() {
+        // Cargo fails on a configuration file it cannot parse before it reads anything else,
+        // even when the lockfile is missing.
+        let fixture = wearer_with_configuration("paths = [\n");
+        std::fs::remove_file(fixture.root.join("Cargo.lock")).expect("remove the lockfile");
+
+        let error = read(&fixture).err().expect("not TOML");
+
+        assert!(detail_of(error).starts_with(&format!(
+            "{}: ",
+            fixture.root.join(".cargo/config.toml").display()
+        )));
+    }
+
+    #[test]
+    fn the_cargo_home_is_read_where_the_variables_say() {
+        // `paths` in a Cargo home the test owns is found through `CARGO_HOME`, and through
+        // `HOME/.cargo` when `CARGO_HOME` is not set.
+        let fixture = wearer_with_configuration("");
+        let cargo_home = fixture.root.join("../cargo-home");
+        fixture.write("../cargo-home/config.toml", "paths = [\"../override\"]\n");
+        fixture.write("../user/.cargo/config.toml", "paths = [\"../override\"]\n");
+
+        let through_cargo_home = read_workspace(
+            &fixture.root,
+            &BTreeMap::new(),
+            &HomeVariables::cargo_home(&cargo_home),
+        )
+        .err()
+        .expect("a paths override in the Cargo home");
+        let through_home = read_workspace(
+            &fixture.root,
+            &BTreeMap::new(),
+            &HomeVariables::home(&fixture.root.join("../user")),
+        )
+        .err()
+        .expect("a paths override in HOME/.cargo");
+
+        assert_eq!(
+            through_cargo_home,
+            ReadWithoutCargoError::unsupported(format!(
+                "`paths` in {}",
+                cargo_home.join("config.toml").display()
+            ))
+        );
+        assert_eq!(
+            through_home,
+            ReadWithoutCargoError::unsupported(format!(
+                "`paths` in {}",
+                fixture.root.join("../user/.cargo/config.toml").display()
+            ))
+        );
+    }
+
     #[test]
     fn the_workspace_is_found_from_a_directory_below_a_member() {
         let fixture = wearer(
@@ -508,7 +652,8 @@ mod tests {
         write_skeleton(&fixture, "house-rules");
         let below: PathBuf = fixture.root.join("app/src");
 
-        let workspace = read_without_cargo(&below, &BTreeMap::new()).expect("a workspace");
+        let workspace =
+            read_workspace(&below, &BTreeMap::new(), &HomeVariables::unset()).expect("a workspace");
 
         assert_eq!(workspace.root, fixture.root);
     }

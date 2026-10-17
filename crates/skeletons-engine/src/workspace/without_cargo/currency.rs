@@ -196,6 +196,7 @@ fn path_manifest_is_the_package(
 mod tests {
     use std::collections::BTreeMap;
 
+    use crate::workspace::without_cargo::cargo_configuration::HomeVariables;
     use crate::workspace::without_cargo::error::ReadWithoutCargoError;
     use crate::workspace::without_cargo::fixture::Fixture;
     use crate::workspace::without_cargo::read::read_document;
@@ -226,7 +227,7 @@ mod tests {
     const APP_DEPENDS_ON_DEP: &str = "[dependencies]\ndep = { path = \"../dep\" }\n";
 
     fn is_current(fixture: &Fixture) -> bool {
-        match read_document(&fixture.root, &BTreeMap::new()) {
+        match read_document(&fixture.root, &BTreeMap::new(), &HomeVariables::unset()) {
             Ok(_) => true,
             Err(ReadWithoutCargoError::Lockfile) => false,
             Err(other) => panic!("expected a document or the lockfile refusal, got {other:?}"),

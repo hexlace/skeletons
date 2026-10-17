@@ -155,8 +155,9 @@ framework.
 
 ### Without Cargo
 
-`check_without_cargo` runs no cargo, so it needs no cargo, no cargo home, no
-git and no `PATH`. It reads `Cargo.toml` files and `Cargo.lock` as files, and
+`check_without_cargo` runs no cargo, so it needs no cargo, no git and no `PATH`,
+and a cargo home need not exist. It reads `Cargo.toml` files, `Cargo.lock` and
+cargo's configuration files as files, and
 returns the report `check` returns for the same workspace and files, or, in the
 one stale shape described at the end of this section, the report `check` returns
 once Cargo brings the lock up to date. It needs:
@@ -235,11 +236,17 @@ A workspace whose skeletons are all path dependencies needs no locations: pass
 What it does not read, because only cargo does, it refuses by name rather than
 guess: `[patch]` and `[replace]` tables, a `package.workspace` key, one package
 declared under two dependency keys, two path packages with one name and
-version, a wearing whose own dependency is declared with `registry =`, and a
-lockfile in a format other than 3 or 4. The error has
-`is_unsupported_without_cargo` true, and `detail()` names the manifest and what
-it uses. `check` reads such a workspace where cargo is available. A manifest or
-lockfile that cannot be read, or that cargo would refuse too, has
+version, a wearing whose own dependency is declared with `registry =`, a
+lockfile in a format other than 3 or 4, and in a cargo configuration file
+`paths`, `[patch]` or `include`. The configuration files are
+`.cargo/config` (or `.cargo/config.toml` when there is no `config`) in the
+directory given and in each directory above it, then the cargo home's: the
+`CARGO_HOME` that is set and not empty, taken from the directory given when
+relative, and otherwise `.cargo` in a `HOME` that is set and not empty. The
+error has `is_unsupported_without_cargo` true, and `detail()` names the
+manifest or configuration file and what it uses. `check` reads such a workspace
+where cargo is available. A manifest, lockfile or configuration file that
+cannot be read, or that cargo would refuse too, has
 `is_manifest_or_lockfile_unreadable` true instead.
 
 A wearing's dependency declared with `registry = "name"` is refused because only

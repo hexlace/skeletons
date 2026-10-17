@@ -68,6 +68,21 @@ impl CargoHome {
         .expect("a configuration file");
     }
 
+    /// Moves this home's `config.toml`, which is the replacement of crates.io that
+    /// [`vendor`](Self::vendor) writes, into `cargo_directory`, a workspace's own `.cargo`, so
+    /// that the replacement is the workspace's and the home holds none.
+    pub(in crate::workspace::without_cargo) fn move_configuration_into(
+        &self,
+        cargo_directory: &Path,
+    ) {
+        std::fs::create_dir_all(cargo_directory).expect("a configuration directory");
+        std::fs::rename(
+            self.path().join("config.toml"),
+            cargo_directory.join("config.toml"),
+        )
+        .expect("the home's configuration moved");
+    }
+
     /// Has Cargo fetch each of `dependencies`, the lines a `[dependencies]` table holds, into
     /// this home, by locking a workspace of its own for each.
     ///

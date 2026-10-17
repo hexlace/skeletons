@@ -177,6 +177,9 @@ pub(crate) enum Environment<'directory> {
         cargo_home: &'directory Path,
         home: &'directory Path,
     },
+    /// `CARGO_HOME` is removed and `HOME` is this directory, so that the Cargo
+    /// home is the `.cargo` in it; everything else is inherited.
+    HomeOnly { home: &'directory Path },
     /// `CARGO_HOME` and `HOME` are empty directories under `empty`, `PATH` is
     /// an empty directory too, and `CARGO` is removed: nothing on the machine
     /// can supply a cargo, its configuration or its cache.
@@ -200,6 +203,9 @@ pub(crate) fn run_in_child(
     match environment {
         Environment::Homes { cargo_home, home } => {
             command.env("CARGO_HOME", cargo_home).env("HOME", home);
+        }
+        Environment::HomeOnly { home } => {
+            command.env_remove("CARGO_HOME").env("HOME", home);
         }
         Environment::NoCargoAtAll { empty } => {
             let cargo_home = empty.join("cargo-home");

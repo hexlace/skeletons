@@ -153,8 +153,8 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 /// The [`Report`] is the one [`check`] returns for the same workspace and
 /// files, or, in the one stale shape described below, the one [`check`]
 /// returns once Cargo brings the lock up to date. That is what a caller that
-/// builds without cargo can use: no cargo, no cargo home, and no `PATH` are
-/// needed, and nothing is run.
+/// builds without cargo can use: no cargo and no `PATH` are needed, a cargo home
+/// need not exist, and nothing is run.
 ///
 /// A relative `directory` is taken from the process's current directory, and
 /// any directory at or below the workspace will do; the manifests above it are
@@ -186,11 +186,19 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 /// of them. A dependency that no wearing names and that moved to another
 /// registry is a named limit: it is read as the lock has it.
 ///
+/// Cargo's configuration files are read, because three things in them change
+/// what cargo reads: `.cargo/config` (or `.cargo/config.toml` when there is no
+/// `config`) in `directory` and in each directory above it, then the cargo
+/// home's `config` or `config.toml`. The home is `CARGO_HOME` when that is set
+/// and not empty, taken from `directory` when relative, and otherwise `.cargo`
+/// in a `HOME` that is set and not empty.
+///
 /// A workspace that uses something only cargo reads is refused rather than
 /// guessed at: `[patch]`, `[replace]`, `package.workspace`, one package under
 /// two dependency keys, two path packages with one name and version, a wearing
 /// whose own dependency is declared with `registry =`, a lockfile in a format
-/// other than 3 or 4.
+/// other than 3 or 4, and in a configuration file `paths`, `[patch]` or
+/// `include`.
 ///
 /// The call writes nothing, runs no build script, needs no git and makes no
 /// network request.
@@ -203,12 +211,13 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 ///   when `directory` cannot be read: nothing is there, it is not a directory,
 ///   or it is not readable.
 /// - [`is_manifest_or_lockfile_unreadable`](ReadWorkspaceError::is_manifest_or_lockfile_unreadable)
-///   when a manifest or the lockfile cannot be read, or is one cargo would
-///   refuse too.
+///   when a manifest, the lockfile or a configuration file cannot be read, or
+///   is one cargo would refuse too.
 /// - [`is_unsupported_without_cargo`](ReadWorkspaceError::is_unsupported_without_cargo)
 ///   when the workspace uses something only cargo reads, a wearing whose own
-///   dependency is declared with `registry =` among them. `check` reads it
-///   where cargo is available.
+///   dependency is declared with `registry =`, and `paths`, `[patch]` or
+///   `include` in a configuration file, among them. `check` reads it where
+///   cargo is available.
 ///
 /// [`is_cargo_metadata_failed`](ReadWorkspaceError::is_cargo_metadata_failed),
 /// [`is_cargo_not_started`](ReadWorkspaceError::is_cargo_not_started) and

@@ -165,13 +165,15 @@ impl ReadWorkspaceError {
         matches!(self.kind, ErrorKind::MetadataUnreadable)
     }
 
-    /// Whether `check_without_cargo` could not read a manifest or the
-    /// lockfile, or found one cargo would refuse too: a file that is missing,
-    /// is not TOML or not in cargo's shape, a workspace member or path
-    /// dependency with no `Cargo.toml`, a lock entry that names no package, a
-    /// package with no target, or no manifest at or above the directory.
-    /// [`detail`](Self::detail) names the file and what was wrong. `check`
-    /// never makes this true. The command line has no word for it.
+    /// Whether `check_without_cargo` could not read a manifest, the lockfile
+    /// or a cargo configuration file, or found one cargo would refuse too: a
+    /// file that is missing, is not TOML or not in cargo's shape, a workspace
+    /// member or path dependency with no `Cargo.toml`, a lock entry that names
+    /// no package, a package with no target, no manifest at or above the
+    /// directory, or a configuration file whose `paths` is not an array or
+    /// whose `patch` is not a table. [`detail`](Self::detail) names the file
+    /// and what was wrong. `check` never makes this true. The command line has
+    /// no word for it.
     #[must_use]
     pub fn is_manifest_or_lockfile_unreadable(&self) -> bool {
         matches!(self.kind, ErrorKind::ManifestOrLockfileUnreadable)
@@ -181,9 +183,10 @@ impl ReadWorkspaceError {
     /// `check_without_cargo` did not guess: `[patch]`, `[replace]`,
     /// `package.workspace`, one package under two dependency keys, two path
     /// packages with one name and version, a lockfile in a format other than 3
-    /// or 4. [`detail`](Self::detail) names the manifest or lockfile and what
-    /// it uses. `check` reads such a workspace where cargo is available, and
-    /// never makes this true. The command line has no word for it.
+    /// or 4, and in a cargo configuration file `paths`, `[patch]` or
+    /// `include`. [`detail`](Self::detail) names the manifest, lockfile or
+    /// configuration file and what it uses. `check` reads such a workspace
+    /// where cargo is available, and never makes this true. The command line has no word for it.
     #[must_use]
     pub fn is_unsupported_without_cargo(&self) -> bool {
         matches!(self.kind, ErrorKind::UnsupportedWithoutCargo)

@@ -5,6 +5,17 @@ use std::path::{Component, Path, PathBuf};
 /// The file a package's manifest is always named.
 pub(super) const MANIFEST_FILE_NAME: &str = "Cargo.toml";
 
+/// The directory Cargo looks in for configuration, in every directory it walks and in the
+/// user's home.
+pub(super) const CARGO_DIRECTORY_NAME: &str = ".cargo";
+
+/// The configuration file's name before Cargo had `.toml` on it. Cargo still reads it, and when
+/// it exists Cargo uses it and ignores `config.toml` beside it.
+pub(super) const LEGACY_CONFIGURATION_FILE_NAME: &str = "config";
+
+/// The configuration file's name.
+pub(super) const CONFIGURATION_FILE_NAME: &str = "config.toml";
+
 /// `path` with every `.` removed and every `..` applied to the component before it, purely
 /// lexically, as Cargo normalizes a path dependency's directory. A symlink is never followed and
 /// nothing is read from the file system, so a `..` after a symlink still climbs the lexical parent.

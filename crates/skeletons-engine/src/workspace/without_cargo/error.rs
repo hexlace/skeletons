@@ -19,12 +19,14 @@ pub enum ReadWithoutCargoError {
         /// The directory and what the operating system said.
         detail: String,
     },
-    /// A manifest or the lockfile cannot be read, or Cargo would refuse it too.
+    /// A manifest, the lockfile or a configuration file cannot be read, or Cargo would refuse it
+    /// too.
     ManifestUnreadable {
         /// The file and what was wrong with it.
         detail: String,
     },
-    /// Cargo reads the workspace and this reader does not follow something in it.
+    /// Cargo reads the workspace and this reader does not follow something in it, in a manifest
+    /// or in a configuration file.
     Unsupported {
         /// The file and the feature.
         detail: String,

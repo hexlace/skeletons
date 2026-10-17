@@ -14,14 +14,20 @@
 //! crates that replaces crates.io. Cargo's verdict is read in that home, offline and `--locked`.
 //! `currency.rs` tests the same shapes against fixed lockfile text.
 //!
-//! The cases for path packages are here, and those for git and registry packages are in the
-//! files beside them.
+//! The Cargo home is the reader's to find in these tests too, and it is given the same one as
+//! Cargo: a test that has a home passes it to the reader as its `CARGO_HOME`, and one that has
+//! none gives the reader no home, so that the files of whoever runs the tests are never read.
+//!
+//! The cases for path packages are here, and those for git and registry packages, and for
+//! Cargo's configuration files, are in the files beside them.
 
+mod configuration;
 mod git;
 mod registry;
 
 use std::collections::BTreeMap;
 
+use super::cargo_configuration::HomeVariables;
 use super::differential::shape;
 use super::error::ReadWithoutCargoError;
 use super::fixture::{CargoHome, Fixture, cargo_version};
@@ -38,6 +44,9 @@ enum Verdict {
     /// A manifest or a package is refused before the lockfile is looked at: the failure Cargo
     /// reports for a package it cannot read, against the reader's unreadable manifest.
     Refused,
+    /// The workspace is one the reader declines to read because only Cargo follows something in
+    /// it, which Cargo itself reads without complaint. Only the reader gives this verdict.
+    Unsupported,
 }
 
 /// What `cargo metadata --locked` says of the workspace at `fixture`'s root.
@@ -68,12 +77,14 @@ fn cargo_verdict_of<Output>(result: Result<Output, ReadWorkspaceError>) -> Verdi
     }
 }
 
-/// What this reader says of the workspace at `fixture`'s root.
-fn reader_verdict(fixture: &Fixture) -> Verdict {
-    match read_document(&fixture.root, &BTreeMap::new()) {
+/// What this reader says of the workspace at `fixture`'s root, finding the Cargo home from
+/// `variables`.
+fn reader_verdict(fixture: &Fixture, variables: &HomeVariables) -> Verdict {
+    match read_document(&fixture.root, &BTreeMap::new(), variables) {
         Ok(_) => Verdict::Current,
         Err(ReadWithoutCargoError::Lockfile) => Verdict::Aborted,
         Err(ReadWithoutCargoError::ManifestUnreadable { .. }) => Verdict::Refused,
+        Err(ReadWithoutCargoError::Unsupported { .. }) => Verdict::Unsupported,
         Err(other) => panic!(
             "{}: the reader failed some other way: {other:?}",
             cargo_version()
@@ -86,13 +97,14 @@ fn assert_both_say(fixture: &Fixture, expected: Verdict) {
     let toolchain = cargo_version();
     assert_eq!(cargo_verdict(fixture), expected, "cargo, on {toolchain}");
     assert_eq!(
-        reader_verdict(fixture),
+        reader_verdict(fixture, &HomeVariables::unset()),
         expected,
         "the reader, on {toolchain}"
     );
 }
 
-/// Requires cargo, in the Cargo home `home`, and the reader to both say `expected`.
+/// Requires cargo, in the Cargo home `home`, and the reader, given that home as its
+/// `CARGO_HOME`, to both say `expected`.
 fn assert_both_say_in_home(fixture: &Fixture, home: &CargoHome, expected: Verdict) {
     let toolchain = cargo_version();
     assert_eq!(
@@ -101,7 +113,7 @@ fn assert_both_say_in_home(fixture: &Fixture, home: &CargoHome, expected: Verdic
         "cargo, on {toolchain}"
     );
     assert_eq!(
-        reader_verdict(fixture),
+        reader_verdict(fixture, &HomeVariables::cargo_home(home.path())),
         expected,
         "the reader, on {toolchain}"
     );
@@ -327,7 +339,7 @@ fn assert_stale_report_is_the_relocked_one(fixture: &Fixture) {
         Verdict::Aborted,
         "cargo, before the lock is brought up to date, on {toolchain}"
     );
-    let stale = read_document(&fixture.root, &BTreeMap::new())
+    let stale = read_document(&fixture.root, &BTreeMap::new(), &HomeVariables::unset())
         .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the stale lock: {error}"));
 
     lock(fixture);

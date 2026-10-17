@@ -186,7 +186,9 @@ impl ReadWorkspaceError {
     /// packages with one name and version, a lockfile in a format other than 3
     /// or 4, an optional dependency of a package outside the workspace, or of
     /// a path package it reaches, that asks a worn package for a version its
-    /// locked one does not meet but its compatible range could, and in a cargo
+    /// locked one does not meet and cargo cannot add beside it (for a registry
+    /// package, one its compatible range could meet; for a path or git
+    /// package, any), and in a cargo
     /// configuration file a non-empty `paths`, a `[patch]` with an entry or any
     /// `include`. [`detail`](Self::detail) names the manifest, lockfile or
     /// configuration file and what it uses. `check` reads such a workspace

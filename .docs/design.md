@@ -2284,16 +2284,21 @@ that canonicalisation and does not compare text.
 
 The optional-dependency refusal covers an optional dependency of a package
 outside the workspace, or of a path package one reaches, whose requirement on a
-worn package the locked version does not meet and a version of the same
-compatible range could. Once a feature enables it cargo keeps the version it
-has, finds it too old and cannot select one, and a relock does not change that,
-so it is not the stale lock whose relocked document the report equals; only
-updating the worn package helps. It is a refusal and not a reproduction because
-the reproduction is the resolver's choice of an updated version. The reader does
-not resolve features, so it refuses whenever a feature could enable the
-dependency, and a workspace where nothing does is refused too, though cargo
-reads it. A requirement in another range is left alone, since cargo adds a
-second version beside the locked one and the lock only needs rewriting. An
+worn package the locked version does not meet and cargo has no way to add
+beside it. For a registry package that is a requirement a version of the same
+compatible range could meet. Once a feature enables it cargo keeps the version
+it has, finds it too old and cannot select one, and a relock does not change
+that, so it is not the stale lock whose relocked document the report equals;
+only updating the worn package helps. A path or git source holds exactly one
+version, so for a worn package from one the range plays no part: any requirement
+the locked version does not meet is refused, in whatever range it is written,
+and a relock does not get past it. It is a refusal and not a reproduction
+because the reproduction is the resolver's choice of an updated version. The
+reader does not resolve features, so it refuses whenever a feature could enable
+the dependency, and a workspace where nothing does is refused too, though cargo
+reads it. A registry package's requirement in another range is left alone, since
+cargo adds a second version beside the locked one and the lock only needs
+rewriting. An
 optional path package whose manifest cannot be read is passed over, since cargo
 does not load it until a feature enables it. A requirement inside a registry
 package's manifest is out of reach, which is the limit left: an unlocked

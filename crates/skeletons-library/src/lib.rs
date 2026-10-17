@@ -218,9 +218,12 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 /// other than 3 or 4, a non-empty `paths`, a `[patch]` with an entry or any
 /// `include` in a configuration file, and an optional dependency of a package
 /// outside the workspace, or of a path package it reaches, that asks a worn
-/// package for a version the lock does not name but that version's compatible
-/// range could. Cargo cannot resolve the workspace once a feature enables that
-/// dependency, and a relock does not help. This call does not resolve features,
+/// package for a version the lock does not name and cargo cannot add beside
+/// the locked one: for a package from a registry, a version in the locked
+/// version's compatible range, since a requirement in another range gets a
+/// second version; for a package from a path or a git repository, which holds
+/// only the locked version, any version. Cargo cannot resolve the workspace
+/// once a feature enables that dependency, and a relock does not help. This call does not resolve features,
 /// so it refuses when a feature could enable it: a workspace where that
 /// dependency is off is refused too, and `check` reads it.
 ///
@@ -240,7 +243,9 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 /// - [`is_unsupported_without_cargo`](ReadWorkspaceError::is_unsupported_without_cargo)
 ///   when the workspace uses something only cargo reads, a wearing whose own
 ///   dependency is declared with `registry =`, an optional dependency that
-///   asks a worn package for a newer version in the range of its locked one,
+///   asks a worn package for a version its locked one does not meet and cargo
+///   cannot add beside it (a version in the locked one's compatible range for
+///   a registry package, any version for a path or git package),
 ///   and `paths`, `[patch]` or `include` in a configuration file, among them.
 ///   `check` reads it where cargo is available, except for that optional
 ///   dependency once a feature enables it: cargo cannot resolve the workspace

@@ -199,6 +199,10 @@ fn read_member(root: &Root, directory: &Path) -> Result<PathPackage, ReadWithout
 /// Reads into `by_directory` each package a member reaches by path that is not itself a member,
 /// and each such package those reach, following only what a package outside the workspace
 /// brings along.
+///
+/// A directory already in `by_directory` is skipped, so each is read once and pushes its own
+/// finite list of path dependencies once. That bounds the loop by the members' path dependencies
+/// plus those of every outsider read, however many of them name the same directory.
 fn read_outsiders(
     by_directory: &mut BTreeMap<PathBuf, PathPackage>,
 ) -> Result<(), ReadWithoutCargoError> {

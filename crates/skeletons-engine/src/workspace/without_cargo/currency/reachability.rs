@@ -17,13 +17,17 @@ pub(super) fn every_entry_is_reached(
 ) -> bool {
     let entry_count = lockfile.entries().len();
     let mut reached = vec![false; entry_count];
-    let mut pending: Vec<usize> = roots.to_vec();
+    let mut pending: Vec<usize> = Vec::with_capacity(entry_count);
 
-    // Each entry is pushed at most once, when it is first reached, so the stack holds at most
-    // `entry_count` entries and the loop runs at most `entry_count` times.
+    // Each entry is pushed at most once, when it is first reached, a root included however many
+    // times `roots` names it, so the stack holds at most `entry_count` entries and the loop runs
+    // at most `entry_count` times.
     for &root in roots {
         assert!(root < entry_count, "a root is the position of an entry");
-        reached[root] = true;
+        if !reached[root] {
+            reached[root] = true;
+            pending.push(root);
+        }
     }
     while let Some(index) = pending.pop() {
         for &dependency in lockfile.entries()[index].dependency_indexes() {

@@ -49,10 +49,10 @@ const LOCKFILE_NAME: &str = "Cargo.lock";
 /// [`ReadWithoutCargoError::Unsupported`] when the workspace uses something only Cargo reads
 /// (`[patch]`, `[replace]`, `package.workspace`, one package under two dependency keys, a lockfile
 /// format other than 3 and 4, a `git` URL with a query of its own and a locked git source whose
-/// query is not one `branch`, `tag` or `rev`, an optional dependency of a package outside the workspace that asks
-/// a worn package for a version the locked one does not meet and Cargo cannot add beside it, which
-/// is a version in the locked one's range for a registry package and any for a path or git
-/// package, and in a configuration file `paths`, `[patch]` or `include`), and
+/// query is not one `branch`, `tag` or `rev`, an optional dependency of a package outside the
+/// workspace that asks a worn package for a version the locked one does not meet and Cargo cannot
+/// add beside it, which is a version in the locked one's range for a registry package and any for a
+/// path or git package, and in a configuration file `paths`, `[patch]` or `include`), and
 /// [`ReadWithoutCargoError::Lockfile`] when `Cargo.lock` is missing or out of date. A missing
 /// `Cargo.lock` is that last error even when the workspace also uses something only Cargo reads.
 pub fn read_without_cargo(

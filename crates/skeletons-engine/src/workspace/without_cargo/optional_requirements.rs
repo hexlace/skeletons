@@ -2,19 +2,20 @@
 //! its lock does not name.
 //!
 //! A registry holds many versions of a package, and Cargo keeps one of them for each range of
-//! versions it calls compatible ([`compatible_range::CompatibleRange`]). When a feature enables an optional
-//! dependency that asks a registry package for a version in the range a worn package is locked
-//! in, and the locked version does not meet it, Cargo cannot resolve the workspace at all: it
-//! keeps the version it has and finds it too old, and only updating the worn package helps. A
+//! versions it calls compatible ([`compatible_range::CompatibleRange`]). When a feature enables an
+//! optional dependency that asks a registry package for a version in the range a worn package is
+//! locked in, and the locked version does not meet it, Cargo cannot resolve the workspace at all:
+//! it keeps the version it has and finds it too old, and only updating the worn package helps. A
 //! requirement in another range gets a second version beside the locked one, and a relock gives
 //! Cargo's own document.
 //!
 //! A path or git source holds exactly one version of a package, so there is no second version to
-//! give: any requirement the locked version does not meet fails once the dependency is enabled,
-//! in whatever range it is written, and no relock gets past it ([`source_kind::SourceKind`]).
+//! give: any requirement the locked version does not meet fails once the dependency is enabled, in
+//! whatever range it is written, and no relock gets past it ([`source_kind::SourceKind`]).
 //!
-//! That is not the stale lock this reader reads through, where a relock gives Cargo's own
-//! document, so it is refused.
+//! Neither a registry requirement in the locked range nor an unmet requirement on a path or git
+//! package is the stale lock this reader reads through, where a relock gives Cargo's own document,
+//! so both are refused.
 //!
 //! The reader does not resolve features, so it cannot tell whether a feature enables the
 //! dependency, and refuses whenever one could. A workspace where nothing does is refused too,

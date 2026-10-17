@@ -2283,14 +2283,14 @@ as written would call a lock cargo just wrote stale, and so the reader ports
 that canonicalisation and does not compare text. A git URL with a query of its
 own is the one shape it does not port: cargo keeps that query in the lock's
 source and writes the reference after it (`?x=1?branch=dev`), and reproducing
-that is not worth it for a shape this rare, so a manifest URL with any query,
-an empty one included, and a lock source whose query is not exactly one `branch`,
+that is not worth it for a shape this rare, so a manifest URL with any query, an
+empty one included, and a lock source whose query is not exactly one `branch`,
 `tag` or `rev` are refused by name, before currency could call the lock stale.
 
 The optional-dependency refusal covers an optional dependency of a package
 outside the workspace, or of a path package one reaches, whose requirement on a
-worn package the locked version does not meet and cargo has no way to add
-beside it. For a registry package that is a requirement a version of the same
+worn package the locked version does not meet and cargo has no way to add beside
+it. For a registry package that is a requirement a version of the same
 compatible range could meet. Once a feature enables it cargo keeps the version
 it has, finds it too old and cannot select one, and a relock does not change
 that, so it is not the stale lock whose relocked document the report equals;
@@ -2303,14 +2303,13 @@ reader does not resolve features, so it refuses whenever a feature could enable
 the dependency, and a workspace where nothing does is refused too, though cargo
 reads it. A registry package's requirement in another range is left alone, since
 cargo adds a second version beside the locked one and the lock only needs
-rewriting. An
-optional path package whose manifest cannot be read is passed over, since cargo
-does not load it until a feature enables it. A requirement inside a registry
-package's manifest is out of reach, which is the limit left: an unlocked
-registry dependency that needs a newer version of a worn package is a lock cargo
-refuses until the package is updated, the update takes the newest compatible
-version, and the report shows the version the lock names, which it says in
-`WornSkeleton::version`.
+rewriting. An optional path package whose manifest cannot be read is passed
+over, since cargo does not load it until a feature enables it. A requirement
+inside a registry package's manifest is out of reach, which is the limit left:
+an unlocked registry dependency that needs a newer version of a worn package is
+a lock cargo refuses until the package is updated, the update takes the newest
+compatible version, and the report shows the version the lock names, which it
+says in `WornSkeleton::version`.
 
 The reader checks the lock against the manifests as far as the files show:
 every package on disk is locked, each package's declarations are among its

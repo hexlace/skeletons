@@ -4,14 +4,14 @@
 //! Cargo keeps one version of a package for each range of versions it calls compatible, and the
 //! workspace's `house-rules = "4"` is locked at 4.5.6. A package outside the workspace that a
 //! feature enables later, and that asks for `house-rules` `4.6`, is in the range 4.5.6 is in and
-//! not met by it: Cargo cannot resolve the workspace until the worn package is updated, however
-//! it is asked. That is no stale lock for the reader to report through, and the reader refuses
-//! it. A requirement in another range, or one the locked version meets, gives Cargo a lock to
-//! rewrite, and the reader reports as it always did. A worn package from a path or a git
-//! repository holds one version, so there Cargo cannot resolve a requirement in any range the
-//! locked version does not meet, and the reader refuses it. Every case runs in a Cargo home the test
-//! owns, which vendors `house-rules` 4.5.6 as the replacement for crates.io, and 4.6.0 and 5.0.0
-//! after the lock where a case needs a version to ask for.
+//! not met by it: Cargo cannot resolve the workspace until the worn package is updated, however it
+//! is asked. That is no stale lock for the reader to report through, and the reader refuses it. A
+//! requirement in another range, or one the locked version meets, gives Cargo a lock to rewrite,
+//! and the reader reports as it always did. A worn package from a path or a git repository holds
+//! one version, so there Cargo cannot resolve a requirement in any range the locked version does
+//! not meet, and the reader refuses it. Every case runs in a Cargo home the test owns, which
+//! vendors `house-rules` 4.5.6 as the replacement for crates.io, and 4.6.0 and 5.0.0 after the lock
+//! where a case needs a version to ask for.
 //!
 //! The package outside the workspace is `y`, in a directory beside the root, and its optional
 //! dependency is `z`. A test writes `z` and then changes `y` so that a feature enables `z`, so

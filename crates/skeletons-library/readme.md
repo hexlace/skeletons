@@ -235,18 +235,18 @@ A workspace whose skeletons are all path dependencies needs no locations: pass
 
 What it does not read, because only cargo does, it refuses by name rather than
 guess: `[patch]` and `[replace]` tables, a `package.workspace` key, one package
-declared under two dependency keys, two path packages with one name and
-version, a wearing whose own dependency is declared with `registry =`, a
-lockfile in a format other than 3 or 4, a git URL with a query of its own, in a
-cargo configuration file a non-empty `paths`, a `[patch]` with an entry, or any
+declared under two dependency keys, two path packages with one name and version,
+a wearing whose own dependency is declared with `registry =`, a lockfile in a
+format other than 3 or 4, a git URL with a query of its own, in a cargo
+configuration file a non-empty `paths`, a `[patch]` with an entry, or any
 `include`, and an optional dependency that asks a worn package for a version the
 locked one does not meet (the last is described below). The error has
-`is_unsupported_without_cargo` true, and `detail()` names
-the manifest or configuration file and what it uses. `check` reads such a
-workspace where cargo is available, except for that optional dependency once a
-feature enables it, where cargo cannot resolve the workspace at all. A
-manifest, lockfile or configuration file that cannot be read, or that cargo
-would refuse too, has `is_manifest_or_lockfile_unreadable` true instead.
+`is_unsupported_without_cargo` true, and `detail()` names the manifest or
+configuration file and what it uses. `check` reads such a workspace where cargo
+is available, except for that optional dependency once a feature enables it,
+where cargo cannot resolve the workspace at all. A manifest, lockfile or
+configuration file that cannot be read, or that cargo would refuse too, has
+`is_manifest_or_lockfile_unreadable` true instead.
 
 The configuration files are `.cargo/config` (or `.cargo/config.toml` when there
 is no `config`) in the directory given and in each directory above it up to
@@ -272,30 +272,29 @@ cargo itself refuses, such as `git@github.com:foo/bar.git`, makes the manifest
 unreadable. A URL with a query of its own, such as `https://example.test/g?x=1`
 (an empty query too), is refused by name, and so is a lockfile source whose
 query is anything but one `branch`, `tag` or `rev`: cargo keeps that query in
-the source, so the lockfile it wrote is current to cargo, and this library
-reads a source's query only as the one reference.
+the source, so the lockfile it wrote is current to cargo, and this library reads
+a source's query only as the one reference.
 
-An optional dependency of a package outside the workspace, or of a path
-package that dependency reaches, that asks a worn package for a version the
-locked one does not meet, is refused, naming the manifest, the dependency and
-the worn package, when cargo has no way to add a version beside the locked one.
-For a worn package from a registry that is a version in the same range of
-versions cargo takes for one package: cargo keeps one version of a package for
-each such range, so once a feature enables that dependency it finds the locked
-one too old and fails, and a relock does not help; only updating the worn
-package does. A worn package from a path or a git repository holds exactly one
-version, so any requirement the locked one does not meet is refused, in
-whatever range it is written. That is not the stale lock described below, where a relock
-gives the document the report equals. The cost is that the reader does not
-resolve features, so it refuses whenever a feature could enable the
-dependency, and a workspace where that dependency is off is refused too, though
-`check` reads it where cargo is available. For a worn package from a registry, a
-requirement in another range is not refused, since cargo then keeps a second
-version beside the locked one. Nor is a
-requirement the locked version meets, one that does not parse, or one in the
-manifest of a registry package, which is not a file the function has. An
-optional path dependency whose manifest cannot be read is passed over, because
-cargo does not load it until a feature enables it.
+An optional dependency of a package outside the workspace, or of a path package
+that dependency reaches, that asks a worn package for a version the locked one
+does not meet, is refused, naming the manifest, the dependency and the worn
+package, when cargo has no way to add a version beside the locked one. For a
+worn package from a registry that is a version in the same range of versions
+cargo takes for one package: cargo keeps one version of a package for each such
+range, so once a feature enables that dependency it finds the locked one too old
+and fails, and a relock does not help; only updating the worn package does. A
+worn package from a path or a git repository holds exactly one version, so any
+requirement the locked one does not meet is refused, in whatever range it is
+written. That is not the stale lock described below, where a relock gives the
+document the report equals. The cost is that the reader does not resolve
+features, so it refuses whenever a feature could enable the dependency, and a
+workspace where that dependency is off is refused too, though `check` reads it
+where cargo is available. For a worn package from a registry, a requirement in
+another range is not refused, since cargo then keeps a second version beside the
+locked one. Nor is a requirement the locked version meets, one that does not
+parse, or one in the manifest of a registry package, which is not a file the
+function has. An optional path dependency whose manifest cannot be read is
+passed over, because cargo does not load it until a feature enables it.
 
 A wearing's dependency declared with `registry = "name"` is refused because only
 Cargo's configuration says which index that name stands for: the lock entry

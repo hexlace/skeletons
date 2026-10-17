@@ -157,7 +157,7 @@ fn workspace_of_one_worn_version(app_dependency: &str, z_dependency: &str) -> Fi
 }
 
 #[test]
-fn a_requirement_in_another_range_on_a_worn_path_package_is_refused() {
+fn a_worn_path_package_asked_for_outside_its_compatible_range_is_refused() {
     // A path package holds one version. `house-rules` 1.0.0 sits in a directory, `app` wears it
     // by path, and `z` asks for it at `^2` by the same path. Cargo cannot keep a second version
     // beside it as it would from a registry, so once `y` enables `z` it fails to select one,
@@ -180,7 +180,7 @@ fn a_requirement_in_another_range_on_a_worn_path_package_is_refused() {
 }
 
 #[test]
-fn a_requirement_in_another_range_on_a_worn_git_package_is_refused() {
+fn a_worn_git_package_asked_for_outside_its_compatible_range_is_refused() {
     // The same for a git source, which also holds one version: `house-rules` 1.0.0 in a
     // `file://` repository, worn by `app` and asked for at `^2` from that repository by `z`.
     // Cargo fails to select a version once `y` enables `z`, and the reader refuses it.
@@ -282,12 +282,12 @@ fn a_requirement_the_locked_worn_version_meets_is_reported_as_after_a_relock() {
 }
 
 #[test]
-fn a_requirement_in_another_range_than_the_locked_one_is_reported_as_after_a_relock() {
-    // The control against over-refusing another range of a registry package (a path or git
-    // package is refused there, as the two tests above it say): `z` asks for `^5`. Cargo keeps one
-    // version for each range, so it adds 5.0.0 beside 4.5.6 and leaves the worn package alone,
-    // and a relock fixes the lock. A requirement in a range the lock does not hold is no reason
-    // to refuse.
+fn a_worn_registry_package_asked_for_outside_its_range_is_not_refused() {
+    // The control against over-refusing another range of a registry package: `z` asks for `^5`.
+    // Cargo keeps one version for each range, so it adds 5.0.0 beside 4.5.6 and leaves the worn
+    // package alone, and the stale report is the one a relock gives. A requirement in a range the
+    // lock does not hold is no reason to refuse here. A path or git package holds one version,
+    // so it is refused there, as the two tests named for those sources hold.
     let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"5\"\n");
     enable_z(&fixture);
     home.vendor("house-rules", "5.0.0");

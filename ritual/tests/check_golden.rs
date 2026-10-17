@@ -5,15 +5,16 @@
 //! Every other scenario in this directory asserts on parts of the output. This
 //! one pins all of it, stdout, stderr and exit status, so that a change which
 //! alters anything the two commands print, for any reason, fails here. The
-//! expected text is a fixed value written below; the one place it varies is the
-//! checked-in skeleton's location, which the commands print and the tests fill
-//! in.
+//! expected text is a fixed value written below. Each fixture carries its own
+//! copy of the skeleton at a relative path, so the path the commands print is
+//! the same wherever the checkout sits.
 
 mod support;
 
 use support::passthrough_plain::PASSTHROUGH_PLAIN_RENDER;
 use support::{
-    Fixture, TestOutcome, path_dependency_on_test_skeleton, wearing_table, write_package_manifest,
+    Fixture, TestOutcome, path_dependency_on_copied_test_skeleton, wearing_table,
+    write_package_manifest,
 };
 
 /// The workspace under test: `passthrough-plain` worn under its own name, a
@@ -21,9 +22,13 @@ use support::{
 /// a wearing table `ghost` that no dependency is declared under.
 fn drifted_and_refused() -> Result<Fixture, Box<dyn std::error::Error>> {
     let fixture = Fixture::new()?;
+    let skeleton = path_dependency_on_copied_test_skeleton(
+        fixture.root(),
+        "passthrough-plain",
+        "passthrough-plain",
+    )?;
     let extra = format!(
-        "[dependencies]\n{}\n{}\n{}",
-        path_dependency_on_test_skeleton("passthrough-plain", "passthrough-plain"),
+        "[dependencies]\n{skeleton}\n{}\n{}",
         wearing_table("passthrough-plain", ""),
         wearing_table("ghost", ""),
     );
@@ -48,10 +53,7 @@ fn check_prints_these_exact_bytes_for_a_drifted_and_refused_workspace() -> TestO
     let report = fixture.run(&["skeletons", "check"])?;
 
     assert_eq!(report.exit_code, 1, "stderr was: {}", report.stderr);
-    assert_eq!(
-        report.stdout,
-        EXPECTED_HUMAN_STDOUT.replace("<skeleton>", &skeleton_location()?)
-    );
+    assert_eq!(report.stdout, EXPECTED_HUMAN_STDOUT);
     assert_eq!(report.stderr, EXPECTED_HUMAN_STDERR);
     Ok(())
 }
@@ -65,28 +67,14 @@ fn check_json_prints_these_exact_bytes_for_a_drifted_and_refused_workspace() -> 
     let report = fixture.run(&["skeletons", "check", "--json"])?;
 
     assert_eq!(report.exit_code, 1, "stderr was: {}", report.stderr);
-    assert_eq!(
-        report.stdout,
-        EXPECTED_JSON_STDOUT.replace("<skeleton>", &skeleton_location()?)
-    );
+    assert_eq!(report.stdout, EXPECTED_JSON_STDOUT);
     assert_eq!(report.stderr, EXPECTED_JSON_STDERR);
     Ok(())
 }
 
-/// Where the checked-in skeleton lives as the two commands print it, which is
-/// the only text in their output that names a place outside the workspace.
-fn skeleton_location() -> Result<String, Box<dyn std::error::Error>> {
-    let path = std::fs::canonicalize(support::checked_in_test_skeleton("passthrough-plain"))?;
-    Ok(path
-        .to_str()
-        .ok_or("the skeleton's path is not text")?
-        .to_owned())
-}
-
-/// What `check` prints on stdout, with `<skeleton>` standing for the
-/// skeleton's location.
+/// What `check` prints on stdout.
 const EXPECTED_HUMAN_STDOUT: &str = "passthrough-plain in Cargo.toml: passthrough-plain 0.0.0 \
-from path <skeleton>, pinned\n  drifted (changed)  plain.yml\n\nrefused: \
+from path skeletons/passthrough-plain, pinned\n  drifted (changed)  plain.yml\n\nrefused: \
 [package.metadata.skeletons.ghost] in Cargo.toml names no dependency of Cargo.toml; add the \
 dependency, or rename the table to the key the dependency is declared under\n\n1 bone: 1 \
 drifted. 1 worn skeleton: 1 pinned. 1 refusal.\n";
@@ -94,8 +82,7 @@ drifted. 1 worn skeleton: 1 pinned. 1 refusal.\n";
 /// What `check` prints on stderr.
 const EXPECTED_HUMAN_STDERR: &str = "ritual: 1 of 1 bone has drifted, and there is 1 refusal\n";
 
-/// What `check --json` prints on stdout, with `<skeleton>` standing for the
-/// skeleton's location.
+/// What `check --json` prints on stdout.
 const EXPECTED_JSON_STDOUT: &str = concat!(
     r#"{
   "format_version": 1,
@@ -120,8 +107,8 @@ const EXPECTED_JSON_STDOUT: &str = concat!(
       "version": "0.0.0",
       "pin": {
         "kind": "path",
-        "path": "<skeleton>",
-        "detail": "path <skeleton>"
+        "path": "skeletons/passthrough-plain",
+        "detail": "path skeletons/passthrough-plain"
       },
       "behind": {
         "state": "pinned"
@@ -138,8 +125,8 @@ const EXPECTED_JSON_STDOUT: &str = concat!(
       "version": "0.0.0",
       "pin": {
         "kind": "path",
-        "path": "<skeleton>",
-        "detail": "path <skeleton>"
+        "path": "skeletons/passthrough-plain",
+        "detail": "path skeletons/passthrough-plain"
       },
       "drift": {
         "state": "drifted",
@@ -205,9 +192,14 @@ fn matching_and_three_refusals() -> Result<WiderWorkspace, Box<dyn std::error::E
     let fixture = Fixture::new()?;
     let binary = binary_only()?;
     let library = library_without_skeleton_table()?;
+    let skeleton = path_dependency_on_copied_test_skeleton(
+        fixture.root(),
+        "passthrough-plain",
+        "passthrough-plain",
+    )?;
     let extra = format!(
-        "[dependencies]\n{}\n{}\n{}\n[package.metadata.skeletons]\noddity = \"text\"\n\n{}\n{}\n{}",
-        path_dependency_on_test_skeleton("passthrough-plain", "passthrough-plain"),
+        "[dependencies]\n{skeleton}\n{}\n{}\n[package.metadata.skeletons]\noddity = \"text\"\n\n\
+         {}\n{}\n{}",
         support::path_dependency_on("binary-only", binary.path()),
         support::path_dependency_on("plain-library", library.path()),
         wearing_table("passthrough-plain", ""),
@@ -233,10 +225,7 @@ fn check_prints_these_exact_bytes_across_more_refusal_kinds() -> TestOutcome {
     let report = workspace.fixture.run(&["skeletons", "check"])?;
 
     assert_eq!(report.exit_code, 1, "stderr was: {}", report.stderr);
-    assert_eq!(
-        report.stdout,
-        WIDER_HUMAN_STDOUT.replace("<skeleton>", &skeleton_location()?)
-    );
+    assert_eq!(report.stdout, WIDER_HUMAN_STDOUT);
     assert_eq!(report.stderr, WIDER_HUMAN_STDERR);
     Ok(())
 }
@@ -250,19 +239,15 @@ fn check_json_prints_these_exact_bytes_across_more_refusal_kinds() -> TestOutcom
     let report = workspace.fixture.run(&["skeletons", "check", "--json"])?;
 
     assert_eq!(report.exit_code, 1, "stderr was: {}", report.stderr);
-    assert_eq!(
-        report.stdout,
-        WIDER_JSON_STDOUT.replace("<skeleton>", &skeleton_location()?)
-    );
+    assert_eq!(report.stdout, WIDER_JSON_STDOUT);
     assert_eq!(report.stderr, WIDER_JSON_STDERR);
     Ok(())
 }
 
-/// What `check` prints on stdout for the wider workspace, with `<skeleton>`
-/// standing for the skeleton's location.
+/// What `check` prints on stdout for the wider workspace.
 const WIDER_HUMAN_STDOUT: &str = "passthrough-plain in Cargo.toml: passthrough-plain 0.0.0 \
-from path <skeleton>, pinned\n  matches            plain.yml\n\nrefused: plain-library in \
-Cargo.toml is plain-library 0.1.0, which is not a skeleton: its manifest has no \
+from path skeletons/passthrough-plain, pinned\n  matches            plain.yml\n\nrefused: \
+plain-library in Cargo.toml is plain-library 0.1.0, which is not a skeleton: its manifest has no \
 [package.metadata.skeletons] table; drop [package.metadata.skeletons.plain-library], or depend \
 on a skeleton\nrefused: [package.metadata.skeletons.oddity] in Cargo.toml is not a table; it \
 reads [package.metadata.skeletons.oddity] on a line of its own, with the skeleton's options, if \
@@ -273,8 +258,7 @@ pinned. 3 refusals.\n";
 /// What `check` prints on stderr for the wider workspace.
 const WIDER_HUMAN_STDERR: &str = "ritual: there are 3 refusals\n";
 
-/// What `check --json` prints on stdout for the wider workspace, with
-/// `<skeleton>` standing for the skeleton's location.
+/// What `check --json` prints on stdout for the wider workspace.
 const WIDER_JSON_STDOUT: &str = concat!(
     r#"{
   "format_version": 1,
@@ -299,8 +283,8 @@ const WIDER_JSON_STDOUT: &str = concat!(
       "version": "0.0.0",
       "pin": {
         "kind": "path",
-        "path": "<skeleton>",
-        "detail": "path <skeleton>"
+        "path": "skeletons/passthrough-plain",
+        "detail": "path skeletons/passthrough-plain"
       },
       "behind": {
         "state": "pinned"
@@ -317,8 +301,8 @@ const WIDER_JSON_STDOUT: &str = concat!(
       "version": "0.0.0",
       "pin": {
         "kind": "path",
-        "path": "<skeleton>",
-        "detail": "path <skeleton>"
+        "path": "skeletons/passthrough-plain",
+        "detail": "path skeletons/passthrough-plain"
       },
       "drift": {
         "state": "matches"

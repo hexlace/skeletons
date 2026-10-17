@@ -63,7 +63,7 @@ it break.
 
 That the engine without the feature holds none of the commands' dependencies
 (the command-line framework, the network client and the TLS stack under it,
-the manifest editor and the query-string decoder) is a test in `xtask`, which
+and the manifest editor) is a test in `xtask`, which
 `cargo test --workspace` runs. It asks `cargo tree` for the engine's graph, and
 the library's, over normal and build dependencies and looks for each of them,
 and asks again with the feature on, directly and through the bundle, to prove
@@ -92,8 +92,8 @@ Three crates are published, and they release together:
 - `crates/skeletons` is the ritual bundle a project mounts: `task()` over the
   engine with `commands` on. It is supported.
 - `crates/skeletons-library` is the supported library for a program that wants
-  the verdict as data: `check` over the engine without `commands`. It is
-  supported.
+  the verdict as data: `check` and `check_without_cargo` over the engine
+  without `commands`. It is supported.
 
 The library's tests go through its public API only. Each writes the workspace
 and the skeletons it reads into a temporary directory of its own and reaches

@@ -1,4 +1,4 @@
-//! Two workspaces on which `check_without_cargo` once differed from `check`,
+//! Two workspaces on which `check_without_cargo` must agree with `check`,
 //! each held to what `check` gives: one repository wearing under two git
 //! references, and a missing lockfile beside a shape only cargo reads.
 //!

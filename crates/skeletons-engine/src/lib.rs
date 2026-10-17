@@ -4,7 +4,11 @@
 //!
 //! Without a feature, the public items read a workspace and report on it as
 //! data. [`read`] reads what a workspace wears, and lets cargo reach the
-//! network only when it is handed [`Network::Allowed`]. [`survey()`] renders
+//! network only when it is handed [`Network::Allowed`]. [`read_without_cargo`]
+//! reads the same from the manifests and `Cargo.lock` as files, running no
+//! cargo: it is told where each locked package that is not a path on disk is
+//! ([`LockedPackageId`]), and a wearing whose package has no location is a
+//! [`RefusalKind::Unlocated`] refusal. [`survey()`] renders
 //! every worn skeleton and compares what it renders with the files on disk,
 //! and writes nothing. The items they take and return carry the answer: each
 //! worn skeleton, each claimed file that could be compared, with its state,
@@ -15,8 +19,8 @@
 //! - `commands` adds `task()`, the group of the commands `check`, `sync`,
 //!   `wear` and `remove` that `skeletons` hands on as its own bundle, with
 //!   every dependency only they use: the command-line framework, the network
-//!   client, the manifest editor and the query-string decoder. It is off by
-//!   default, and `skeletons` is the one that turns it on.
+//!   client and the manifest editor. It is off by default, and `skeletons` is
+//!   the one that turns it on.
 //! - `test-util` compiles in the seams that let a dependent's tests observe or
 //!   redirect a real network request or a real wait. Every one of them sits in
 //!   the commands, so it changes nothing without `commands`.

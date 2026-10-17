@@ -2236,7 +2236,33 @@ workspace does not fetch them all: a build leaves out packages locked for other
 platforms, and dev-dependencies, which is how `wear` adds a skeleton. Running
 `cargo fetch --locked` first, or `check`, which reads with the network allowed,
 is the wearer's own responsibility. The library's `check` reads the same way
-and needs the same.
+and needs the same. Its `check_without_cargo` runs no cargo and needs no cargo
+home; see the next paragraphs for what it needs instead.
+
+**The library's `check_without_cargo` reads the manifests and `Cargo.lock` as
+files, so it needs the caller to say where the files of each locked package that
+is not a path on disk are.** A path package is found from the manifests. A
+package with a registry or git `source` in the lockfile is found in the
+directory the caller gives for its name, version and source, if that directory's
+`Cargo.toml` names the package at that version. A wearing whose package has no
+usable location is not an error: it is an `unlocated` refusal in the report,
+which names the package to supply, and every other wearing is still reported.
+The command line never prints that kind, because it reads only through cargo.
+
+**`check_without_cargo` refuses what it would have to guess, and cannot see two
+ways a lockfile goes stale.** It refuses by name a workspace that uses
+`[patch]`, `[replace]` or `package.workspace`, one package under two dependency
+keys, two path packages sharing a name and version, and a lockfile in a format
+other than 3 or 4, because reproducing cargo's resolution of any of them is
+cargo's job and a refusal can never be a report that differs from cargo's. It
+checks the lock against the manifests as far as the files show: every package on
+disk is locked, each package's declarations are among its entry's dependencies,
+and the lock holds nothing cargo would drop, so a stale lock gets the abort
+`check` gives. It cannot see an optional dependency of a package outside the
+workspace that a feature newly enables, or a dependency moved to a registry with
+a different index, because both are decided by cargo's resolver. `check` aborts
+on both, and `check_without_cargo` reads a lock stale in either way as it
+stands.
 
 **`remove` edits the command line's own manifest and nothing else.** A
 dependency that member inherited from `[workspace.dependencies]` leaves the

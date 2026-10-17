@@ -1,5 +1,13 @@
-//! What a repository wears, read fresh from `cargo metadata` on every run —
-//! nothing here is ever stored and read back.
+//! What a repository wears, read fresh on every run — nothing here is ever
+//! stored and read back.
+//!
+//! There are two readers. [`read`] asks `cargo metadata`. [`read_without_cargo`]
+//! reads the manifests and `Cargo.lock` as files, and takes from its caller the
+//! directory of each locked package that is not a path on disk. Both build one
+//! document in the shape `cargo metadata` prints, and everything after it is
+//! shared, so the two give the same workspace for the same files. The one
+//! thing only the second can say is a wearing whose package has no location,
+//! which is [`WearingRefusal::Unlocated`].
 
 mod cargo_metadata;
 mod crate_name;

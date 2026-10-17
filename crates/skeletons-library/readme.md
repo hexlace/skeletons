@@ -1,11 +1,13 @@
 # skeletons-library
 
 The supported way for a program to ask what [skeletons](https://github.com/hexlace/skeletons#readme)
-would say about a workspace. One function, `check`, reads a workspace and
-returns, as data, which files its worn skeletons claim and whether each one
-matches. It writes nothing in the workspace, makes no network request, and
-says nothing in words: a caller decides what a drifted file or a refusal means
-to its own users.
+would say about a workspace. Two functions read a workspace and return, as
+data, which files its worn skeletons claim and whether each one matches.
+`check` asks cargo. `check_without_cargo` reads the manifests and `Cargo.lock`
+as files, for a program that builds without Cargo. Both give the same report for
+the same workspace and files. Neither writes anything in the workspace or makes
+a network request, and neither says anything in words: a caller decides what a
+drifted file or a refusal means to its own users.
 
 A caller that wants the commands themselves, `check`, `sync`, `wear` and
 `remove` with their tables and messages, mounts
@@ -114,6 +116,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## What it needs
 
+The two functions need different things. Pick by what the program has.
+
+### With Cargo
+
 `check` needs `cargo`, a `Cargo.lock` that is up to date, and every locked
 source already fetched. It runs the program `$CARGO` names whenever that
 variable is set, exactly as given and an empty value included, and runs `cargo`
@@ -144,6 +150,96 @@ directory need not be a git repository. When every dependency a workspace has is
 a `path` dependency, `cargo generate-lockfile --offline` is enough to make the
 lockfile. The library depends on no network client and no command-line
 framework.
+
+### Without Cargo
+
+`check_without_cargo` runs no cargo, so it needs no cargo, no cargo home, no
+git and no `PATH`. It reads `Cargo.toml` files and `Cargo.lock` as files, and
+returns the report `check` returns for the same workspace and files. It needs:
+
+- A `Cargo.lock` that is up to date. The function never writes one, so make it
+  where cargo is. A lockfile that is missing, or that the manifests have
+  outgrown, gets the error `check` gives, of which `is_lockfile_not_current` is
+  true.
+- For each locked package that has a `source`, from a registry or a git
+  repository, the directory holding that package's own `Cargo.toml`. A package
+  like that is not a path on disk, so the function cannot find it, and the
+  caller says where it is. Pass it in a `PackageLocations`, keyed by a
+  `LockedPackage`: the `name`, `version` and `source` of that package's
+  `[[package]]` entry in `Cargo.lock`, exactly as written there. A package with
+  no `source` is a path package and needs nothing, since it is found from the
+  manifests. A location for a package no wearing resolves to is never read.
+
+A wearing whose package was given no location is not an error. It is a refusal
+in the report, of kind `Unlocated`, and `unlocated_package()` gives the identity
+to supply. A location whose `Cargo.toml` names another package, or another
+version, locates nothing and is refused the same way. Every other wearing is
+still reported. A program that can find a package once asked can insert it and
+call again.
+
+Here the program has its own reading of `Cargo.lock`, and keeps every locked
+package it fetched in a vendor directory; each entry with a `source` becomes one
+location:
+
+```rust,no_run
+use std::path::Path;
+
+use skeletons_library::{LockedPackage, PackageLocations};
+
+/// One `[[package]]` entry of `Cargo.lock`, as the program's own reader gives it.
+struct LockEntry {
+    name: String,
+    version: String,
+    source: Option<String>,
+}
+
+fn locations(entries: Vec<LockEntry>, vendor: &Path) -> PackageLocations {
+    entries
+        .into_iter()
+        .filter_map(|entry| {
+            let source = entry.source?;
+            let directory = vendor.join(format!("{}-{}", entry.name, entry.version));
+            let package = LockedPackage {
+                name: entry.name,
+                version: entry.version,
+                source,
+            };
+            Some((package, directory))
+        })
+        .collect()
+}
+
+fn check_vendored(entries: Vec<LockEntry>, vendor: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let report = skeletons_library::check_without_cargo(".", &locations(entries, vendor))?;
+    for refusal in report.refusals() {
+        if let Some(package) = refusal.unlocated_package() {
+            println!("no files for {} {} from {}", package.name, package.version, package.source);
+        }
+    }
+    Ok(())
+}
+```
+
+A workspace whose skeletons are all path dependencies needs no locations: pass
+`&PackageLocations::new()`.
+
+What it does not read, because only cargo does, it refuses by name rather than
+guess: `[patch]` and `[replace]` tables, a `package.workspace` key, one package
+declared under two dependency keys, two path packages with one name and
+version, and a lockfile in a format other than 3 or 4. The error has
+`is_unsupported_without_cargo` true, and `detail()` names the manifest and what
+it uses. `check` reads such a workspace where cargo is available. A manifest or
+lockfile that cannot be read, or that cargo would refuse too, has
+`is_manifest_or_lockfile_unreadable` true instead.
+
+It checks `Cargo.lock` against the manifests as far as the files show, and gives
+the lockfile error where cargo would. Two stale shapes it cannot see, because
+seeing them is cargo's own resolution: a package outside the workspace whose
+optional dependency is newly enabled through a feature, and a dependency moved
+to a registry with a different index. `check` aborts on both, and
+`check_without_cargo` reads a lock stale in either way as it stands. A program
+that has to be sure the lock is current runs `cargo metadata --locked` where
+cargo is, or calls `check` there.
 
 ## Support
 

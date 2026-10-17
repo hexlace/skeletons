@@ -1,4 +1,4 @@
-//! Everything `check` found in a workspace.
+//! Everything `check` or `check_without_cargo` found in a workspace.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -10,8 +10,8 @@ use crate::refusal::Refusal;
 use crate::skeletons_named::SkeletonsNamed;
 use crate::worn_skeleton::WornSkeleton;
 
-/// What `check` found in a workspace: each wearing that resolved to a skeleton,
-/// and every refusal.
+/// What `check` or `check_without_cargo` found in a workspace: each wearing
+/// that resolved to a skeleton, and every refusal.
 ///
 /// There are two complete ways to read a report. For one package, use
 /// [`skeletons_named`](Self::skeletons_named). For the whole workspace, use
@@ -21,7 +21,12 @@ use crate::worn_skeleton::WornSkeleton;
 /// command line's `check` would pass it only when `refusals()` is empty and
 /// every file of every skeleton is [`Matches`](crate::FileState::Matches).
 ///
-/// A report never changes after `check` returns it.
+/// The two functions give one report for one workspace and its files, so
+/// everything here reads the same whichever produced it, except that only
+/// `check_without_cargo` can report an
+/// [`Unlocated`](crate::RefusalKind::Unlocated) refusal.
+///
+/// A report never changes after the call that made it returns it.
 ///
 /// # Examples
 ///
@@ -155,8 +160,9 @@ impl Report {
         }
     }
 
-    /// The workspace root as cargo reports it: an absolute path. Every other
-    /// path in a report is relative to it.
+    /// The workspace root: an absolute path, as cargo reports it for `check`
+    /// and as the canonical directory holding the root manifest for
+    /// `check_without_cargo`. Every other path in a report is relative to it.
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root

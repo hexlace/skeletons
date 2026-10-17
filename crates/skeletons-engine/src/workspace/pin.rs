@@ -9,15 +9,9 @@
 
 use std::path::{Path, PathBuf};
 
+use super::crates_io_source::CRATES_IO_SOURCE;
 use super::git_query::{GitQuery, parsed_git_query};
 use crate::git::ObjectId;
-
-/// The source `cargo metadata` reports for a crates.io dependency, always
-/// exactly this string — including when `[source.crates-io] replace-with`
-/// serves it from somewhere else, and including in the offline,
-/// vendored-directory fixtures `ritual`'s tests use. Exposed for
-/// `check/json.rs`, which reports it verbatim as a registry pin's `source`.
-pub(crate) const CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
 /// How a worn skeleton is pinned to one version, and what a remote could ever
 /// say about it being newer.

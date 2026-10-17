@@ -384,9 +384,10 @@ mod tests {
     }
 
     #[test]
-    fn a_declaration_without_a_path_locked_as_a_package_on_disk_is_unsupported() {
+    fn a_declaration_without_a_path_locked_as_a_package_on_disk_is_out_of_date() {
         // `house-rules` is declared from a registry and also exists on disk, and the lockfile
-        // resolves the declaration to the one on disk: only a patch does that.
+        // resolves the declaration to the one on disk: only a patch does that, and Cargo would
+        // lock the registry package instead.
         let fixture = wearer("\"4\"", &lock_of_app_and_skeleton(None));
         write_skeleton(&fixture, "house-rules");
         fixture.write(
@@ -394,12 +395,9 @@ mod tests {
             "[workspace]\nmembers = [\"app\", \"house-rules\"]\n",
         );
 
-        let error = read(&fixture).err().expect("an unsupported resolution");
+        let error = read(&fixture).err().expect("an out of date lockfile");
 
-        assert!(matches!(error, ReadWithoutCargoError::Unsupported { .. }));
-        assert!(
-            detail_of(error).contains("locked as a package on disk but declared without a `path`")
-        );
+        assert_eq!(error, ReadWithoutCargoError::Lockfile);
     }
 
     #[test]

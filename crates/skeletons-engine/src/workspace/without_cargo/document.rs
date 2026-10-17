@@ -218,6 +218,10 @@ impl Collector<'_> {
 
 /// Refuses a declaration that is locked as a package with no source without writing a `path`:
 /// only a patch or a replacement does that, and this reader does not follow either.
+///
+/// A lockfile that does this is out of date, and the currency check refuses it before the
+/// document is built, so this is the guard for a declaration that check read differently from
+/// this one: a package name declared in two tables with two source kinds.
 fn refuse_a_path_resolution_without_a_path(
     member: &PathPackage,
     dependency: &LockEntry,

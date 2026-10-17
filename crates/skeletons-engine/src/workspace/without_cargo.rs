@@ -24,6 +24,8 @@ mod unsupported;
 mod workspace_search;
 
 #[cfg(test)]
+mod currency_differential;
+#[cfg(test)]
 mod differential;
 #[cfg(test)]
 mod fixture;

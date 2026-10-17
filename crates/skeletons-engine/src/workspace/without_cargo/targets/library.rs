@@ -24,6 +24,28 @@ pub(super) fn resolve(
     package_name: &str,
     targets: &Targets,
 ) -> Result<Option<String>, TextError> {
+    let library = find(directory, package_name, targets)?;
+    if let Some(name) = &library {
+        // Every name `find` returns went through `checked` first, so a manifest cannot make
+        // either of these fire.
+        assert!(
+            !name.trim().is_empty(),
+            "a library name is never blank: it was checked before its path"
+        );
+        assert!(
+            !name.contains('-'),
+            "a library name never holds a hyphen: {name}"
+        );
+    }
+    Ok(library)
+}
+
+/// The library `resolve` describes, before its name is asserted on.
+fn find(
+    directory: &Path,
+    package_name: &str,
+    targets: &Targets,
+) -> Result<Option<String>, TextError> {
     let default_path_exists = directory.join(DEFAULT_LIBRARY_PATH).is_file();
     let Some(table) = &targets.library else {
         // With no `[lib]`, Cargo discovers the library from `src/lib.rs` unless `autolib` is off.

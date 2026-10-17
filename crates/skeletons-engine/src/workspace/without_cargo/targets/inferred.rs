@@ -74,6 +74,18 @@ pub(super) fn inferred(directory: &Path, kind: TargetKind, package_name: &str) -
             }
         }
     }
+    // The main binary's path is a constant ending in `.rs`, a stem target was kept only for its
+    // `.rs` extension, and a subdirectory's is `main.rs`, so no file name can break this.
+    for target in &found {
+        assert!(
+            target
+                .path
+                .extension()
+                .is_some_and(|extension| extension == "rs"),
+            "an inferred target is a Rust file: {}",
+            target.path.display()
+        );
+    }
     found
 }
 

@@ -31,10 +31,15 @@ pub(super) fn locked_path_dependency_names<'lock>(
         .filter(|dependency| dependency.source().is_none())
         .map(LockEntry::name)
         .collect();
-    assert!(
-        names.len() <= dependency_indexes.len(),
-        "every name comes from one of the entry's own dependencies"
-    );
+    for name in &names {
+        assert!(
+            dependency_indexes.iter().any(|&dependency| {
+                let dependency = &lockfile.entries()[dependency];
+                dependency.source().is_none() && dependency.name() == *name
+            }),
+            "every name is that of a sourceless entry the given entry lists: {name}"
+        );
+    }
     names
 }
 

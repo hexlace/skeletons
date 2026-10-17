@@ -38,6 +38,12 @@ pub(super) fn worn_entries(
             }
         }
     }
+    // Each insertion above was guarded by `set_aside`, which is built from the lockfile alone,
+    // so no manifest can put one of its entries here.
+    assert!(
+        entries.is_disjoint(set_aside),
+        "an entry set aside is never worn"
+    );
     entries
 }
 

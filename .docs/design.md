@@ -2249,20 +2249,26 @@ usable location is not an error: it is an `unlocated` refusal in the report,
 which names the package to supply, and every other wearing is still reported.
 The command line never prints that kind, because it reads only through cargo.
 
-**`check_without_cargo` refuses what it would have to guess, and cannot see two
-ways a lockfile goes stale.** It refuses by name a workspace that uses
-`[patch]`, `[replace]` or `package.workspace`, one package under two dependency
-keys, two path packages sharing a name and version, and a lockfile in a format
-other than 3 or 4, because reproducing cargo's resolution of any of them is
-cargo's job and a refusal can never be a report that differs from cargo's. It
-checks the lock against the manifests as far as the files show: every package on
-disk is locked, each package's declarations are among its entry's dependencies,
-and the lock holds nothing cargo would drop, so a stale lock gets the abort
-`check` gives. It cannot see an optional dependency of a package outside the
-workspace that a feature newly enables, or a dependency moved to a registry with
-a different index, because both are decided by cargo's resolver. `check` aborts
-on both, and `check_without_cargo` reads a lock stale in either way as it
-stands.
+**`check_without_cargo` refuses what it would have to guess, and reports through
+one stale shape.** It refuses by name a workspace that uses `[patch]`,
+`[replace]` or `package.workspace`, one package under two dependency keys, two
+path packages sharing a name and version, a wearing whose own dependency is
+declared with `registry =`, and a lockfile in a format other than 3 or 4,
+because reproducing cargo's resolution of any of them is cargo's job and a
+refusal can never be a report that differs from cargo's. The `registry =` name
+is refused because only cargo's configuration says which index it stands for,
+so the lock entry could name another registry's package. It checks the lock
+against the manifests as far as the files show: every package on disk is locked,
+each package's declarations are among its entry's dependencies, and the lock
+holds nothing cargo would drop, so a stale lock gets the abort `check` gives.
+It does not see a feature change on a package outside the workspace that
+enables or disables an optional dependency, because that is decided by cargo's
+resolver. `check` aborts there and asks for a relock; `check_without_cargo`
+reads the lock as it stands, and the report is still right, because it reads the
+members, their wearing tables and the package each wearing's dependency is
+locked to, and the change touches none of them. It is the report `check` gives
+once the lock is current. A dependency outside the wearings that moved
+registries is a named limit, read as the lock has it.
 
 **`remove` edits the command line's own manifest and nothing else.** A
 dependency that member inherited from `[workspace.dependencies]` leaves the

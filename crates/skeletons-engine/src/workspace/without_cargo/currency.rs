@@ -4,8 +4,8 @@
 //! `--locked` makes Cargo resolve the workspace again and refuse when the lockfile it would write
 //! is not the one on disk. This module reproduces that verdict for the cases a reader of the
 //! manifests can see, which is every case that involves only path packages and the declarations
-//! and lock entries of every package. What it cannot see needs Cargo's feature resolution or its
-//! configuration, and the library's readme names both.
+//! and lock entries of every package. What it does not decide needs Cargo's feature resolution or
+//! its configuration, and the library's readme names both.
 
 mod locked_source;
 mod reachability;
@@ -95,7 +95,7 @@ fn dependencies_of<'lock>(
 ///
 /// A member's declarations are all locked, of every kind and optional or not. A package outside
 /// the workspace is locked only for what it needs: not its dev-dependencies, and not an optional
-/// dependency until a feature enables one, which this reader cannot see.
+/// dependency until a feature enables one, which this reader does not decide.
 fn declarations_are_locked(
     packages: &[PathPackage],
     package: &PathPackage,

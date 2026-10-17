@@ -4,10 +4,11 @@ The supported way for a program to ask what [skeletons](https://github.com/hexla
 would say about a workspace. Two functions read a workspace and return, as
 data, which files its worn skeletons claim and whether each one matches.
 `check` asks cargo. `check_without_cargo` reads the manifests and `Cargo.lock`
-as files, for a program that builds without Cargo. Both give the same report for
-the same workspace and files, bar a lockfile stale in one of two ways that only
-cargo can see (see "Without Cargo" below). Neither writes anything in the workspace or makes
-a network request, and neither says anything in words: a caller decides what a
+as files, for a program that builds without Cargo. Where
+`check_without_cargo` gives a report, it is the report `check` gives on the same
+files, or, in the one stale shape "Without Cargo" below names, the report
+`check` gives once the lock is regenerated. Neither writes anything in the
+workspace or makes a network request, and neither says anything in words: a caller decides what a
 drifted file or a refusal means to its own users.
 
 A caller that wants the commands themselves, `check`, `sync`, `wear` and
@@ -156,9 +157,9 @@ framework.
 
 `check_without_cargo` runs no cargo, so it needs no cargo, no cargo home, no
 git and no `PATH`. It reads `Cargo.toml` files and `Cargo.lock` as files, and
-returns the report `check` returns for the same workspace and files, except for
-a lockfile stale in one of the two ways described at the end of this section,
-which `check` aborts on and this reads as it stands. It needs:
+returns the report `check` returns for the same workspace and files, or, in the
+one stale shape described at the end of this section, the report `check` returns
+once the lock is regenerated. It needs:
 
 - A `Cargo.lock` that is up to date. The function never writes one, so make it
   where cargo is. A lockfile that is missing, or that the manifests have
@@ -229,20 +230,32 @@ A workspace whose skeletons are all path dependencies needs no locations: pass
 What it does not read, because only cargo does, it refuses by name rather than
 guess: `[patch]` and `[replace]` tables, a `package.workspace` key, one package
 declared under two dependency keys, two path packages with one name and
-version, and a lockfile in a format other than 3 or 4. The error has
+version, a wearing whose own dependency is declared with `registry =`, and a
+lockfile in a format other than 3 or 4. The error has
 `is_unsupported_without_cargo` true, and `detail()` names the manifest and what
 it uses. `check` reads such a workspace where cargo is available. A manifest or
 lockfile that cannot be read, or that cargo would refuse too, has
 `is_manifest_or_lockfile_unreadable` true instead.
 
+A wearing's dependency declared with `registry = "name"` is refused because only
+Cargo's configuration says which index that name stands for: the lock entry
+could name another registry's package, and the report would read that package's
+files and metadata. The remedy is `check`, where Cargo is. A dependency that no
+wearing names is not refused, even when it is declared that way. One that moved
+to another registry is a named limit: the lock is stale, `check_without_cargo`
+does not abort on it, and it reads the dependency as the lock has it, which the
+report does not depend on.
+
 It checks `Cargo.lock` against the manifests as far as the files show, and gives
-the lockfile error where cargo would. Two stale shapes it cannot see, because
-seeing them is cargo's own resolution: a package outside the workspace whose
-optional dependency is newly enabled through a feature, and a dependency moved
-to a registry with a different index. `check` aborts on both, and
-`check_without_cargo` reads a lock stale in either way as it stands. A program
-that has to be sure the lock is current runs `cargo metadata --locked` where
-cargo is, or calls `check` there.
+the lockfile error where cargo would. One stale shape it reports through, because
+seeing it is cargo's own resolution: a feature change on a package outside the
+workspace that enables or disables an optional dependency, with no relock.
+`check` aborts there, asking for the relock, and `check_without_cargo` reads the
+lock as it stands. The report is still right, because it reads the members,
+their wearing tables and the package each wearing's dependency is locked to, and
+such a change touches none of them. It is the report `check` gives once the lock
+is current. A program that has to be sure the lock is current runs
+`cargo metadata --locked` where cargo is, or calls `check` there.
 
 ## Support
 

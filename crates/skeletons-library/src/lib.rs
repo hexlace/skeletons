@@ -110,8 +110,8 @@ const _: () = {
 ///
 /// Where there is no cargo to run, or no cargo home holding the locked
 /// sources, use [`check_without_cargo`], which returns the same [`Report`] for
-/// the same workspace and files, bar a lockfile stale in one of the two ways
-/// only cargo can see, which its documentation describes.
+/// the same workspace and files, or, in the one stale shape its documentation
+/// describes, the one this returns once the lock is regenerated.
 ///
 /// # Errors
 ///
@@ -151,10 +151,9 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 /// skeletons claim with what is on disk.
 ///
 /// The [`Report`] is the one [`check`] returns for the same workspace and
-/// files, and a workspace whose lockfile `check` aborts on gets the same abort,
-/// except for a lockfile stale in one of the two ways described below, which
-/// `check` aborts on and this call reads as it stands. That is what a caller
-/// that builds without cargo can use: no cargo, no cargo home, and no `PATH`
+/// files, or, in the one stale shape described below, the one [`check`]
+/// returns once the lock is regenerated. That is what a caller that builds
+/// without cargo can use: no cargo, no cargo home, and no `PATH`
 /// are needed, and nothing is run.
 ///
 /// A relative `directory` is taken from the process's current directory, and
@@ -174,17 +173,20 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 /// The `Cargo.lock` must be up to date, and the call checks what a reader of
 /// the files can see: that every package on disk is locked, that the entries
 /// agree with the manifests' declarations, and that the lock holds nothing
-/// cargo would drop. Two stale shapes it cannot see, because seeing them is
-/// cargo's own resolution. One is a package outside the workspace whose
-/// optional dependency is newly enabled through a feature. The other is a
-/// dependency moved to a registry with a different index. `check` aborts on
-/// both. A lock stale in either way is read as it stands, which is the one
-/// place this call's lockfile abort and `check`'s differ.
+/// cargo would drop. One stale shape it reports through, because seeing it is
+/// cargo's own resolution: a feature change on a package outside the workspace
+/// that enables or disables an optional dependency. `check` aborts there,
+/// asking for a relock, and this call reads the lock as it stands. The report
+/// is still right, because it reads the members, their wearing tables and the
+/// package each wearing's dependency is locked to, and the change touches none
+/// of them. A dependency that no wearing names and that moved to another
+/// registry is a named limit: it is read as the lock has it.
 ///
 /// A workspace that uses something only cargo reads is refused rather than
 /// guessed at: `[patch]`, `[replace]`, `package.workspace`, one package under
-/// two dependency keys, two path packages with one name and version, a
-/// lockfile in a format other than 3 or 4.
+/// two dependency keys, two path packages with one name and version, a wearing
+/// whose own dependency is declared with `registry =`, a lockfile in a format
+/// other than 3 or 4.
 ///
 /// The call writes nothing, runs no build script, needs no git and makes no
 /// network request.
@@ -200,7 +202,8 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 ///   when a manifest or the lockfile cannot be read, or is one cargo would
 ///   refuse too.
 /// - [`is_unsupported_without_cargo`](ReadWorkspaceError::is_unsupported_without_cargo)
-///   when the workspace uses something only cargo reads. `check` reads it
+///   when the workspace uses something only cargo reads, a wearing whose own
+///   dependency is declared with `registry =` among them. `check` reads it
 ///   where cargo is available.
 ///
 /// [`is_cargo_metadata_failed`](ReadWorkspaceError::is_cargo_metadata_failed),

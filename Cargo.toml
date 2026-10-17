@@ -90,6 +90,13 @@ semver = { version = "1.0.28", default-features = false, features = ["std"] }
 # where it parses a source's URL, through the `url` crate, which decodes them
 # with this crate.
 form_urlencoded = "1.2.2"
+# Expanding a workspace's `members` entries into directories when a workspace is
+# read without Cargo (`workspace/without_cargo/member_patterns.rs`): Cargo's own
+# matcher, from rust-lang, with the same rules for `*`, `?`, `[…]` and `**` and for
+# hidden directories, so the two readers agree on which directories are members.
+# No dependencies of its own, and already in `Cargo.lock` through
+# `rituals-compose`, so it adds no package.
+glob = "0.3.4"
 # Building disposable directories and files for the engine's unit tests that
 # need a real filesystem (real symlinks, a read-only directory to fail a write
 # into), and the workspaces `skeletons-library`'s tests read. Dev-only, so it

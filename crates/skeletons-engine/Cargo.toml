@@ -71,6 +71,9 @@ semver.workspace = true
 # Decoding a git source's query string (`workspace/git_query.rs`), for `behind`'s pin
 # and for reading a workspace without Cargo.
 form_urlencoded.workspace = true
+# Expanding a workspace's `members` entries, for reading a workspace without Cargo
+# (`workspace/without_cargo/member_patterns.rs`).
+glob.workspace = true
 # The commands': asking crates.io's sparse index whether a registry-pinned
 # skeleton is behind (`behind/crates_io.rs`). See the comment on this dependency
 # in the repository's root `Cargo.toml` for why `ureq`, and why `rustls` alone.

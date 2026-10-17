@@ -26,6 +26,11 @@ pub(crate) struct PackageManifest {
     targets: Targets,
     declarations: Vec<Declaration>,
     workspace: Option<WorkspaceRoot>,
+    /// Whether the manifest writes `[patch]`. Cargo applies it from a workspace root, and from a
+    /// package that is its own root, so it is read from any manifest.
+    has_patch: bool,
+    /// Whether the manifest writes `[replace]`, under the same rule as `[patch]`.
+    has_replace: bool,
 }
 
 /// The `[package]` of a manifest.
@@ -149,10 +154,6 @@ pub(crate) struct WorkspaceRoot {
     pub(crate) dependencies: BTreeMap<String, Declaration>,
     /// `workspace.package.version`, when written.
     pub(crate) package_version: Option<String>,
-    /// Whether the manifest writes `[patch]`.
-    pub(crate) has_patch: bool,
-    /// Whether the manifest writes `[replace]`.
-    pub(crate) has_replace: bool,
 }
 
 #[derive(Deserialize)]
@@ -268,14 +269,7 @@ impl PackageManifest {
         let own_workspace = raw
             .workspace
             .as_ref()
-            .map(|section| {
-                workspace_root(
-                    section,
-                    directory,
-                    raw.patch.is_some(),
-                    raw.replace.is_some(),
-                )
-            })
+            .map(|section| workspace_root(section, directory))
             .transpose()?;
         let inherited = own_workspace.as_ref().or(workspace);
 
@@ -292,7 +286,21 @@ impl PackageManifest {
             targets,
             declarations,
             workspace: own_workspace,
+            has_patch: raw.patch.is_some(),
+            has_replace: raw.replace.is_some(),
         })
+    }
+
+    /// Whether the manifest writes `[patch]`.
+    #[must_use]
+    pub(crate) const fn writes_patch(&self) -> bool {
+        self.has_patch
+    }
+
+    /// Whether the manifest writes `[replace]`.
+    #[must_use]
+    pub(crate) const fn writes_replace(&self) -> bool {
+        self.has_replace
     }
 
     /// The manifest's `[package]`, or `None` for a virtual workspace root.
@@ -322,12 +330,7 @@ impl PackageManifest {
 }
 
 /// The `[workspace]` table of the manifest in `directory`.
-fn workspace_root(
-    section: &RawWorkspace,
-    directory: &Path,
-    has_patch: bool,
-    has_replace: bool,
-) -> Result<WorkspaceRoot, TextError> {
+fn workspace_root(section: &RawWorkspace, directory: &Path) -> Result<WorkspaceRoot, TextError> {
     let site = Site {
         table: "[workspace.dependencies]",
         is_dev: false,
@@ -351,8 +354,6 @@ fn workspace_root(
         exclude: section.exclude.clone(),
         dependencies,
         package_version,
-        has_patch,
-        has_replace,
     })
 }
 
@@ -1376,33 +1377,34 @@ serde = "1"
                 exclude: vec!["crates/old".to_owned()],
                 dependencies: [("serde".to_owned(), registry("serde", "1", false))].into(),
                 package_version: Some("1.0.0".to_owned()),
-                has_patch: false,
-                has_replace: false,
             })
         );
     }
 
     #[test]
-    fn a_root_notices_patch_and_replace() {
+    fn a_manifest_notices_patch_and_replace() {
+        // A package that is its own root writes them without a `[workspace]`, so they are read
+        // from the manifest, not from the workspace table.
         let patched = PackageManifest::parse(
-            "[workspace]\n[patch.crates-io]\nfoo = { path = \"foo\" }\n",
+            "[package]\nname = \"a\"\n[patch.crates-io]\nfoo = { path = \"foo\" }\n",
             Path::new("/w"),
             None,
         )
-        .expect("a root");
+        .expect("a package");
         let replaced = PackageManifest::parse(
             "[workspace]\n[replace]\n\"foo:1.0.0\" = { path = \"foo\" }\n",
             Path::new("/w"),
             None,
         )
         .expect("a root");
+        let plain = PackageManifest::parse("[workspace]\n", Path::new("/w"), None).expect("a root");
 
-        let patched = patched.workspace().expect("a workspace");
-        assert!(patched.has_patch);
-        assert!(!patched.has_replace);
-        let replaced = replaced.workspace().expect("a workspace");
-        assert!(replaced.has_replace);
-        assert!(!replaced.has_patch);
+        assert!(patched.writes_patch());
+        assert!(!patched.writes_replace());
+        assert!(replaced.writes_replace());
+        assert!(!replaced.writes_patch());
+        assert!(!plain.writes_patch());
+        assert!(!plain.writes_replace());
     }
 
     #[test]

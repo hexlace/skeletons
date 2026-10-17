@@ -21,14 +21,6 @@ mod pin;
 mod prospect;
 mod schema;
 mod wearing_table;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the readers of a lockfile and a manifest have no caller until the reader of a \
-                  workspace without Cargo is built on them"
-    )
-)]
 mod without_cargo;
 mod worn;
 
@@ -48,6 +40,7 @@ pub(crate) use wearing_table::OptionShapeRefusal;
 pub(crate) use wearing_table::RESERVED_WEARING_KEYS;
 #[cfg(test)]
 pub(crate) use wearing_table::ShapeFound;
+pub use without_cargo::{ReadWithoutCargoError, read_without_cargo};
 pub use worn::WornDependency;
 pub(crate) use worn::WornId;
 

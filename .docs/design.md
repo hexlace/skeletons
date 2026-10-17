@@ -2255,7 +2255,8 @@ one stale shape.** It refuses by name a workspace that uses `[patch]`,
 path packages sharing a name and version, a wearing whose own dependency is
 declared with `registry =`, a lockfile in a format other than 3 or 4, a `git`
 URL with a query of its own, a locked git source whose query is not one
-`branch`, `tag` or `rev`, a non-empty `paths`, a `[patch]` with an entry or any
+`branch`, `tag` or `rev`, a `[workspace.dependencies]` entry that writes both
+`git` and `path`, a non-empty `paths`, a `[patch]` with an entry or any
 `include` in a cargo configuration file, and an optional dependency that asks a
 worn package for a version the lock does not name, because reproducing cargo's
 resolution of any of them is cargo's job and a refusal can never be a report

@@ -237,7 +237,8 @@ What it does not read, because only cargo does, it refuses by name rather than
 guess: `[patch]` and `[replace]` tables, a `package.workspace` key, one package
 declared under two dependency keys, two path packages with one name and version,
 a wearing whose own dependency is declared with `registry =`, a lockfile in a
-format other than 3 or 4, a git URL with a query of its own, in a cargo
+format other than 3 or 4, a git URL with a query of its own, a
+`[workspace.dependencies]` entry that writes both `git` and `path`, in a cargo
 configuration file a non-empty `paths`, a `[patch]` with an entry, or any
 `include`, and an optional dependency that asks a worn package for a version the
 locked one does not meet (the last is described below). The error has

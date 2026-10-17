@@ -186,7 +186,8 @@ impl ReadWorkspaceError {
     /// packages with one name and version, a wearing whose own dependency is
     /// declared with `registry =`, a lockfile in a format other than 3 or 4, a
     /// `git` URL with a query of its own, a locked git source whose query is
-    /// not one `branch`, `tag` or `rev`, an optional dependency of a package
+    /// not one `branch`, `tag` or `rev`, a `[workspace.dependencies]` entry
+    /// that writes both `git` and `path`, an optional dependency of a package
     /// outside the workspace, or of a path package it reaches, that asks a worn
     /// package for a version its locked one does not meet and cargo cannot add
     /// beside it (for a registry package, one its compatible range could meet;

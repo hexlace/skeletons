@@ -715,6 +715,37 @@ serde.workspace = true
         assert_eq!(error.kind(), TextErrorKind::Unreadable);
     }
 
+    #[test]
+    fn a_git_dependency_on_a_revision_is_read_with_no_requirement() {
+        // The case the generated declarations once shrank to: a git dependency on a revision,
+        // under a key that names its own package, with no version requirement.
+        let manifest = parsed(
+            r#"
+[package]
+name = "a"
+
+[dependencies]
+a = { git = "https://aaa.invalid/a", rev = "aaaa0aa" }
+"#,
+        );
+
+        assert_eq!(
+            manifest.declarations(),
+            [Declaration {
+                key: "a".to_owned(),
+                package: "a".to_owned(),
+                rename: None,
+                is_dev: false,
+                is_optional: false,
+                source: DeclaredSource::Git {
+                    url: "https://aaa.invalid/a".to_owned(),
+                    reference: GitReference::Rev("aaaa0aa".to_owned()),
+                },
+                version_requirement: None,
+            }]
+        );
+    }
+
     /// A declaration as the generator holds it: what the manifest will write, in the parts
     /// Cargo's tables are made of, before it is rendered.
     #[derive(Debug, Clone)]

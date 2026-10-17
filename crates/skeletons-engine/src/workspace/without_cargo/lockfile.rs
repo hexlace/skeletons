@@ -367,6 +367,41 @@ source = "git+https://example.invalid/dep?tag=v1#3333333333333333333333333333333
     }
 
     #[test]
+    fn a_dependency_on_a_git_package_of_the_same_name_and_version_picks_the_git_package() {
+        // The case the generated lockfiles once shrank to. A path package `a` renames a git
+        // package that is also called `a` and also 0.1.0, and Cargo writes the line below for it
+        // (measured on 1.95.0): the full spelling, source without commit, because the short ones
+        // would name both packages.
+        let lockfile = parsed(
+            r#"
+version = 4
+
+[[package]]
+name = "a"
+version = "0.1.0"
+dependencies = [
+ "a 0.1.0 (git+https://example.invalid/dep)",
+]
+
+[[package]]
+name = "a"
+version = "0.1.0"
+source = "git+https://example.invalid/dep#aa0000aa00aaaaaa00aaa0a0aa0000aaa0aaa00a"
+"#,
+        );
+
+        let entries = lockfile.entries();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].source(), None);
+        assert_eq!(entries[0].dependency_indexes(), &[1]);
+        assert_eq!(
+            entries[1].source(),
+            Some("git+https://example.invalid/dep#aa0000aa00aaaaaa00aaa0a0aa0000aaa0aaa00a")
+        );
+        assert_eq!(entries[1].dependency_indexes(), &[] as &[usize]);
+    }
+
+    #[test]
     fn a_dependency_spelling_the_commit_names_no_package() {
         // Cargo never writes `#<commit>` in a dependency line, so a line that does is not one it
         // wrote, and it is not read as if it were.

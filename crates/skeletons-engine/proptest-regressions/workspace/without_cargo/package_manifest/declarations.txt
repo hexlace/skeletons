@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 47170c2d7f5d362c669f65a821f7eeb23173fe96700eef59eb9a436907d8eeb2 # shrinks to declaration = Generated { key: "a", renamed_from: None, is_dev: false, is_optional: false, source: Git("https://aaa.invalid/a", Rev("aaaa0aa")), version_requirement: None }

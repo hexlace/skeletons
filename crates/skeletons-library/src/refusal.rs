@@ -6,12 +6,17 @@ use std::sync::Arc;
 
 use skeletons_engine::{RefusalRecord, RefusedWearing};
 
+use crate::locked_package::LockedPackage;
+
 /// What kind of refusal one is, by what it says is wrong.
 ///
-/// The names are the `kind` words `check --json` reports, in `UpperCamelCase`.
-/// The first six are about a wearing that resolved to no skeleton at all. The
-/// last four name one or more worn skeletons, and each of those skeletons
-/// holds the refusal in its [`Files::Refused`](crate::Files::Refused).
+/// The names are the words `check --json` reports as a refusal's `kind`, in
+/// `UpperCamelCase`, except [`Unlocated`](Self::Unlocated), which only
+/// [`check_without_cargo`](crate::check_without_cargo) reports and the command
+/// line never prints. The first seven are about a wearing that resolved to no
+/// skeleton at all. The last four name one or more worn skeletons, and each of
+/// those skeletons holds the refusal in its
+/// [`Files::Refused`](crate::Files::Refused).
 ///
 /// A kind has no `Display`, because this library says nothing in sentences:
 /// what a refusal means to a caller's users is the caller's to write. For a
@@ -54,6 +59,11 @@ pub enum RefusalKind {
     Ambiguous,
     /// The package the dependency resolved to is not a skeleton.
     NotASkeleton,
+    /// The dependency resolved to a locked package that was given no location,
+    /// or whose given location holds no `Cargo.toml` naming it at its locked
+    /// version, so whether it is a skeleton is unknown. Only
+    /// [`check_without_cargo`](crate::check_without_cargo) reports it.
+    Unlocated,
     /// A value recorded for one of the skeleton's options was refused.
     OptionRefused,
     /// The skeleton itself is defective.
@@ -65,8 +75,10 @@ pub enum RefusalKind {
 }
 
 impl RefusalKind {
-    /// The word for this kind: a stable identifier, lowercase and hyphenated,
-    /// and the same one the command line's JSON reports as `kind`.
+    /// The word for this kind: a stable identifier, lowercase and hyphenated.
+    /// Every kind but [`Unlocated`](Self::Unlocated) has the word the command
+    /// line's JSON reports as `kind`, and `unlocated` is a word only this
+    /// library reports.
     ///
     /// It is an identifier and not prose, so it is safe to log, compare or
     /// key on, and it will not be reworded. A kind added later has a word of
@@ -88,6 +100,7 @@ impl RefusalKind {
             Self::Unresolved => "unresolved",
             Self::Ambiguous => "ambiguous",
             Self::NotASkeleton => "not-a-skeleton",
+            Self::Unlocated => "unlocated",
             Self::OptionRefused => "option-refused",
             Self::SkeletonInvalid => "skeleton-invalid",
             Self::Overlap => "overlap",
@@ -104,7 +117,8 @@ impl RefusalKind {
             | Self::NamesNoDependency
             | Self::Unresolved
             | Self::Ambiguous
-            | Self::NotASkeleton => true,
+            | Self::NotASkeleton
+            | Self::Unlocated => true,
             Self::OptionRefused | Self::SkeletonInvalid | Self::Overlap | Self::UnsafePath => false,
         }
     }
@@ -126,6 +140,7 @@ impl RefusalKind {
             skeletons_engine::RefusalKind::SkeletonInvalid => Self::SkeletonInvalid,
             skeletons_engine::RefusalKind::Overlap => Self::Overlap,
             skeletons_engine::RefusalKind::UnsafePath => Self::UnsafePath,
+            skeletons_engine::RefusalKind::Unlocated => Self::Unlocated,
         }
     }
 }
@@ -195,6 +210,7 @@ struct RefusalData {
     kind: RefusalKind,
     wearings: Vec<Wearing>,
     paths: Vec<PathBuf>,
+    unlocated_package: Option<LockedPackage>,
 }
 
 impl Refusal {
@@ -203,10 +219,19 @@ impl Refusal {
             kind: RefusalKind::from_engine(record.kind),
             wearings: record.wearings.iter().map(Wearing::from_engine).collect(),
             paths: record.paths.iter().map(PathBuf::from).collect(),
+            unlocated_package: record
+                .unlocated_package
+                .clone()
+                .map(LockedPackage::from_engine),
         };
         assert!(
             !data.wearings.is_empty(),
             "every refusal concerns at least one wearing"
+        );
+        assert_eq!(
+            data.unlocated_package.is_some(),
+            matches!(data.kind, RefusalKind::Unlocated),
+            "a refusal names a locked package exactly when it is unlocated"
         );
         Self {
             data: Arc::new(data),
@@ -244,6 +269,33 @@ impl Refusal {
         &self.data.paths
     }
 
+    /// The locked package that was given no usable location, when this
+    /// refusal is [`Unlocated`](RefusalKind::Unlocated), and `None` for every
+    /// other kind.
+    ///
+    /// It is the name, version and source `Cargo.lock` writes for the package,
+    /// which is what [`PackageLocations::insert`](crate::PackageLocations::insert) takes, so a
+    /// caller that can find the package's files hands this straight back and checks again.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use skeletons_library::{LockedPackage, PackageLocations};
+    ///
+    /// let report = skeletons_library::check_without_cargo(".", &PackageLocations::new())?;
+    /// for refusal in report.refusals() {
+    ///     if let Some(package) = refusal.unlocated_package() {
+    ///         let LockedPackage { name, version, source } = package;
+    ///         eprintln!("no files for {name} {version} from {source}");
+    ///     }
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn unlocated_package(&self) -> Option<&LockedPackage> {
+        self.data.unlocated_package.as_ref()
+    }
+
     /// The package named by the one wearing of a refusal about a wearing that
     /// resolved to no skeleton, or `None` when that wearing names none.
     pub(crate) fn package_named(&self) -> Option<&str> {
@@ -260,13 +312,15 @@ impl Refusal {
 
 impl fmt::Debug for Refusal {
     // Written out so that the shared data is not a level of its own in what
-    // `{:?}` and `{:#?}` print: a refusal shows its kind, wearings and paths.
+    // `{:?}` and `{:#?}` print: a refusal shows its kind, wearings, paths and
+    // the unlocated package.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("Refusal")
             .field("kind", &self.data.kind)
             .field("wearings", &self.data.wearings)
             .field("paths", &self.data.paths)
+            .field("unlocated_package", &self.data.unlocated_package)
             .finish()
     }
 }
@@ -276,13 +330,14 @@ mod tests {
     use super::RefusalKind;
 
     /// Every kind, in the order `position` numbers them.
-    const KINDS: [RefusalKind; 10] = [
+    const KINDS: [RefusalKind; 11] = [
         RefusalKind::NotATable,
         RefusalKind::ReservedKey,
         RefusalKind::NamesNoDependency,
         RefusalKind::Unresolved,
         RefusalKind::Ambiguous,
         RefusalKind::NotASkeleton,
+        RefusalKind::Unlocated,
         RefusalKind::OptionRefused,
         RefusalKind::SkeletonInvalid,
         RefusalKind::Overlap,
@@ -299,10 +354,11 @@ mod tests {
             RefusalKind::Unresolved => 3,
             RefusalKind::Ambiguous => 4,
             RefusalKind::NotASkeleton => 5,
-            RefusalKind::OptionRefused => 6,
-            RefusalKind::SkeletonInvalid => 7,
-            RefusalKind::Overlap => 8,
-            RefusalKind::UnsafePath => 9,
+            RefusalKind::Unlocated => 6,
+            RefusalKind::OptionRefused => 7,
+            RefusalKind::SkeletonInvalid => 8,
+            RefusalKind::Overlap => 9,
+            RefusalKind::UnsafePath => 10,
         }
     }
 
@@ -317,6 +373,7 @@ mod tests {
             RefusalKind::Unresolved => "unresolved",
             RefusalKind::Ambiguous => "ambiguous",
             RefusalKind::NotASkeleton => "not-a-skeleton",
+            RefusalKind::Unlocated => "unlocated",
             RefusalKind::OptionRefused => "option-refused",
             RefusalKind::SkeletonInvalid => "skeleton-invalid",
             RefusalKind::Overlap => "overlap",

@@ -9,7 +9,7 @@ use crate::claim::{
     folded_relation, staging_name,
 };
 use crate::skeleton::{Escaped, RenderError};
-use crate::workspace::{OptionShapeRefusal, WearingRefusal, WornId};
+use crate::workspace::{OptionShapeRefusal, UNLOCATED_NEVER_MET, WearingRefusal, WornId};
 
 impl Refusal {
     /// The worn skeleton this refusal is about, when it is about exactly
@@ -510,6 +510,7 @@ fn wearing_message(wearing: &WearingRefusal) -> String {
             dependency,
             package: (name, version),
         } => not_a_skeleton_message(manifest, dependency, name, version),
+        WearingRefusal::Unlocated { .. } => unreachable!("{UNLOCATED_NEVER_MET}"),
     }
 }
 
@@ -759,7 +760,7 @@ mod tests {
     use crate::claim::{Claimant, TooLongName};
     use crate::skeleton::{Reason, RenderError, SkeletonIdentity};
     use crate::survey::RefusalKind;
-    use crate::workspace::{WearingRefusal, WornId};
+    use crate::workspace::{LockedPackageId, WearingRefusal, WornId};
 
     #[test]
     fn a_render_refusal_naming_a_file_with_a_newline_stays_on_one_line() {
@@ -1232,7 +1233,12 @@ mod tests {
     /// How many kinds of [`WearingRefusal`] there are. The match in
     /// [`wearing_variant`] has no wildcard, so a variant added without an
     /// arm does not compile, and the sample list must then cover it.
-    const WEARING_VARIANTS: usize = 6;
+    const WEARING_VARIANTS: usize = 7;
+
+    /// The index [`wearing_variant`] gives an unlocated refusal. It has no
+    /// message, so no sample goes through the message loop; the count
+    /// includes it, and the unreachable arm has its own test.
+    const UNLOCATED_VARIANT: usize = 6;
 
     const fn wearing_variant(refusal: &WearingRefusal) -> usize {
         match refusal {
@@ -1242,6 +1248,7 @@ mod tests {
             WearingRefusal::Unresolved { .. } => 3,
             WearingRefusal::Ambiguous { .. } => 4,
             WearingRefusal::NotASkeleton { .. } => 5,
+            WearingRefusal::Unlocated { .. } => UNLOCATED_VARIANT,
         }
     }
 
@@ -1291,7 +1298,10 @@ mod tests {
         // through an exhaustive match, so a new one cannot go untested.
         let samples = wearing_samples();
         assert_every_kind(
-            samples.iter().map(wearing_variant),
+            samples
+                .iter()
+                .map(wearing_variant)
+                .chain(std::iter::once(UNLOCATED_VARIANT)),
             WEARING_VARIANTS,
             "WearingRefusal",
         );
@@ -1303,6 +1313,25 @@ mod tests {
                 &format!("{sample:?}"),
             );
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "no command reads without cargo")]
+    fn an_unlocated_refusal_has_no_message() {
+        // Only `read_without_cargo` makes an unlocated refusal, and no command
+        // reads without cargo, so asking one for its message is a bug in the
+        // caller: the arm states it cannot happen, and this holds that it does.
+        let refusal = Refusal::Wearing(WearingRefusal::Unlocated {
+            manifest: "Cargo.toml".to_owned(),
+            dependency: "ci".to_owned(),
+            package: LockedPackageId {
+                name: "a-skeleton".to_owned(),
+                version: "0.1.0".to_owned(),
+                source: "registry+https://example.test/index".to_owned(),
+            },
+        });
+
+        let _ = refusal.message();
     }
 
     /// How many kinds of [`UnsafePathCause`] there are; see
@@ -1511,6 +1540,8 @@ mod tests {
         // is a change to that output. Each kind is paired with the word the
         // document gives it; the kinds are counted through an exhaustive
         // match, so a kind added without a pair here cannot go untested.
+        // `unlocated` is the library's word and is not documented there:
+        // `check --json` never reports it.
         let documented = [
             (RefusalKind::NotATable, "not-a-table"),
             (RefusalKind::ReservedKey, "reserved-key"),
@@ -1522,6 +1553,7 @@ mod tests {
             (RefusalKind::SkeletonInvalid, "skeleton-invalid"),
             (RefusalKind::Overlap, "overlap"),
             (RefusalKind::UnsafePath, "unsafe-path"),
+            (RefusalKind::Unlocated, "unlocated"),
         ];
         assert_every_kind(
             documented.iter().map(|(kind, _)| kind_index(*kind)),

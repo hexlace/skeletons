@@ -355,6 +355,7 @@ mod tests {
                     package: Some("a-skeleton".to_owned()),
                 }],
                 paths: Vec::new(),
+                unlocated_package: None,
             }]
         );
     }

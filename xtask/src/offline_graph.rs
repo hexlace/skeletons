@@ -41,8 +41,8 @@ use crate::process::{self, Program};
 
 /// The packages that only the commands bring in: the command-line framework
 /// and its composition crate, the argument parser, the network client with the
-/// TLS stack under it, the manifest editor, and the query-string decoder.
-const COMMANDS_ONLY: [&str; 8] = [
+/// TLS stack under it, and the manifest editor.
+const COMMANDS_ONLY: [&str; 7] = [
     "rituals",
     "rituals-compose",
     "clap",
@@ -50,7 +50,6 @@ const COMMANDS_ONLY: [&str; 8] = [
     "rustls",
     "ring",
     "toml_edit",
-    "form_urlencoded",
 ];
 
 /// The packages whose default build must hold none of [`COMMANDS_ONLY`]. A

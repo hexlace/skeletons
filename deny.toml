@@ -41,7 +41,11 @@ ignore = []
 #   CDLA-Permissive-2.0  — `webpki-roots`, whose content is Mozilla's root
 #                          certificate data
 #   Unicode-3.0          — `unicode-ident` (with MIT or Apache-2.0), for the
-#                          Unicode data tables it is generated from
+#                          Unicode data tables it is generated from, and the
+#                          ICU4X crates `url` reaches through `idna`
+#                          (`icu_normalizer_data`, `icu_properties_data` and
+#                          the rest of the `icu_*` family), which carry
+#                          Unicode's own data
 #
 # A licence a new dependency brings fails the check until it is read and added
 # here with the crate that needs it.

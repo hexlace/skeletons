@@ -63,6 +63,19 @@ fn run(directory: &Path, home: &Path, arguments: &[&str]) -> Result<(), Box<dyn 
     require_success(command, "git").map(drop)
 }
 
+/// The commit `HEAD` names in the repository at `directory`, as the full hex
+/// hash.
+pub(crate) fn head_commit(directory: &Path, home: &Path) -> Result<String, Box<dyn Error>> {
+    let mut command = Command::new("git");
+    command
+        .current_dir(directory)
+        .env("HOME", home)
+        .args(["rev-parse", "HEAD"]);
+    isolate(&mut command);
+    let output = require_success(command, "git")?;
+    Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+}
+
 /// Turns `directory`, which holds a skeleton crate, into a git repository with
 /// one commit, and returns the `file://` URL a git dependency reaches it by.
 pub(crate) fn commit_repository(directory: &Path, home: &Path) -> Result<String, Box<dyn Error>> {

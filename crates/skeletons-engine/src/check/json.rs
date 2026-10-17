@@ -27,7 +27,8 @@ use crate::git::ObjectId;
 use crate::skeleton::RenderError;
 use crate::survey::{Refusal, option_shape_detail};
 use crate::workspace::{
-    CRATES_IO_SOURCE, Pin, ReadWorkspaceError, WearingRefusal, WornDependency, WornId,
+    CRATES_IO_SOURCE, Pin, ReadWorkspaceError, UNLOCATED_NEVER_MET, WearingRefusal, WornDependency,
+    WornId,
 };
 
 /// `--json`'s own format-version marker: a reader checks this is a version
@@ -731,6 +732,7 @@ fn wearing_refusal_json(
             },
             message,
         },
+        WearingRefusal::Unlocated { .. } => unreachable!("{UNLOCATED_NEVER_MET}"),
     }
 }
 
@@ -836,7 +838,9 @@ mod tests {
     use std::num::NonZeroU32;
     use std::path::Path;
 
-    use super::{behind_json, drift_json, newer_json, pin_json, refusal_json};
+    use super::{
+        behind_json, drift_json, newer_json, pin_json, refusal_json, wearing_refusal_json,
+    };
     use crate::behind::{Behind, Newer, Undetermined, UndeterminedReason};
     use crate::claim::{
         ClaimPath, Claimant, Drift, DriftReason, Overlap, TooLongName, UnsafePathCause,
@@ -845,7 +849,9 @@ mod tests {
     use crate::skeleton::{Reason, RenderError, SkeletonIdentity};
     use crate::survey::Refusal;
     use crate::survey::poison::{POISON, POISON_ESCAPED, assert_escaped_once};
-    use crate::workspace::{CRATES_IO_SOURCE, Pin, ReadWorkspaceError, WearingRefusal, WornId};
+    use crate::workspace::{
+        CRATES_IO_SOURCE, LockedPackageId, Pin, ReadWorkspaceError, WearingRefusal, WornId,
+    };
 
     /// `text` parsed as an [`ObjectId`], for a test's own expected value.
     fn oid(text: &str) -> ObjectId {
@@ -1401,6 +1407,26 @@ mod tests {
                 message_json = message_json
             )
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "no command reads without cargo")]
+    fn an_unlocated_refusal_has_no_json_shape() {
+        // Only `read_without_cargo` makes an unlocated refusal, and no command
+        // reads without cargo, so `check --json` has no shape for one. The
+        // message is passed in directly because `Refusal::message` would panic
+        // first, and this test is about the JSON arm.
+        let wearing = WearingRefusal::Unlocated {
+            manifest: "Cargo.toml".to_owned(),
+            dependency: "ci".to_owned(),
+            package: LockedPackageId {
+                name: "a-skeleton".to_owned(),
+                version: "0.1.0".to_owned(),
+                source: "registry+https://example.test/index".to_owned(),
+            },
+        };
+
+        let _ = wearing_refusal_json("unlocated", String::new(), &wearing);
     }
 
     #[test]

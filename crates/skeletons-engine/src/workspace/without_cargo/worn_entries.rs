@@ -5,6 +5,8 @@ use std::collections::BTreeSet;
 use super::layout::Layout;
 use super::lock_entries::path_entry_index;
 use super::lockfile::Lockfile;
+use super::package_manifest::Declaration;
+use super::path_package::PathPackage;
 use crate::workspace::wearing_table::wearing_tables;
 
 /// The positions, in [`Lockfile::entries`], of the entries a wearing table of some member can
@@ -25,25 +27,8 @@ pub(super) fn worn_entries(
             // The lockfile does not hold the member, which the document refuses on its own.
             continue;
         };
-        // The same reading `from_document` makes of the table, so the two agree on which keys
-        // are worn. A table that is not one refuses the whole member there, so nothing is worn.
-        let Ok((tables, _refusals)) = wearing_tables(&member.metadata, |key| {
-            member
-                .declarations
-                .iter()
-                .any(|declaration| declaration.key == key)
-        }) else {
-            continue;
-        };
-
-        let worn_packages: BTreeSet<&str> = member
-            .declarations
-            .iter()
-            .filter(|declaration| {
-                tables
-                    .keys()
-                    .any(|worn_key| worn_key.as_str() == declaration.key)
-            })
+        let worn_packages: BTreeSet<&str> = worn_declarations(member)
+            .into_iter()
             .map(|declaration| declaration.package.as_str())
             .collect();
         for &dependency_index in lockfile.entries()[entry_index].dependency_indexes() {
@@ -54,6 +39,31 @@ pub(super) fn worn_entries(
         }
     }
     entries
+}
+
+/// The declarations of `member` that its wearing tables name: those written under a key some
+/// `[package.metadata.skeletons.<key>]` table has.
+///
+/// This is the same reading `from_document` makes of the tables, so the two agree on which keys
+/// are worn. A table that is not one refuses the whole member there, so nothing is worn.
+pub(super) fn worn_declarations(member: &PathPackage) -> Vec<&Declaration> {
+    let Ok((tables, _refusals)) = wearing_tables(&member.metadata, |key| {
+        member
+            .declarations
+            .iter()
+            .any(|declaration| declaration.key == key)
+    }) else {
+        return Vec::new();
+    };
+    member
+        .declarations
+        .iter()
+        .filter(|declaration| {
+            tables
+                .keys()
+                .any(|worn_key| worn_key.as_str() == declaration.key)
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -8,11 +8,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::error::ReadWithoutCargoError;
 use super::file_system::MANIFEST_FILE_NAME;
 use super::layout::Layout;
+use super::package_manifest::DeclaredSource;
 use super::path_package::PathPackage;
+use super::worn_entries::worn_declarations;
 
 /// Refuses `layout` when it uses `[patch]` or `[replace]`, a `package.workspace` key, a member
-/// that gives one package two dependency keys or one key two packages, or two packages with one
-/// name and version.
+/// that gives one package two dependency keys or one key two packages, a member that wears a
+/// dependency declared with `registry =`, or two packages with one name and version.
 ///
 /// # Errors
 ///
@@ -41,6 +43,7 @@ pub(super) fn check(layout: &Layout) -> Result<(), ReadWithoutCargoError> {
         }
         if package.is_member {
             check_keys(package)?;
+            check_worn_registries(package)?;
         }
     }
     check_identities(&layout.packages)
@@ -76,6 +79,27 @@ fn check_keys(member: &PathPackage) -> Result<(), ReadWithoutCargoError> {
             member.manifest_path.display(),
             joined(keys)
         )));
+    }
+    Ok(())
+}
+
+/// Refuses a member that wears a dependency declared with `registry =`. Only Cargo's
+/// configuration says which index a registry name stands for, so the package the lock entry names
+/// could be another registry's, and the report would read the wrong package's files. A dependency
+/// nothing wears is never read, so it is read as the lock has it.
+fn check_worn_registries(member: &PathPackage) -> Result<(), ReadWithoutCargoError> {
+    for declaration in worn_declarations(member) {
+        if let DeclaredSource::Registry {
+            name: Some(registry),
+        } = &declaration.source
+        {
+            return Err(ReadWithoutCargoError::unsupported(format!(
+                "{}: the worn dependency `{}` is declared with `registry = \"{registry}\"`, and \
+                 only cargo's configuration says which index that names",
+                member.manifest_path.display(),
+                declaration.key
+            )));
+        }
     }
     Ok(())
 }

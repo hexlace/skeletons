@@ -21,11 +21,11 @@ use std::path::{Path, PathBuf};
 
 use semver::{Version, VersionReq};
 
-use super::currency::locked_source;
 use super::error::ReadWithoutCargoError;
 use super::file_system::{MANIFEST_FILE_NAME, normalized};
 use super::layout::Layout;
 use super::lock_entries::set_aside_entries;
+use super::locked_source;
 use super::lockfile::{LockEntry, Lockfile};
 use super::package_manifest::{Declaration, DeclaredSource};
 use super::path_package::{Inherits, read_manifest};

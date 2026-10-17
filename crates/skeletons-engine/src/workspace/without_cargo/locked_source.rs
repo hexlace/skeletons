@@ -12,13 +12,10 @@ use crate::workspace::without_cargo::package_manifest::{DeclaredSource, GitRefer
 /// Cargo wrote it, which is not always how the manifest spells it, so the two are compared as
 /// Cargo canonicalises them, and with its one reference as a decoded query, so
 /// `branch=feat%2Fx` is the branch `feat/x`; a declaration naming no reference is locked with no
-/// query. A registry declaration
-/// with no `registry =` name is locked from crates.io exactly, and one with a name from some
-/// registry: this reader has no Cargo configuration to say which index a name stands for.
-pub(in crate::workspace::without_cargo) fn agrees(
-    locked: Option<&str>,
-    declared: &DeclaredSource,
-) -> bool {
+/// query. A registry declaration with no `registry =` name is locked from crates.io exactly, and
+/// one with a name from some registry: this reader does not interpret registry names, so it
+/// cannot say which index a name stands for.
+pub(super) fn agrees(locked: Option<&str>, declared: &DeclaredSource) -> bool {
     match (declared, locked) {
         (DeclaredSource::Path { .. }, None) => true,
         (DeclaredSource::Path { .. }, Some(_))

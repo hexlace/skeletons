@@ -89,47 +89,15 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::configuration_files;
+    use crate::workspace::without_cargo::fixture::Fixture;
 
-    /// A temporary directory with a real path, and the files a test writes into it.
-    struct Tree {
-        _directory: tempfile::TempDir,
-        /// The temporary directory itself, a real path.
-        top: PathBuf,
-    }
-
-    impl Tree {
-        fn new() -> Self {
-            let directory = tempfile::tempdir().expect("a temporary directory");
-            let top = directory.path().canonicalize().expect("a real path");
-            Self {
-                _directory: directory,
-                top,
-            }
-        }
-
-        /// Writes the file `relative` under the top, creating the directories above it.
-        fn write(&self, relative: &str) -> PathBuf {
-            let path = self.top.join(relative);
-            std::fs::create_dir_all(path.parent().expect("a file has a parent"))
-                .expect("a directory");
-            std::fs::write(&path, "").expect("a file");
-            path
-        }
-
-        fn directory(&self, relative: &str) -> PathBuf {
-            let path = self.top.join(relative);
-            std::fs::create_dir_all(&path).expect("a directory");
-            path
-        }
-
-        /// The files `start` walks to with `cargo_home`, less any the machine has in the
-        /// directories above the temporary directory, which are no business of a test.
-        fn walk(&self, start: &str, cargo_home: Option<&Path>) -> Vec<PathBuf> {
-            configuration_files(&self.top.join(start), cargo_home)
-                .into_iter()
-                .filter(|file| file.starts_with(&self.top))
-                .collect()
-        }
+    /// The files `start` walks to with `cargo_home`, less any the machine has in the
+    /// directories above the fixture's temporary directory, which are no business of a test.
+    fn walk(fixture: &Fixture, start: &Path, cargo_home: Option<&Path>) -> Vec<PathBuf> {
+        configuration_files(start, cargo_home)
+            .into_iter()
+            .filter(|file| file.starts_with(&fixture.top))
+            .collect()
     }
 
     #[test]
@@ -137,13 +105,17 @@ mod tests {
         // A configuration file at the start, one at its parent and one at the temporary
         // directory above that, and one in the Cargo home: the walk gives them in that order,
         // the home last because it has the lowest precedence.
-        let tree = Tree::new();
-        let start = tree.write("w/app/.cargo/config.toml");
-        let parent = tree.write("w/.cargo/config.toml");
-        let top = tree.write(".cargo/config.toml");
-        let home = tree.write("cargo-home/config.toml");
+        let fixture = Fixture::new();
+        let start = fixture.write("app/.cargo/config.toml", "");
+        let parent = fixture.write(".cargo/config.toml", "");
+        let top = fixture.write("../.cargo/config.toml", "");
+        let home = fixture.write("../cargo-home/config.toml", "");
 
-        let files = tree.walk("w/app", Some(&tree.top.join("cargo-home")));
+        let files = walk(
+            &fixture,
+            &fixture.root.join("app"),
+            Some(&fixture.top.join("cargo-home")),
+        );
 
         assert_eq!(files, [start, parent, top, home]);
     }
@@ -152,34 +124,35 @@ mod tests {
     fn a_directory_below_the_start_or_beside_it_is_never_looked_in() {
         // Cargo reads no configuration of a workspace member when it starts at the root, and
         // none of a sibling member or a directory under the start.
-        let tree = Tree::new();
-        let root = tree.write("w/.cargo/config.toml");
-        tree.write("w/app/.cargo/config.toml");
-        tree.write("w/other/.cargo/config.toml");
-        tree.write("w/app/src/.cargo/config.toml");
+        let fixture = Fixture::new();
+        let root = fixture.write(".cargo/config.toml", "");
+        let app = fixture.write("app/.cargo/config.toml", "");
+        fixture.write("other/.cargo/config.toml", "");
+        fixture.write("app/src/.cargo/config.toml", "");
 
-        assert_eq!(tree.walk("w", None), [root]);
         assert_eq!(
-            tree.walk("w/app", None),
-            [
-                tree.top.join("w/app/.cargo/config.toml"),
-                tree.top.join("w/.cargo/config.toml")
-            ]
+            walk(&fixture, &fixture.root, None),
+            std::slice::from_ref(&root)
         );
+        assert_eq!(walk(&fixture, &fixture.root.join("app"), None), [app, root]);
     }
 
     #[test]
     fn the_file_without_the_extension_hides_the_one_with_it_beside_it() {
         // Where `config` and `config.toml` both exist Cargo uses `config` alone, in a `.cargo`
         // directory and in the Cargo home, and takes `config.toml` where it is the only one.
-        let tree = Tree::new();
-        let legacy = tree.write("w/.cargo/config");
-        tree.write("w/.cargo/config.toml");
-        let plain = tree.write(".cargo/config.toml");
-        let home_legacy = tree.write("cargo-home/config");
-        tree.write("cargo-home/config.toml");
+        let fixture = Fixture::new();
+        let legacy = fixture.write(".cargo/config", "");
+        fixture.write(".cargo/config.toml", "");
+        let plain = fixture.write("../.cargo/config.toml", "");
+        let home_legacy = fixture.write("../cargo-home/config", "");
+        fixture.write("../cargo-home/config.toml", "");
 
-        let files = tree.walk("w", Some(&tree.top.join("cargo-home")));
+        let files = walk(
+            &fixture,
+            &fixture.root,
+            Some(&fixture.top.join("cargo-home")),
+        );
 
         assert_eq!(files, [legacy, plain, home_legacy]);
     }
@@ -187,12 +160,16 @@ mod tests {
     #[test]
     fn a_directory_with_no_configuration_file_adds_nothing() {
         // A `.cargo` with no `config` in it, and a Cargo home that is not there at all.
-        let tree = Tree::new();
-        tree.directory("w/.cargo");
-        tree.write("w/.cargo/credentials.toml");
+        let fixture = Fixture::new();
+        fixture.directory(".cargo");
+        fixture.write(".cargo/credentials.toml", "");
 
         assert_eq!(
-            tree.walk("w", Some(&tree.top.join("no-such-home"))),
+            walk(
+                &fixture,
+                &fixture.root,
+                Some(&fixture.top.join("no-such-home"))
+            ),
             Vec::<PathBuf>::new()
         );
     }
@@ -202,27 +179,34 @@ mod tests {
         // The Cargo home is the `.cargo` of the temporary directory above the start, which the
         // walk reaches anyway. Its file is read there, at that directory's precedence, and the
         // home does not add it again, however the home is spelled.
-        let tree = Tree::new();
-        let root = tree.write("w/.cargo/config.toml");
-        let top = tree.write(".cargo/config.toml");
-        let spelled_with_a_parent = tree.top.join("w/../.cargo");
+        let fixture = Fixture::new();
+        let root = fixture.write(".cargo/config.toml", "");
+        let top = fixture.write("../.cargo/config.toml", "");
+        let spelled_with_a_parent = fixture.top.join("w/../.cargo");
 
         assert_eq!(
-            tree.walk("w", Some(&tree.top.join(".cargo"))),
+            walk(&fixture, &fixture.root, Some(&fixture.top.join(".cargo"))),
             [root.clone(), top.clone()]
         );
-        assert_eq!(tree.walk("w", Some(&spelled_with_a_parent)), [root, top]);
+        assert_eq!(
+            walk(&fixture, &fixture.root, Some(&spelled_with_a_parent)),
+            [root, top]
+        );
     }
 
     #[test]
     fn a_home_that_is_a_cargo_directory_the_walk_never_reaches_is_read_last() {
         // The home is another directory's `.cargo` entirely: one below the start, which the walk
         // does not enter, so it is listed after the walk.
-        let tree = Tree::new();
-        let root = tree.write("w/.cargo/config.toml");
-        let home = tree.write("w/app/.cargo/config.toml");
+        let fixture = Fixture::new();
+        let root = fixture.write(".cargo/config.toml", "");
+        let home = fixture.write("app/.cargo/config.toml", "");
 
-        let files = tree.walk("w", Some(&tree.top.join("w/app/.cargo")));
+        let files = walk(
+            &fixture,
+            &fixture.root,
+            Some(&fixture.root.join("app/.cargo")),
+        );
 
         assert_eq!(files, [root, home]);
     }

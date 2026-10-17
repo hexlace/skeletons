@@ -13,6 +13,8 @@ pub(super) use git_repository::GitRepository;
 /// temporary directory.
 pub(super) struct Fixture {
     _directory: tempfile::TempDir,
+    /// The temporary directory itself, a real path.
+    pub(super) top: PathBuf,
     /// The tree's root, a real path.
     pub(super) root: PathBuf,
 }
@@ -20,23 +22,32 @@ pub(super) struct Fixture {
 impl Fixture {
     pub(super) fn new() -> Self {
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let root = directory
-            .path()
-            .canonicalize()
-            .expect("a real path")
-            .join("w");
+        let top = directory.path().canonicalize().expect("a real path");
+        let root = top.join("w");
         std::fs::create_dir(&root).expect("the root directory");
         Self {
             _directory: directory,
+            top,
             root,
         }
     }
 
-    /// Writes the file `relative`, under the temporary directory's root, with `text`.
-    pub(super) fn write(&self, relative: &str, text: &str) {
+    /// Writes the file `relative`, under the temporary directory's root, with `text`, and says
+    /// where it is, as a real path.
+    pub(super) fn write(&self, relative: &str, text: &str) -> PathBuf {
+        let path = self
+            .directory_above(relative)
+            .join(Path::new(relative).file_name().expect("a file has a name"));
+        std::fs::write(&path, text).expect("a file");
+        path
+    }
+
+    /// Makes the directory `relative`, under the temporary directory's root, and says where it
+    /// is, as a real path.
+    pub(super) fn directory(&self, relative: &str) -> PathBuf {
         let path = self.root.join(relative);
-        std::fs::create_dir_all(path.parent().expect("a file has a parent")).expect("a directory");
-        std::fs::write(path, text).expect("a file");
+        std::fs::create_dir_all(&path).expect("a directory");
+        path.canonicalize().expect("a real path")
     }
 
     /// A library package named `name` at `relative`, with `extra` after its `[package]` table.
@@ -53,6 +64,12 @@ impl Fixture {
     /// and says what it printed on failure.
     pub(super) fn lock_with_cargo(&self) -> Result<(), String> {
         lock_with_cargo_in(&self.root)
+    }
+
+    /// The directory that holds the file `relative`, made, as a real path.
+    fn directory_above(&self, relative: &str) -> PathBuf {
+        let parent = Path::new(relative).parent().expect("a file has a parent");
+        self.directory(&parent.display().to_string())
     }
 }
 

@@ -57,19 +57,6 @@ pub(super) fn read(
     Ok(CargoConfiguration { files })
 }
 
-/// The file at `path`, read and parsed as TOML.
-fn read_file(path: &Path) -> Result<ConfigurationFile, ReadWithoutCargoError> {
-    let text =
-        std::fs::read_to_string(path).map_err(|error| ReadWithoutCargoError::file(path, &error))?;
-    let table = toml::from_str::<toml::Table>(&text).map_err(|error| {
-        ReadWithoutCargoError::text(path, &TextError::unreadable(error.to_string()))
-    })?;
-    Ok(ConfigurationFile {
-        path: path.to_path_buf(),
-        table,
-    })
-}
-
 impl CargoConfiguration {
     /// Refuses a file that uses `include`, `paths` or `[patch]`, the first one found going from
     /// the nearest file out, and within a file in that order.
@@ -151,6 +138,19 @@ impl ConfigurationFile {
     }
 }
 
+/// The file at `path`, read and parsed as TOML.
+fn read_file(path: &Path) -> Result<ConfigurationFile, ReadWithoutCargoError> {
+    let text =
+        std::fs::read_to_string(path).map_err(|error| ReadWithoutCargoError::file(path, &error))?;
+    let table = toml::from_str::<toml::Table>(&text).map_err(|error| {
+        ReadWithoutCargoError::text(path, &TextError::unreadable(error.to_string()))
+    })?;
+    Ok(ConfigurationFile {
+        path: path.to_path_buf(),
+        table,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -159,49 +159,20 @@ mod tests {
 
     use super::{ConfigurationFile, read};
     use crate::workspace::without_cargo::error::ReadWithoutCargoError;
+    use crate::workspace::without_cargo::fixture::Fixture;
 
-    /// A temporary directory with a real path, and the start `w` in it.
-    struct Tree {
-        _directory: tempfile::TempDir,
-        top: PathBuf,
+    /// What reading the configuration from the fixture's root, and refusing what only Cargo
+    /// follows, says.
+    fn verdict(fixture: &Fixture, cargo_home: Option<&Path>) -> Result<(), ReadWithoutCargoError> {
+        read(&fixture.root, cargo_home)?.refuse_what_only_cargo_follows()
     }
 
-    impl Tree {
-        fn new() -> Self {
-            let directory = tempfile::tempdir().expect("a temporary directory");
-            let top = directory.path().canonicalize().expect("a real path");
-            std::fs::create_dir(top.join("w")).expect("the start");
-            Self {
-                _directory: directory,
-                top,
-            }
-        }
-
-        fn start(&self) -> PathBuf {
-            self.top.join("w")
-        }
-
-        /// Writes `text` to `relative` under the top and says where.
-        fn write(&self, relative: &str, text: &str) -> PathBuf {
-            let path = self.top.join(relative);
-            std::fs::create_dir_all(path.parent().expect("a file has a parent"))
-                .expect("a directory");
-            std::fs::write(&path, text).expect("a file");
-            path
-        }
-
-        /// What reading the configuration from the start, and refusing what only Cargo follows,
-        /// says.
-        fn verdict(&self, cargo_home: Option<&Path>) -> Result<(), ReadWithoutCargoError> {
-            read(&self.start(), cargo_home)?.refuse_what_only_cargo_follows()
-        }
-    }
-
-    /// The verdict on a single file `w/.cargo/config.toml` holding `text`, and the file.
+    /// The verdict on a single file `.cargo/config.toml` in the root holding `text`, and the
+    /// file.
     fn verdict_on(text: &str) -> (Result<(), ReadWithoutCargoError>, PathBuf) {
-        let tree = Tree::new();
-        let file = tree.write("w/.cargo/config.toml", text);
-        (tree.verdict(None), file)
+        let fixture = Fixture::new();
+        let file = fixture.write(".cargo/config.toml", text);
+        (verdict(&fixture, None), file)
     }
 
     fn unsupported(detail: String) -> Result<(), ReadWithoutCargoError> {
@@ -300,10 +271,10 @@ mod tests {
 
     #[test]
     fn text_that_is_not_toml_is_unreadable_naming_the_file() {
-        let tree = Tree::new();
-        let file = tree.write("w/.cargo/config.toml", "paths = [\n");
+        let fixture = Fixture::new();
+        let file = fixture.write(".cargo/config.toml", "paths = [\n");
 
-        let verdict = tree.verdict(None);
+        let verdict = verdict(&fixture, None);
 
         let Err(ReadWithoutCargoError::ManifestUnreadable { detail }) = verdict else {
             panic!("expected an unreadable file, got {verdict:?}");
@@ -317,19 +288,16 @@ mod tests {
     #[test]
     fn a_file_that_cannot_be_read_is_unreadable_naming_the_file() {
         // `config` is a directory: Cargo takes it as the file and fails to read it.
-        let tree = Tree::new();
-        std::fs::create_dir_all(tree.top.join("w/.cargo/config")).expect("a directory");
+        let fixture = Fixture::new();
+        let config = fixture.directory(".cargo/config");
 
-        let verdict = tree.verdict(None);
+        let verdict = verdict(&fixture, None);
 
         let Err(ReadWithoutCargoError::ManifestUnreadable { detail }) = verdict else {
             panic!("expected an unreadable file, got {verdict:?}");
         };
         assert!(
-            detail.starts_with(&format!(
-                "{} could not be read",
-                tree.top.join("w/.cargo/config").display()
-            )),
+            detail.starts_with(&format!("{} could not be read", config.display())),
             "{detail}"
         );
     }
@@ -359,17 +327,17 @@ mod tests {
     #[test]
     fn within_a_file_include_comes_before_paths_and_paths_before_patch() {
         // One file, written twice: with all three keys, and then with the first one gone.
-        let tree = Tree::new();
-        let file = tree.write(
-            "w/.cargo/config.toml",
+        let fixture = Fixture::new();
+        let file = fixture.write(
+            ".cargo/config.toml",
             "include = \"x.toml\"\npaths = [\"p\"]\n[patch.crates-io]\nx = { path = \"x\" }\n",
         );
-        let all_three = tree.verdict(None);
-        tree.write(
-            "w/.cargo/config.toml",
+        let all_three = verdict(&fixture, None);
+        fixture.write(
+            ".cargo/config.toml",
             "paths = [\"p\"]\n[patch.crates-io]\nx = { path = \"x\" }\n",
         );
-        let paths_and_patch = tree.verdict(None);
+        let paths_and_patch = verdict(&fixture, None);
 
         assert_eq!(
             all_three,
@@ -383,26 +351,24 @@ mod tests {
 
     #[test]
     fn the_nearest_file_is_refused_before_one_further_out_and_the_home_comes_last() {
-        let tree = Tree::new();
-        let near = tree.write("w/.cargo/config.toml", "paths = [\"near\"]\n");
-        tree.write(".cargo/config.toml", "include = \"far.toml\"\n");
-        let home = tree.write("cargo-home/config.toml", "paths = [\"home\"]\n");
+        let fixture = Fixture::new();
+        let near = fixture.write(".cargo/config.toml", "paths = [\"near\"]\n");
+        let next = fixture.write("../.cargo/config.toml", "include = \"far.toml\"\n");
+        let home = fixture.write("../cargo-home/config.toml", "paths = [\"home\"]\n");
+        let cargo_home = fixture.top.join("cargo-home");
 
         assert_eq!(
-            tree.verdict(Some(&tree.top.join("cargo-home"))),
+            verdict(&fixture, Some(&cargo_home)),
             unsupported(format!("`paths` in {}", near.display()))
         );
         std::fs::remove_file(&near).expect("remove the nearest");
         assert_eq!(
-            tree.verdict(Some(&tree.top.join("cargo-home"))),
-            unsupported(format!(
-                "`include` in {}",
-                tree.top.join(".cargo/config.toml").display()
-            ))
+            verdict(&fixture, Some(&cargo_home)),
+            unsupported(format!("`include` in {}", next.display()))
         );
-        std::fs::remove_file(tree.top.join(".cargo/config.toml")).expect("remove the next");
+        std::fs::remove_file(&next).expect("remove the next");
         assert_eq!(
-            tree.verdict(Some(&tree.top.join("cargo-home"))),
+            verdict(&fixture, Some(&cargo_home)),
             unsupported(format!("`paths` in {}", home.display()))
         );
     }
@@ -443,16 +409,16 @@ mod tests {
     fn the_file_without_the_extension_is_the_one_read_when_both_exist() {
         // Cargo ignores `config.toml` beside a `config`, so a `paths` only in `config.toml` is
         // not Cargo's, and one in `config` is, whatever `config.toml` says.
-        let hidden = Tree::new();
-        hidden.write("w/.cargo/config", "");
-        hidden.write("w/.cargo/config.toml", "paths = [\"x\"]\n");
-        let read = Tree::new();
-        let legacy = read.write("w/.cargo/config", "paths = [\"x\"]\n");
-        read.write("w/.cargo/config.toml", "");
+        let hidden = Fixture::new();
+        hidden.write(".cargo/config", "");
+        hidden.write(".cargo/config.toml", "paths = [\"x\"]\n");
+        let read = Fixture::new();
+        let legacy = read.write(".cargo/config", "paths = [\"x\"]\n");
+        read.write(".cargo/config.toml", "");
 
-        assert_eq!(hidden.verdict(None), Ok(()));
+        assert_eq!(verdict(&hidden, None), Ok(()));
         assert_eq!(
-            read.verdict(None),
+            verdict(&read, None),
             unsupported(format!("`paths` in {}", legacy.display()))
         );
     }

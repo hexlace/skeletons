@@ -162,6 +162,19 @@ mod tests {
 
     use super::CompatibleRange;
 
+    /// The largest major, minor and patch a requirement or a locked version is written with.
+    /// The numbers are small so that comparators meet each other often.
+    const WRITTEN_PART_MAX: u64 = 3;
+
+    /// The largest major, minor and patch the grid looks at: one more than a requirement is
+    /// written with, which is as far as the version just after one it writes goes.
+    const PART_MAX: u64 = WRITTEN_PART_MAX + 2;
+
+    /// The pre-releases the brute force looks at, which hold every one the range builds a
+    /// candidate from and others besides: a numeric identifier, and an identifier followed by
+    /// the one that would come next.
+    const PRE_RELEASES: [&str; 7] = ["0", "1", "alpha", "alpha.0", "alpha.1", "beta", "beta.0"];
+
     /// Whether the range of the compatible versions of `locked` admits one that meets
     /// `requirement`.
     fn admits(locked: &str, requirement: &str) -> bool {
@@ -245,19 +258,6 @@ mod tests {
         assert!(admits("4.5.6", ">4.0.0, <4.0.1-alpha"));
         assert!(!admits("4.5.6", ">4.0.0, <4.0.1"));
     }
-
-    /// The largest major, minor and patch a requirement or a locked version is written with.
-    /// The numbers are small so that comparators meet each other often.
-    const WRITTEN_PART_MAX: u64 = 3;
-
-    /// The largest major, minor and patch the grid looks at: one more than a requirement is
-    /// written with, which is as far as the version just after one it writes goes.
-    const PART_MAX: u64 = WRITTEN_PART_MAX + 2;
-
-    /// The pre-releases the brute force looks at, which hold every one the range builds a
-    /// candidate from and others besides: a numeric identifier, and an identifier followed by
-    /// the one that would come next.
-    const PRE_RELEASES: [&str; 7] = ["0", "1", "alpha", "alpha.0", "alpha.1", "beta", "beta.0"];
 
     /// Every version up to `PART_MAX` in each part with no pre-release and with each of
     /// [`PRE_RELEASES`].

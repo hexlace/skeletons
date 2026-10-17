@@ -6,16 +6,13 @@
 //! did change the document: the package it reads is the one the configuration names. Every case
 //! runs in a Cargo home the test owns, which vendors the registry crate `house-rules` 1.1.0.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::super::cargo_configuration::HomeVariables;
-use super::super::error::ReadWithoutCargoError;
 use super::super::file_system::normalized;
 use super::super::fixture::{CargoHome, Fixture, GitRepository, cargo_version};
-use super::super::read::read_document;
 use super::{
-    Verdict, assert_both_say_in_home, cargo_verdict_in_home, locked_members, reader_verdict,
+    Verdict, assert_both_say_in_home, assert_reader_refuses, cargo_verdict_in_home, locked_members,
     write_app,
 };
 use crate::workspace::schema::{Document, Package};
@@ -81,23 +78,6 @@ fn assert_cargo_reads_house_rules_from(fixture: &Fixture, home: &CargoHome, dire
         directory.join("Cargo.toml"),
         "cargo's package, on {toolchain}"
     );
-}
-
-/// Requires that the reader, given `variables`, refuses the workspace at `fixture`'s root as
-/// something only Cargo follows, with the detail `detail`.
-fn assert_reader_refuses(fixture: &Fixture, variables: &HomeVariables, detail: &str) {
-    let toolchain = cargo_version();
-    assert_eq!(
-        reader_verdict(fixture, variables),
-        Verdict::Unsupported,
-        "the reader, on {toolchain}"
-    );
-    let Err(ReadWithoutCargoError::Unsupported { detail: given }) =
-        read_document(&fixture.root, &BTreeMap::new(), variables)
-    else {
-        panic!("the reader, on {toolchain}: expected a refusal");
-    };
-    assert_eq!(given, detail, "the reader's words, on {toolchain}");
 }
 
 /// The text of a configuration file that overrides with the directory `directory`.
@@ -264,8 +244,8 @@ fn a_patch_by_git_in_the_directory_above_the_root_is_refused() {
 fn a_source_replacement_in_the_workspaces_own_configuration_is_read_past() {
     // The control against over-refusing: the replacement of crates.io lives in the workspace's
     // own `.cargo` and the Cargo home holds none. It moves where Cargo reads `house-rules` and
-    // never which package the lock names, so both say the lock is current. This is green before
-    // the configuration is read and after, by design.
+    // never which package the lock names, so both say the lock is current: reading the
+    // configuration must not turn a replacement into a refusal.
     let (fixture, home) = unlocked_app_on_house_rules();
     home.move_configuration_into(&fixture.root.join(".cargo"));
     lock_in(&home, &fixture, Network::Refused);

@@ -19,11 +19,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::super::cargo_configuration::HomeVariables;
-use super::super::error::ReadWithoutCargoError;
 use super::super::fixture::{CargoHome, Fixture, cargo_version};
 use super::super::read::read_document;
 use super::{
-    Verdict, Y_DEFAULT_ENABLES_Z, Y_OPTIONAL_Z, assert_both_say_in_home,
+    Verdict, Y_DEFAULT_ENABLES_Z, Y_OPTIONAL_Z, assert_both_say_in_home, assert_reader_refuses,
     assert_stale_report_is_the_relocked_one_in_home, cargo_verdict_in_home, locked_members,
     write_app,
 };
@@ -90,22 +89,7 @@ fn assert_cargo_cannot_resolve_and_reader_refuses(
         Verdict::Refused,
         "cargo, on {toolchain}"
     );
-    assert_reader_refuses(fixture, home, detail);
-}
-
-/// Requires that the reader, given `home`, refuses the workspace at `fixture`'s root with the
-/// detail `detail`.
-fn assert_reader_refuses(fixture: &Fixture, home: &CargoHome, detail: &str) {
-    let toolchain = cargo_version();
-    let read = read_document(
-        &fixture.root,
-        &BTreeMap::new(),
-        &HomeVariables::cargo_home(home.path()),
-    );
-    let Err(ReadWithoutCargoError::Unsupported { detail: given }) = read else {
-        panic!("the reader, on {toolchain}: expected a refusal, got {read:?}");
-    };
-    assert_eq!(given, detail, "the reader's words, on {toolchain}");
+    assert_reader_refuses(fixture, &HomeVariables::cargo_home(home.path()), detail);
 }
 
 /// Where the reader is to find `house-rules` 4.5.6 from crates.io: the vendored directory.
@@ -122,11 +106,11 @@ fn house_rules_at(home: &CargoHome) -> BTreeMap<LockedPackageId, PathBuf> {
 
 #[test]
 fn an_optional_dependency_enabled_after_the_lock_that_needs_a_newer_worn_version_is_refused() {
-    // Case B2. `app` locks `house-rules` at 4.5.6 through `^4`. `z` asks for `^4.6`, which is in
-    // the range 4.5.6 is in, and 4.6.0 is in the registry once the lock is made. Once `y`
-    // enables `z`, Cargo keeps the one 4.x it has, finds it too old, and fails to select a
-    // version, and a relock does not help. The reader cannot read that from the lock, and says
-    // so, naming `z`'s manifest.
+    // The direct shape: `app` locks `house-rules` at 4.5.6 through `^4`. `z` asks for `^4.6`,
+    // which is in the range 4.5.6 is in, and 4.6.0 is in the registry once the lock is made.
+    // Once `y` enables `z`, Cargo keeps the one 4.x it has, finds it too old, and fails to
+    // select a version, and a relock does not help. The reader cannot read that from the lock,
+    // and says so, naming `z`'s manifest.
     let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"4.6\"\n");
     enable_z(&fixture);
     home.vendor("house-rules", "4.6.0");
@@ -140,9 +124,9 @@ fn an_optional_dependency_enabled_after_the_lock_that_needs_a_newer_worn_version
 
 #[test]
 fn a_dependency_of_an_optional_package_that_needs_a_newer_worn_version_is_refused() {
-    // Case B5. `z` takes the requirement through `x`, a package it depends on by path, which
-    // asks for `^4.6`. The reader follows the path from `z` and names `x`'s manifest. (The
-    // directory `w` is the workspace's own, so the package is not called that.)
+    // The indirect shape: `z` takes the requirement through `x`, a package it depends on by
+    // path, which asks for `^4.6`. The reader follows the path from `z` and names `x`'s
+    // manifest. (The directory `w` is the workspace's own, so the package is not called that.)
     let (fixture, home) = locked_with_optional_z("[dependencies]\nx = { path = \"../x\" }\n");
     fixture.package("../x", "x", "[dependencies]\nhouse-rules = \"4.6\"\n");
     enable_z(&fixture);
@@ -157,8 +141,8 @@ fn a_dependency_of_an_optional_package_that_needs_a_newer_worn_version_is_refuse
 
 #[test]
 fn an_optional_dependency_that_is_never_enabled_is_refused_though_cargo_reads_the_workspace() {
-    // Case B3, the cost of refusing. Nothing enables `z`, so Cargo never reads its requirement
-    // and says the lock is current. The reader cannot see which features are on, and refuses
+    // The cost of refusing: nothing enables `z`, so Cargo never reads its requirement and says
+    // the lock is current. The reader cannot see which features are on, and refuses
     // whenever one could break resolution, which is a workspace Cargo reads.
     let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"4.6\"\n");
 
@@ -170,7 +154,7 @@ fn an_optional_dependency_that_is_never_enabled_is_refused_though_cargo_reads_th
     );
     assert_reader_refuses(
         &fixture,
-        &home,
+        &HomeVariables::cargo_home(home.path()),
         &refusal_of(&manifest_of(&fixture, "z"), "4.6"),
     );
 }
@@ -198,10 +182,10 @@ fn an_optional_dependency_of_the_outsider_that_is_the_worn_package_is_refused() 
 
 #[test]
 fn a_requirement_the_locked_worn_version_meets_is_reported_as_after_a_relock() {
-    // Control B4: `z` asks for `^4.5`, which 4.5.6 meets. Enabling `z` only makes the lock lack
-    // it, so Cargo's `--locked` aborts and a relock fixes it, and the reader reads the lock as
-    // it stands, which is the report once Cargo brings it up to date. Green without the
-    // refusal, and it must stay green.
+    // The control against over-refusing a met requirement: `z` asks for `^4.5`, which 4.5.6
+    // meets. Enabling `z` only makes the lock lack it, so Cargo's `--locked` aborts and a relock
+    // fixes it, and the reader reads the lock as it stands, which is the report once Cargo
+    // brings it up to date. A requirement the locked version meets is no reason to refuse.
     let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"4.5\"\n");
     enable_z(&fixture);
 
@@ -210,9 +194,10 @@ fn a_requirement_the_locked_worn_version_meets_is_reported_as_after_a_relock() {
 
 #[test]
 fn a_requirement_in_another_range_than_the_locked_one_is_reported_as_after_a_relock() {
-    // Control B6: `z` asks for `^5`. Cargo keeps one version for each range, so it adds 5.0.0
-    // beside 4.5.6 and leaves the worn package alone, and a relock fixes the lock. Green
-    // without the refusal, and it must stay green.
+    // The control against over-refusing another range: `z` asks for `^5`. Cargo keeps one
+    // version for each range, so it adds 5.0.0 beside 4.5.6 and leaves the worn package alone,
+    // and a relock fixes the lock. A requirement in a range the lock does not hold is no reason
+    // to refuse.
     let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"5\"\n");
     enable_z(&fixture);
     home.vendor("house-rules", "5.0.0");
@@ -223,9 +208,10 @@ fn a_requirement_in_another_range_than_the_locked_one_is_reported_as_after_a_rel
 #[test]
 fn a_requirement_of_a_registry_package_is_not_read_and_the_report_is_the_locked_version() {
     // The limit that stays: `y` enables `r`, a crate from the registry whose own manifest asks
-    // for `^4.6`. Cargo fails to resolve it as it does case B2, and the reader has no manifest
-    // of `r` to read, so it reports `house-rules` at the version the lock names. The lock is
-    // current to the reader and holds 4.5.6, which is what its report shows.
+    // for `^4.6`. Cargo fails to resolve it as it does for a manifest the reader holds, and the
+    // reader has no manifest of `r` to read, so it reports `house-rules` at the version the
+    // lock names. The lock is current to the reader and holds 4.5.6, which is what its report
+    // shows.
     let (fixture, home) = locked_workspace(
         "[dependencies]\nr = { version = \"1\", optional = true }\n",
         "",

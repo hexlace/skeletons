@@ -54,6 +54,24 @@ impl CanonicalGitUrl {
     }
 }
 
+impl fmt::Display for NotACargoGitUrl {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unparseable(error) => error.fmt(formatter),
+            Self::CannotBeABase => formatter.write_str("cannot-be-a-base-URLs are not supported"),
+        }
+    }
+}
+
+impl std::error::Error for NotACargoGitUrl {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Unparseable(error) => Some(error),
+            Self::CannotBeABase => None,
+        }
+    }
+}
+
 /// Drops the one empty segment that a trailing `/` ends `url`'s path with. A root path `/` stays,
 /// and `//` becomes `/`.
 fn without_trailing_slash(url: &mut Url) {
@@ -112,24 +130,6 @@ fn without_dot_git(url: &mut Url) {
         unreachable!("a URL that can be a base has path segments");
     };
     segments.pop().push(&last);
-}
-
-impl fmt::Display for NotACargoGitUrl {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unparseable(error) => error.fmt(formatter),
-            Self::CannotBeABase => formatter.write_str("cannot-be-a-base-URLs are not supported"),
-        }
-    }
-}
-
-impl std::error::Error for NotACargoGitUrl {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Unparseable(error) => Some(error),
-            Self::CannotBeABase => None,
-        }
-    }
 }
 
 #[cfg(test)]

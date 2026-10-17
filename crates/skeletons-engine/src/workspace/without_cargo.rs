@@ -15,6 +15,7 @@ mod file_system;
 mod layout;
 mod located;
 mod lock_entries;
+mod locked_source;
 pub(super) mod lockfile;
 mod member_patterns;
 mod optional_requirements;

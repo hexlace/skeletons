@@ -122,6 +122,23 @@ fn assert_both_say_in_home(fixture: &Fixture, home: &CargoHome, expected: Verdic
     );
 }
 
+/// Requires that the reader, given `variables`, refuses the workspace at `fixture`'s root as
+/// something only Cargo follows, with the detail `detail`.
+fn assert_reader_refuses(fixture: &Fixture, variables: &HomeVariables, detail: &str) {
+    let toolchain = cargo_version();
+    assert_eq!(
+        reader_verdict(fixture, variables),
+        Verdict::Unsupported,
+        "the reader, on {toolchain}"
+    );
+    let Err(ReadWithoutCargoError::Unsupported { detail: given }) =
+        read_document(&fixture.root, &BTreeMap::new(), variables)
+    else {
+        panic!("the reader, on {toolchain}: expected a refusal");
+    };
+    assert_eq!(given, detail, "the reader's words, on {toolchain}");
+}
+
 /// Has the cargo that runs the tests lock the workspace at `fixture`'s root.
 fn lock(fixture: &Fixture) {
     let toolchain = cargo_version();

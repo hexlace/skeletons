@@ -32,12 +32,13 @@ use std::path::{Path, PathBuf};
 use semver::{Version, VersionReq};
 
 use super::cargo_cannot_load::CargoCannotLoad;
-use super::error::{ManifestFailure, ReadWithoutCargoError};
+use super::error::ReadWithoutCargoError;
 use super::file_system::{MANIFEST_FILE_NAME, normalized};
 use super::layout::Layout;
 use super::lock_entries::set_aside_entries;
 use super::locked_source;
 use super::lockfile::{LockEntry, Lockfile};
+use super::manifest_failure::ManifestFailure;
 use super::package_manifest::{Declaration, DeclaredSource, Unfollowed};
 use super::path_package::{Inherits, read_manifest};
 use super::worn_entries::worn_entries;
@@ -259,9 +260,8 @@ mod tests {
     use std::path::Path;
 
     use super::passed_over;
-    use crate::workspace::without_cargo::cargo_cannot_load::CargoCannotLoad;
-    use crate::workspace::without_cargo::error::ManifestFailure;
-    use crate::workspace::without_cargo::text_error::TextError;
+    use crate::workspace::without_cargo::manifest_failure::ManifestFailure;
+    use crate::workspace::without_cargo::text_error::{RefusedShape, TextError};
 
     const MANIFEST: &str = "/w/z/Cargo.toml";
 
@@ -286,7 +286,7 @@ mod tests {
         // the shapes measured to fail in Cargo as well, so the walk passes over them.
         let path = Path::new(MANIFEST);
         let gone = std::io::Error::from(std::io::ErrorKind::NotFound);
-        let ambiguous = TextError::unreadable_as(CargoCannotLoad::GitAndPath, "ambiguous");
+        let ambiguous = TextError::unreadable_as(RefusedShape::GitAndPath, "ambiguous");
 
         assert!(passed_over(&ManifestFailure::file(path, &gone)));
         assert!(passed_over(&ManifestFailure::text(path, &ambiguous)));

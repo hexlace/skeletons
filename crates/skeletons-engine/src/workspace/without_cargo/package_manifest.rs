@@ -149,10 +149,24 @@ pub(crate) enum Unfollowed {
     /// with the lock's.
     Refuse,
     /// Read the declaration with the shape as written, for a reader that compares no source of
-    /// it. A git URL keeps its query, so it is never the URL of a locked source, which the
-    /// lockfile read refuses any query on but one reference: the declaration names no worn
-    /// package, as for Cargo, where it is another source.
+    /// it. The lockfile read refuses any git source whose query is not exactly one reference,
+    /// so a declaration whose URL has a query of its own agrees with no lock entry
+    /// ([`locked_source::agrees`](super::locked_source::agrees)) and names no worn package.
     ReadPast,
+}
+
+/// Where one manifest sits and what its read needs to know about the workspace and the shapes it
+/// does not follow.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Reading<'reading> {
+    /// The directory the manifest sits in, which a `path` dependency is relative to.
+    pub(crate) directory: &'reading Path,
+    /// The root of the workspace the manifest is a member of, which a `version.workspace = true`
+    /// and a `workspace = true` dependency take their values from. A manifest with a
+    /// `[workspace]` of its own is its own workspace root and ignores it.
+    pub(crate) workspace: Option<&'reading WorkspaceRoot>,
+    /// What to do with a shape Cargo loads and this reader does not follow.
+    pub(crate) unfollowed: Unfollowed,
 }
 
 impl PackageManifest {
@@ -177,24 +191,25 @@ impl PackageManifest {
         directory: &Path,
         workspace: Option<&WorkspaceRoot>,
     ) -> Result<Self, TextError> {
-        Self::parse_with(text, directory, workspace, Unfollowed::Refuse)
+        let reading = Reading {
+            directory,
+            workspace,
+            unfollowed: Unfollowed::Refuse,
+        };
+        Self::parse_with(text, &reading)
     }
 
-    /// Reads a manifest's text as [`parse`](Self::parse) does, handling a shape Cargo loads and
-    /// this reader does not follow as `unfollowed` says: [`Unfollowed::ReadPast`] reads it, for a
-    /// read that compares no source of what it finds. [`parse`](Self::parse) is this with
-    /// [`Unfollowed::Refuse`]. Every other refusal is as [`parse`](Self::parse) gives it.
+    /// Reads a manifest's text as [`parse`](Self::parse) does, from `reading`, which says where
+    /// the manifest sits and how to handle a shape Cargo loads and this reader does not follow:
+    /// [`Unfollowed::ReadPast`] reads it, for a read that compares no source of what it finds.
+    /// [`parse`](Self::parse) is this with [`Unfollowed::Refuse`]. Every other refusal is as
+    /// [`parse`](Self::parse) gives it.
     ///
     /// # Errors
     ///
     /// As [`parse`](Self::parse), except that [`Unfollowed::ReadPast`] never gives Unsupported for
     /// a `git` URL's query.
-    pub(crate) fn parse_with(
-        text: &str,
-        directory: &Path,
-        workspace: Option<&WorkspaceRoot>,
-        unfollowed: Unfollowed,
-    ) -> Result<Self, TextError> {
+    pub(crate) fn parse_with(text: &str, reading: &Reading<'_>) -> Result<Self, TextError> {
         let raw: RawManifest = toml::from_str(text).map_err(|error| {
             TextError::unreadable(format!("Cargo.toml is not a manifest: {error}"))
         })?;
@@ -207,16 +222,22 @@ impl PackageManifest {
         let own_workspace = raw
             .workspace
             .as_ref()
-            .map(|section| workspace_root(section, directory, unfollowed))
+            .map(|section| workspace_root(section, reading.directory, reading.unfollowed))
             .transpose()?;
-        let inherited = own_workspace.as_ref().or(workspace);
+        let inherited = own_workspace.as_ref().or(reading.workspace);
 
         let package = raw
             .package
             .as_ref()
             .map(|section| package_section(section, inherited))
             .transpose()?;
-        let declarations = declarations_of(&raw, directory, inherited, unfollowed)?;
+        let declarations = declarations_of(
+            &raw,
+            &Reading {
+                workspace: inherited,
+                ..*reading
+            },
+        )?;
         let edition = raw
             .package
             .as_ref()

@@ -48,8 +48,7 @@ pub(super) fn read(
     let Ok(text) = std::fs::read_to_string(&manifest_path) else {
         return Ok(None);
     };
-    let Ok(manifest) = parse_inheriting(&text, directory, &manifest_path, Unfollowed::ReadPast)
-    else {
+    let Ok(manifest) = parse_inheriting(&text, directory, Unfollowed::ReadPast) else {
         return Ok(None);
     };
     let Some(package) = manifest.package() else {

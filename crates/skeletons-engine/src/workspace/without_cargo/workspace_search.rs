@@ -4,9 +4,10 @@
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use super::error::{ManifestFailure, ReadWithoutCargoError};
+use super::error::ReadWithoutCargoError;
 use super::file_system::{MANIFEST_FILE_NAME, normalized};
-use super::package_manifest::{PackageManifest, Unfollowed, WorkspaceRoot};
+use super::manifest_failure::ManifestFailure;
+use super::package_manifest::{PackageManifest, Reading, Unfollowed, WorkspaceRoot};
 use super::text_error::TextError;
 
 /// The nearest workspace root above a directory.
@@ -62,7 +63,12 @@ pub(super) fn nearest_above(
         if !declares {
             continue;
         }
-        let manifest = PackageManifest::parse_with(&text, ancestor, None, unfollowed)
+        let reading = Reading {
+            directory: ancestor,
+            workspace: None,
+            unfollowed,
+        };
+        let manifest = PackageManifest::parse_with(&text, &reading)
             .map_err(|error| ReadWithoutCargoError::text(&manifest_path, &error))?;
         assert!(
             manifest.workspace().is_some(),
@@ -108,7 +114,7 @@ fn inherited_workspace(
 }
 
 /// Reads the manifest text `text` of the package in `directory`, which is not a member of a
-/// workspace already read.
+/// workspace already read. The text is the `Cargo.toml` in `directory`, which the failure names.
 ///
 /// The text is read alone when it takes nothing from a workspace. When it does, the workspace it
 /// inherits from is the nearest root above `directory`, found only then, so a manifest that needs
@@ -123,21 +129,29 @@ fn inherited_workspace(
 pub(super) fn parse_inheriting(
     text: &str,
     directory: &Path,
-    manifest_path: &Path,
     unfollowed: Unfollowed,
 ) -> Result<PackageManifest, ManifestFailure> {
-    let alone = PackageManifest::parse_with(text, directory, None, unfollowed);
-    let error = match alone {
+    let manifest_path = directory.join(MANIFEST_FILE_NAME);
+    let alone = Reading {
+        directory,
+        workspace: None,
+        unfollowed,
+    };
+    let error = match PackageManifest::parse_with(text, &alone) {
         Ok(manifest) => return Ok(manifest),
         Err(error) => error,
     };
     let Some(workspace) =
         inherited_workspace(directory, unfollowed).map_err(ManifestFailure::refused)?
     else {
-        return Err(ManifestFailure::text(manifest_path, &error));
+        return Err(ManifestFailure::text(&manifest_path, &error));
     };
-    PackageManifest::parse_with(text, directory, Some(&workspace), unfollowed)
-        .map_err(|error| ManifestFailure::text(manifest_path, &error))
+    let inheriting = Reading {
+        workspace: Some(&workspace),
+        ..alone
+    };
+    PackageManifest::parse_with(text, &inheriting)
+        .map_err(|error| ManifestFailure::text(&manifest_path, &error))
 }
 
 #[cfg(test)]
@@ -243,7 +257,6 @@ mod tests {
         let manifest = parse_inheriting(
             "[package]\nname = \"a\"\n",
             Path::new("/absent/a"),
-            Path::new("/absent/a/Cargo.toml"),
             Unfollowed::Refuse,
         )
         .expect("a manifest that inherits nothing");
@@ -266,7 +279,6 @@ mod tests {
         let manifest = parse_inheriting(
             "[package]\nname = \"m\"\nversion.workspace = true\n",
             &member,
-            &member.join("Cargo.toml"),
             Unfollowed::Refuse,
         )
         .expect("a member inheriting its version");
@@ -291,20 +303,10 @@ mod tests {
         .expect("a manifest");
         let text = "[package]\nname = \"m\"\n[dependencies]\ng.workspace = true\n";
 
-        let read_past = parse_inheriting(
-            text,
-            &member,
-            &member.join("Cargo.toml"),
-            Unfollowed::ReadPast,
-        )
-        .expect("a manifest Cargo reads");
-        let refused = parse_inheriting(
-            text,
-            &member,
-            &member.join("Cargo.toml"),
-            Unfollowed::Refuse,
-        )
-        .expect_err("the root's query is refused");
+        let read_past =
+            parse_inheriting(text, &member, Unfollowed::ReadPast).expect("a manifest Cargo reads");
+        let refused = parse_inheriting(text, &member, Unfollowed::Refuse)
+            .expect_err("the root's query is refused");
         let refused = ReadWithoutCargoError::from(refused);
 
         let [declaration] = read_past.declarations() else {
@@ -329,7 +331,6 @@ mod tests {
         let error = parse_inheriting(
             "[package]\nname = \"m\"\nversion.workspace = true\n",
             &member,
-            &member.join("Cargo.toml"),
             Unfollowed::Refuse,
         )
         .expect_err("nothing gives the version");
@@ -350,7 +351,6 @@ mod tests {
             "[package]\nname = \"m\"\n[dependencies]\n\
              g = { git = \"https://example.invalid/g\", path = \"../g\" }\n",
             Path::new("/absent/m"),
-            Path::new("/absent/m/Cargo.toml"),
             Unfollowed::Refuse,
         )
         .expect_err("git and path at once");

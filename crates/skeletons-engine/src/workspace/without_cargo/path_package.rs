@@ -4,10 +4,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use super::error::{ManifestFailure, ReadWithoutCargoError};
+use super::error::ReadWithoutCargoError;
 use super::file_system::{MANIFEST_FILE_NAME, normalized};
+use super::manifest_failure::ManifestFailure;
 use super::package_manifest::{
-    Declaration, DeclaredSource, PackageManifest, Unfollowed, WorkspaceRoot,
+    Declaration, DeclaredSource, PackageManifest, Reading, Unfollowed, WorkspaceRoot,
 };
 use super::targets::library_name;
 use super::workspace_search::parse_inheriting;
@@ -147,10 +148,15 @@ pub(super) fn read_manifest(
         .map_err(|error| ManifestFailure::file(&manifest_path, &error))?;
     match inherits {
         Inherits::Workspace(workspace) => {
-            PackageManifest::parse_with(&text, directory, workspace, unfollowed)
+            let reading = Reading {
+                directory,
+                workspace,
+                unfollowed,
+            };
+            PackageManifest::parse_with(&text, &reading)
                 .map_err(|error| ManifestFailure::text(&manifest_path, &error))
         }
-        Inherits::Ancestors => parse_inheriting(&text, directory, &manifest_path, unfollowed),
+        Inherits::Ancestors => parse_inheriting(&text, directory, unfollowed),
     }
 }
 

@@ -1,5 +1,7 @@
 //! The manifests this reader knows Cargo cannot load either.
 
+use super::text_error::RefusedShape;
+
 /// A shape of manifest that Cargo itself fails to load, each one measured against Cargo.
 ///
 /// A read may pass over a manifest only where Cargo fails on that manifest too. Then a refusal
@@ -17,4 +19,26 @@ pub(crate) enum CargoCannotLoad {
     /// ambiguous. An entry of `[workspace.dependencies]` that does is not this shape: Cargo
     /// loads it until a member inherits it.
     GitAndPath,
+}
+
+impl From<RefusedShape> for CargoCannotLoad {
+    fn from(shape: RefusedShape) -> Self {
+        match shape {
+            RefusedShape::GitAndPath => Self::GitAndPath,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CargoCannotLoad;
+    use crate::workspace::without_cargo::text_error::RefusedShape;
+
+    #[test]
+    fn a_shape_of_text_converts_to_the_shape_of_the_same_name() {
+        assert_eq!(
+            CargoCannotLoad::from(RefusedShape::GitAndPath),
+            CargoCannotLoad::GitAndPath
+        );
+    }
 }

@@ -8,9 +8,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::super::canonical_git_url::CanonicalGitUrl;
-use super::super::cargo_cannot_load::CargoCannotLoad;
-use super::super::text_error::TextError;
-use super::{RawDependencies, RawDependencyTables, RawManifest, Unfollowed, WorkspaceRoot};
+use super::super::text_error::{RefusedShape, TextError};
+use super::{RawDependencies, RawDependencyTables, RawManifest, Reading, Unfollowed};
 
 /// One dependency a manifest declares, in any of its dependency tables.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,12 +75,10 @@ struct Site<'site> {
     table: &'site str,
     kind: TableKind,
     is_dev: bool,
-    /// The directory of the manifest the table is in.
-    directory: &'site Path,
-    /// The workspace a `workspace = true` declaration takes its value from.
-    workspace: Option<&'site WorkspaceRoot>,
-    /// What to do with a shape Cargo loads and this reader does not follow.
-    unfollowed: Unfollowed,
+    /// The manifest the table is in: where it sits, the workspace a `workspace = true`
+    /// declaration takes its value from, and what to do with a shape Cargo loads and this reader
+    /// does not follow.
+    reading: &'site Reading<'site>,
 }
 
 /// One declaration's table, with the key it is written under, read by key name.
@@ -98,13 +95,16 @@ pub(super) fn workspace_declarations(
     directory: &Path,
     unfollowed: Unfollowed,
 ) -> Result<BTreeMap<String, Declaration>, TextError> {
+    let reading = Reading {
+        directory,
+        workspace: None,
+        unfollowed,
+    };
     let site = Site {
         table: "[workspace.dependencies]",
         kind: TableKind::WorkspaceDependencies,
         is_dev: false,
-        directory,
-        workspace: None,
-        unfollowed,
+        reading: &reading,
     };
     let mut declarations = BTreeMap::new();
     for (key, value) in table.into_iter().flatten() {
@@ -116,30 +116,15 @@ pub(super) fn workspace_declarations(
 /// Every declaration of a manifest: its own tables, then those of each `[target.<cfg>]`.
 pub(super) fn declarations_of(
     raw: &RawManifest,
-    directory: &Path,
-    workspace: Option<&WorkspaceRoot>,
-    unfollowed: Unfollowed,
+    reading: &Reading<'_>,
 ) -> Result<Vec<Declaration>, TextError> {
     let mut declarations = Vec::new();
-    let reading = Reading {
-        directory,
-        workspace,
-        unfollowed,
-    };
-    collect_declarations(&raw.tables, "", &reading, &mut declarations)?;
+    collect_declarations(&raw.tables, "", reading, &mut declarations)?;
     for (cfg, tables) in raw.target.iter().flatten() {
         let prefix = format!("target.{cfg}.");
-        collect_declarations(tables, &prefix, &reading, &mut declarations)?;
+        collect_declarations(tables, &prefix, reading, &mut declarations)?;
     }
     Ok(declarations)
-}
-
-/// What every table of one manifest shares as its dependencies are read: where the manifest is,
-/// the workspace it inherits from, and what to do with a shape this reader does not follow.
-struct Reading<'reading> {
-    directory: &'reading Path,
-    workspace: Option<&'reading WorkspaceRoot>,
-    unfollowed: Unfollowed,
 }
 
 /// Appends the declarations of `tables` to `declarations`. `prefix` is what a reader names the
@@ -175,9 +160,7 @@ fn collect_declarations(
             table: &label,
             kind: TableKind::PackageDependencies,
             is_dev,
-            directory: reading.directory,
-            workspace: reading.workspace,
-            unfollowed: reading.unfollowed,
+            reading,
         };
         for (key, value) in table.into_iter().flatten() {
             declarations.push(declaration(key, value, &site)?);
@@ -243,6 +226,7 @@ fn inherited_declaration(
         )));
     }
     let inherited = site
+        .reading
         .workspace
         .and_then(|root| root.dependencies.get(key))
         .ok_or_else(|| {
@@ -305,7 +289,7 @@ impl Written<'_> {
             (Some(text), None) => self.git_source(&text),
             (Some(_), Some(_)) => Err(self.git_and_path()),
             (None, Some(path)) => Ok(DeclaredSource::Path {
-                directory: self.site.directory.join(path),
+                directory: self.site.reading.directory.join(path),
             }),
             (None, None) => Ok(DeclaredSource::Registry {
                 name: self.string("registry")?,
@@ -316,7 +300,7 @@ impl Written<'_> {
     /// The refusal for an entry that writes both `git` and `path`.
     ///
     /// Cargo refuses such a dependency as ambiguous in every table of a package, so there it is
-    /// the shape [`CargoCannotLoad::GitAndPath`]. In `[workspace.dependencies]` Cargo loads the
+    /// the shape [`RefusedShape::GitAndPath`]. In `[workspace.dependencies]` Cargo loads the
     /// entry while no member inherits it, and refuses it only once one does, so it is no shape
     /// Cargo fails on: this reader does not follow it, and a read that passes over manifests
     /// Cargo cannot load must not pass over a root that holds one.
@@ -324,7 +308,7 @@ impl Written<'_> {
         let (table, key) = (self.site.table, self.key);
         match self.site.kind {
             TableKind::PackageDependencies => TextError::unreadable_as(
-                CargoCannotLoad::GitAndPath,
+                RefusedShape::GitAndPath,
                 format!(
                     "{table} `{key}` writes both `git` and `path`, and Cargo allows only one of \
                      them"
@@ -345,11 +329,8 @@ impl Written<'_> {
     /// source's query only as one reference, so the two could not be compared, and
     /// `?branch=dev` written with no `branch` key would lock as a branch.
     ///
-    /// When the site reads past it, the URL is kept with its query. Such a declaration is never
-    /// the source of a lock entry this reader holds: the lockfile read refuses every git source
-    /// whose query is not exactly one reference, so no entry has a URL with a query to agree
-    /// with ([`locked_source::agrees`](super::super::locked_source::agrees)). It names no worn
-    /// package, as for Cargo, where it is another source.
+    /// When the site reads past it, the URL is kept with its query, and the declaration names no
+    /// worn package ([`Unfollowed::ReadPast`] says why).
     fn git_source(&self, text: &str) -> Result<DeclaredSource, TextError> {
         let url = CanonicalGitUrl::parse(text).map_err(|reason| {
             TextError::unreadable(format!(
@@ -357,7 +338,7 @@ impl Written<'_> {
                 self.site.table, self.key
             ))
         })?;
-        match (url.has_query(), self.site.unfollowed) {
+        match (url.has_query(), self.site.reading.unfollowed) {
             (true, Unfollowed::Refuse) => {
                 return Err(TextError::unsupported(format!(
                     "{} `{}`: `git = \"{text}\"` has a query of its own, which Cargo keeps in \
@@ -400,9 +381,9 @@ mod tests {
 
     use proptest::prelude::*;
 
-    use super::super::{PackageManifest, Unfollowed};
-    use super::{CanonicalGitUrl, CargoCannotLoad, Declaration, DeclaredSource, GitReference};
-    use crate::workspace::without_cargo::text_error::TextErrorKind;
+    use super::super::{PackageManifest, Reading, Unfollowed};
+    use super::{CanonicalGitUrl, Declaration, DeclaredSource, GitReference};
+    use crate::workspace::without_cargo::text_error::{RefusedShape, TextErrorKind};
 
     /// Reads `text` as the manifest in `/w/crates/a`, with no workspace above it.
     fn parsed(text: &str) -> PackageManifest {
@@ -731,9 +712,11 @@ by_tag = { git = "https://example.invalid/g", tag = "v1" }
         let manifest = PackageManifest::parse_with(
             "[package]\nname = \"a\"\n[dependencies]\n\
              renamed = { package = \"g\", git = \"https://example.invalid/g?x=1\" }\n",
-            Path::new("/w"),
-            None,
-            Unfollowed::ReadPast,
+            &Reading {
+                directory: Path::new("/w"),
+                workspace: None,
+                unfollowed: Unfollowed::ReadPast,
+            },
         )
         .expect("a manifest Cargo reads");
 
@@ -769,9 +752,11 @@ by_tag = { git = "https://example.invalid/g", tag = "v1" }
         ] {
             let error = PackageManifest::parse_with(
                 &format!("[package]\nname = \"a\"\n[dependencies]\n{declaration}\n"),
-                Path::new("/w"),
-                None,
-                Unfollowed::ReadPast,
+                &Reading {
+                    directory: Path::new("/w"),
+                    workspace: None,
+                    unfollowed: Unfollowed::ReadPast,
+                },
             )
             .expect_err(declaration);
 
@@ -810,8 +795,8 @@ by_tag = { git = "https://example.invalid/g", tag = "v1" }
 
         assert_eq!(error.kind(), TextErrorKind::Unreadable);
         assert_eq!(
-            error.cargo_cannot_load(),
-            Some(CargoCannotLoad::GitAndPath),
+            error.refused_shape(),
+            Some(RefusedShape::GitAndPath),
             "the shape a read that passes over manifests matches on"
         );
         assert_eq!(
@@ -837,7 +822,7 @@ by_tag = { git = "https://example.invalid/g", tag = "v1" }
         .expect_err("git and path at once");
 
         assert_eq!(error.kind(), TextErrorKind::Unsupported);
-        assert_eq!(error.cargo_cannot_load(), None);
+        assert_eq!(error.refused_shape(), None);
         assert_eq!(
             error.detail(),
             "[workspace.dependencies] `g` writes both `git` and `path`, which Cargo loads until \

@@ -3,6 +3,16 @@
 
 mod cargo_metadata;
 mod crate_name;
+// Without `commands`, the only reader of the decoder is the one that reads a workspace
+// without Cargo, which nothing in a build calls yet.
+#[cfg_attr(
+    not(any(test, feature = "commands")),
+    expect(
+        dead_code,
+        reason = "no reader of a workspace without Cargo calls the decoder yet"
+    )
+)]
+mod git_query;
 mod locate;
 mod locked_package_id;
 #[cfg(feature = "commands")]
@@ -11,6 +21,15 @@ mod pin;
 mod prospect;
 mod schema;
 mod wearing_table;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the readers of a lockfile and a manifest have no caller until the reader of a \
+                  workspace without Cargo is built on them"
+    )
+)]
+mod without_cargo;
 mod worn;
 
 use std::path::{Path, PathBuf};

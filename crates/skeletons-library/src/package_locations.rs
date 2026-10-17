@@ -12,7 +12,10 @@ use crate::locked_package::LockedPackage;
 ///
 /// A package with a `source` in `Cargo.lock`, from a registry or a git
 /// repository, is not a path on disk, so the caller says where its files are.
-/// Each location is the directory holding that package's own `Cargo.toml`. A
+/// Each location is the directory holding that package's own `Cargo.toml`, as
+/// the source `Cargo.lock` names has it: for a git package, at the commit
+/// after `#`. Only the manifest's name and version are checked against the
+/// key, so the files of another commit at the same version are read as given. A
 /// path package is found from the manifests and needs none. A relative
 /// directory is taken from the process's current directory when
 /// `check_without_cargo` reads it, not when it is inserted.

@@ -168,7 +168,11 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 /// whose `Cargo.toml` names another package or another version, is not an
 /// error. It is a [`Refusal`] of kind [`RefusalKind::Unlocated`] in the
 /// [`Report`], whose [`unlocated_package`](Refusal::unlocated_package) is the
-/// identity to supply, and every other wearing is still reported.
+/// identity to supply, and every other wearing is still reported. The name
+/// and version are all a location is checked against: a directory does not
+/// say which source it came from, so a git checkout of another commit at the
+/// same version is read as given. Each location has to hold the files of the
+/// source `Cargo.lock` names, for a git package the commit after `#`.
 ///
 /// The `Cargo.lock` must be up to date, and the call checks what a reader of
 /// the files can see: that every package on disk is locked, that the entries

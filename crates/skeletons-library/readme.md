@@ -177,8 +177,13 @@ once the lock is regenerated. It needs:
 A wearing whose package was given no location is not an error. It is a refusal
 in the report, of kind `Unlocated`, and `unlocated_package()` gives the identity
 to supply. A location whose `Cargo.toml` names another package, or another
-version, locates nothing and is refused the same way. Every other wearing is
-still reported. A program that can find a package once asked can insert it and
+version, locates nothing and is refused the same way. Those two are all a
+location is checked against: a directory does not say which source it came
+from, so one holding the right package at the right version from elsewhere, a
+git checkout of another commit with the version unchanged among them, is read
+as given. The directory has to hold the locked source itself: for a git
+package, the commit after `#` in its `source`. Every other wearing is still
+reported. A program that can find a package once asked can insert it and
 call again.
 
 Here the program has its own reading of `Cargo.lock`, and keeps every locked

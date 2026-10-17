@@ -97,7 +97,8 @@ mod tests {
             "app",
             "version = \"0.1.0\"\n\
              [dependencies]\n\
-             worn-rules = { package = \"house-rules\", git = \"https://example.test/house-rules\" }\n\
+             worn-rules = { package = \"house-rules\", \
+             git = \"https://example.test/house-rules\" }\n\
              plain = { git = \"https://example.test/plain\" }\n\
              [dev-dependencies]\n\
              tests-only = { git = \"https://example.test/tests-only\" }\n\

@@ -318,8 +318,10 @@ fn checked_version(version: &str, key: &str) -> Result<String, TextError> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::path::Path;
 
+    use proptest::prelude::*;
     use serde_json::json;
 
     use super::super::text_error::TextErrorKind;
@@ -554,5 +556,155 @@ serde = "1"
         assert!(root.exclude.is_empty());
         assert!(root.dependencies.is_empty());
         assert_eq!(root.package_version, None);
+    }
+
+    /// Text standing for a part of a rendered TOML value: written as it is, or still a value to
+    /// write. The renderer works through a stack of these, so a deep value takes no call depth.
+    enum Piece<'value> {
+        Text(String),
+        Value(&'value toml::Value),
+    }
+
+    /// `value` as TOML text that stands for it after `key =`: tables as inline tables, with every
+    /// key quoted.
+    fn rendered(value: &toml::Value) -> String {
+        let mut text = String::new();
+        let mut stack = vec![Piece::Value(value)];
+        while let Some(piece) = stack.pop() {
+            match piece {
+                Piece::Text(literal) => text.push_str(&literal),
+                Piece::Value(toml::Value::String(string)) => {
+                    stack.push(Piece::Text(format!("{string:?}")));
+                }
+                Piece::Value(toml::Value::Integer(integer)) => text.push_str(&integer.to_string()),
+                Piece::Value(toml::Value::Float(float)) => {
+                    stack.push(Piece::Text(format!("{float:?}")));
+                }
+                Piece::Value(toml::Value::Boolean(flag)) => text.push_str(&flag.to_string()),
+                Piece::Value(toml::Value::Datetime(datetime)) => {
+                    text.push_str(&datetime.to_string());
+                }
+                Piece::Value(toml::Value::Array(items)) => {
+                    stack.push(Piece::Text("]".to_owned()));
+                    for (position, item) in items.iter().enumerate().rev() {
+                        stack.push(Piece::Value(item));
+                        if position > 0 {
+                            stack.push(Piece::Text(", ".to_owned()));
+                        }
+                    }
+                    stack.push(Piece::Text("[".to_owned()));
+                }
+                Piece::Value(toml::Value::Table(table)) => {
+                    stack.push(Piece::Text(" }".to_owned()));
+                    let entries: Vec<_> = table.iter().collect();
+                    for (position, (key, item)) in entries.into_iter().enumerate().rev() {
+                        stack.push(Piece::Value(item));
+                        stack.push(Piece::Text(format!("{key:?} = ")));
+                        if position > 0 {
+                            stack.push(Piece::Text(", ".to_owned()));
+                        }
+                    }
+                    stack.push(Piece::Text("{ ".to_owned()));
+                }
+            }
+        }
+        text
+    }
+
+    /// Any TOML value, a few levels deep, from the keys and leaves a manifest's tables meet.
+    fn arbitrary_value() -> impl Strategy<Value = toml::Value> {
+        let key = proptest::sample::select(vec![
+            "name",
+            "version",
+            "workspace",
+            "path",
+            "git",
+            "branch",
+            "tag",
+            "rev",
+            "package",
+            "optional",
+            "registry",
+            "members",
+            "exclude",
+            "dependencies",
+            "metadata",
+            "x",
+        ]);
+        let leaf = prop_oneof![
+            "[a-zA-Z0-9 ._/:+<>=,^~*-]{0,12}".prop_map(toml::Value::String),
+            (-1_000_000_i64..1_000_000).prop_map(toml::Value::Integer),
+            (-1_000_000.0_f64..1_000_000.0).prop_map(toml::Value::Float),
+            proptest::bool::ANY.prop_map(toml::Value::Boolean),
+            proptest::sample::select(vec!["1979-05-27", "1979-05-27T07:32:00Z", "07:32:00"])
+                .prop_map(|text| toml::Value::Datetime(
+                    text.parse().expect("each of these is a TOML date or time")
+                )),
+        ];
+        leaf.prop_recursive(3, 24, 4, move |inner| {
+            prop_oneof![
+                proptest::collection::vec(inner.clone(), 0..4).prop_map(toml::Value::Array),
+                proptest::collection::vec((key.clone(), inner), 0..4).prop_map(|entries| {
+                    toml::Value::Table(
+                        entries
+                            .into_iter()
+                            .map(|(key, value)| (key.to_owned(), value))
+                            .collect(),
+                    )
+                }),
+            ]
+        })
+    }
+
+    proptest! {
+        /// Places arbitrary TOML values at the manifest's known keys (`package`, `dependencies`,
+        /// `dev-dependencies`, `target.<cfg>.dependencies`, `lib` and `workspace`), most of them
+        /// the wrong shape for their key, and reads the text with and without a workspace above.
+        /// Reading must not panic, and must give a manifest that has a `[package]` or a
+        /// `[workspace]`, or a text error that says what is wrong.
+        #[test]
+        fn arbitrary_values_at_the_known_keys_give_a_manifest_or_a_text_error(
+            package in proptest::option::of(arbitrary_value()),
+            dependencies in proptest::option::of(arbitrary_value()),
+            dev_dependencies in proptest::option::of(arbitrary_value()),
+            target_dependencies in proptest::option::of(arbitrary_value()),
+            lib in proptest::option::of(arbitrary_value()),
+            workspace in proptest::option::of(arbitrary_value()),
+        ) {
+            let mut lines = Vec::new();
+            for (key, value) in [
+                ("package", &package),
+                ("dependencies", &dependencies),
+                ("dev-dependencies", &dev_dependencies),
+                ("lib", &lib),
+                ("workspace", &workspace),
+            ] {
+                if let Some(value) = value {
+                    lines.push(format!("{key} = {}", rendered(value)));
+                }
+            }
+            if let Some(value) = &target_dependencies {
+                lines.push(format!(
+                    "target = {{ \"cfg(unix)\" = {{ dependencies = {} }} }}",
+                    rendered(value)
+                ));
+            }
+            let text = lines.join("\n");
+            let root = WorkspaceRoot {
+                members: Vec::new(),
+                exclude: Vec::new(),
+                dependencies: BTreeMap::new(),
+                package_version: Some("1.0.0".to_owned()),
+            };
+
+            for workspace in [None, Some(&root)] {
+                match PackageManifest::parse(&text, Path::new("/w/crates/a"), workspace) {
+                    Ok(manifest) => {
+                        prop_assert!(manifest.package().is_some() || manifest.workspace().is_some());
+                    }
+                    Err(error) => prop_assert!(!error.detail().is_empty()),
+                }
+            }
+        }
     }
 }

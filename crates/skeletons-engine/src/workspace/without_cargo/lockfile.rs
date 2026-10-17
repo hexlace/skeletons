@@ -225,7 +225,9 @@ fn spelled_entry(entry: &str) -> Option<DependencyEntry<'_>> {
 
 #[cfg(test)]
 mod tests {
-    use super::Lockfile;
+    use proptest::prelude::*;
+
+    use super::{LockEntry, Lockfile};
     use crate::workspace::without_cargo::text_error::TextErrorKind;
 
     const CRATES_IO: &str = "registry+https://github.com/rust-lang/crates.io-index";
@@ -586,5 +588,170 @@ name = "a"
     #[test]
     fn a_lockfile_with_no_packages_has_no_entries() {
         assert!(parsed("version = 4\n").entries().is_empty());
+    }
+
+    /// A package as the generator holds it, before it is written as lockfile text: the source is
+    /// kept as the dependency lines spell it, apart from the commit a git source is locked to.
+    #[derive(Debug, Clone)]
+    struct Generated {
+        name: &'static str,
+        version: &'static str,
+        spelled_source: Option<String>,
+        commit: Option<String>,
+    }
+
+    impl Generated {
+        /// The `source` the package writes: the spelled source and, for git, its locked commit.
+        fn source(&self) -> Option<String> {
+            self.spelled_source.as_ref().map(|spelled| {
+                self.commit
+                    .as_ref()
+                    .map_or_else(|| spelled.clone(), |commit| format!("{spelled}#{commit}"))
+            })
+        }
+
+        /// Whether the dependency line `name`, `name version` or `name version (source)` names
+        /// this package, by the plain rule that every part written must be equal.
+        fn is_named_by(&self, name: &str, version: Option<&str>, source: Option<&str>) -> bool {
+            self.name == name
+                && version.is_none_or(|written| self.version == written)
+                && source.is_none_or(|written| self.spelled_source.as_deref() == Some(written))
+        }
+    }
+
+    /// A package from small pools of names, versions and sources, so that the same name and
+    /// version recur under different sources and the short dependency spellings are ambiguous
+    /// often enough to matter.
+    fn generated_package() -> impl Strategy<Value = Generated> {
+        let source = prop_oneof![
+            Just((None, false)),
+            Just((Some(CRATES_IO.to_owned()), false)),
+            Just((Some("sparse+https://index.crates.io/".to_owned()), false)),
+            (0..4_u8, "[a-z]{1,6}").prop_map(|(reference, name)| {
+                let query = match reference {
+                    0 => String::new(),
+                    1 => format!("?rev={name}"),
+                    2 => format!("?branch={name}%2Fx"),
+                    _ => format!("?tag=v{name}"),
+                };
+                (
+                    Some(format!("git+https://example.invalid/dep{query}")),
+                    true,
+                )
+            }),
+        ];
+        (
+            proptest::sample::select(vec!["a", "b", "c"]),
+            proptest::sample::select(vec!["0.1.0", "1.0.0", "2.0.0-rc.1"]),
+            source,
+            "[0-9a-f]{40}",
+        )
+            .prop_map(
+                |(name, version, (spelled_source, is_git), commit)| Generated {
+                    name,
+                    version,
+                    spelled_source,
+                    commit: is_git.then_some(commit),
+                },
+            )
+    }
+
+    /// Packages no two of which share a name, a version and a spelled source, which is how Cargo
+    /// tells two locked packages apart: one reference locks to one commit.
+    fn generated_packages() -> impl Strategy<Value = Vec<Generated>> {
+        proptest::collection::vec(generated_package(), 1..8).prop_map(|candidates| {
+            let mut kept: Vec<Generated> = Vec::new();
+            for candidate in candidates {
+                let repeats = kept.iter().any(|package| {
+                    package.name == candidate.name
+                        && package.version == candidate.version
+                        && package.spelled_source == candidate.spelled_source
+                });
+                if !repeats {
+                    kept.push(candidate);
+                }
+            }
+            kept
+        })
+    }
+
+    /// The line Cargo writes for the dependency on `target`, in the short or the long spelling
+    /// (`0` name, `1` name and version, `2` name, version and source), or `None` when the package
+    /// has no source to spell.
+    fn spelled_line(target: &Generated, spelling: u8) -> Option<String> {
+        match spelling {
+            0 => Some(target.name.to_owned()),
+            1 => Some(format!("{} {}", target.name, target.version)),
+            _ => target
+                .spelled_source
+                .as_ref()
+                .map(|source| format!("{} {} ({source})", target.name, target.version)),
+        }
+    }
+
+    proptest! {
+        /// Generates packages, picks dependencies among them in each of Cargo's three spellings,
+        /// writes the lockfile text, reads it back, and requires the entries and every resolved
+        /// dependency index to equal the generated ones.
+        ///
+        /// A dependency whose spelling would name more than one of the generated packages is not
+        /// generated: the generator counts, over the packages it holds, how many the line names
+        /// by the plain rule in `Generated::is_named_by`, and drops the dependency unless the
+        /// count is one. Such a line is refused by the reader, and the unit tests above pin that.
+        #[test]
+        fn generated_lockfiles_are_read_back_as_generated(
+            packages in generated_packages(),
+            picks in proptest::collection::vec(
+                proptest::collection::vec((0_usize..64, 0_u8..3), 0..5),
+                8,
+            ),
+        ) {
+            let mut blocks = vec!["version = 4\n".to_owned()];
+            let mut expected = Vec::new();
+            for (package, package_picks) in packages.iter().zip(&picks) {
+                let mut lines = Vec::new();
+                let mut indexes = Vec::new();
+                for &(pick, spelling) in package_picks {
+                    let index = pick % packages.len();
+                    let target = &packages[index];
+                    let Some(line) = spelled_line(target, spelling) else { continue };
+                    let (version, source) = match spelling {
+                        0 => (None, None),
+                        1 => (Some(target.version), None),
+                        _ => (Some(target.version), target.spelled_source.as_deref()),
+                    };
+                    let named = packages
+                        .iter()
+                        .filter(|candidate| candidate.is_named_by(target.name, version, source))
+                        .count();
+                    if named == 1 {
+                        lines.push(format!("{line:?}"));
+                        indexes.push(index);
+                    }
+                }
+                let source_line = package
+                    .source()
+                    .map_or_else(String::new, |source| format!("source = {source:?}\n"));
+                let dependencies_line = if lines.is_empty() {
+                    String::new()
+                } else {
+                    format!("dependencies = [{}]\n", lines.join(", "))
+                };
+                blocks.push(format!(
+                    "\n[[package]]\nname = {:?}\nversion = {:?}\n{source_line}{dependencies_line}",
+                    package.name, package.version
+                ));
+                expected.push(LockEntry {
+                    name: package.name.to_owned(),
+                    version: package.version.to_owned(),
+                    source: package.source(),
+                    dependency_indexes: indexes,
+                });
+            }
+
+            let lockfile = Lockfile::parse(&blocks.concat());
+
+            prop_assert_eq!(lockfile, Ok(Lockfile { entries: expected }));
+        }
     }
 }

@@ -305,7 +305,9 @@ impl Written<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+
+    use proptest::prelude::*;
 
     use super::super::PackageManifest;
     use super::{Declaration, DeclaredSource, GitReference};
@@ -711,5 +713,152 @@ serde.workspace = true
         .expect_err("no workspace");
 
         assert_eq!(error.kind(), TextErrorKind::Unreadable);
+    }
+
+    /// A declaration as the generator holds it: what the manifest will write, in the parts
+    /// Cargo's tables are made of, before it is rendered.
+    #[derive(Debug, Clone)]
+    struct Generated {
+        key: String,
+        renamed_from: Option<String>,
+        is_dev: bool,
+        is_optional: bool,
+        source: GeneratedSource,
+        version_requirement: Option<String>,
+    }
+
+    #[derive(Debug, Clone)]
+    enum GeneratedSource {
+        Path(String),
+        Git(String, GitReference),
+        Registry(Option<String>),
+    }
+
+    fn generated_source() -> impl Strategy<Value = GeneratedSource> {
+        prop_oneof![
+            proptest::collection::vec(proptest::sample::select(vec!["..", "x", "y.z"]), 1..4)
+                .prop_map(|segments| GeneratedSource::Path(segments.join("/"))),
+            (
+                "https://[a-z]{3,8}\\.invalid/[a-z]{1,8}",
+                prop_oneof![
+                    Just(GitReference::DefaultBranch),
+                    "[a-zA-Z0-9_/-]{1,8}".prop_map(GitReference::Branch),
+                    "[a-zA-Z0-9_/.-]{1,8}".prop_map(GitReference::Tag),
+                    "[0-9a-f]{7,40}".prop_map(GitReference::Rev),
+                ],
+            )
+                .prop_map(|(url, reference)| GeneratedSource::Git(url, reference)),
+            proptest::option::of("[a-z][a-z0-9-]{0,7}").prop_map(GeneratedSource::Registry),
+        ]
+    }
+
+    fn generated_declaration() -> impl Strategy<Value = Generated> {
+        (
+            "[a-zA-Z][a-zA-Z0-9_-]{0,8}",
+            proptest::option::of("[a-zA-Z][a-zA-Z0-9_-]{0,8}"),
+            proptest::bool::ANY,
+            proptest::bool::ANY,
+            generated_source(),
+            proptest::option::of("(\\^|=|~|>=)?[0-9]{1,2}(\\.[0-9]{1,2}){0,2}(, <[0-9]{1,2})?"),
+        )
+            .prop_map(
+                |(key, renamed_from, is_dev, is_optional, source, version_requirement)| Generated {
+                    key,
+                    renamed_from,
+                    is_dev,
+                    is_optional,
+                    source,
+                    version_requirement,
+                },
+            )
+    }
+
+    impl Generated {
+        /// The `key = …` line the manifest writes: the bare version string when nothing but a
+        /// registry version is written, an inline table otherwise.
+        fn line(&self) -> String {
+            let shorthand = self.renamed_from.is_none()
+                && !self.is_optional
+                && matches!(self.source, GeneratedSource::Registry(None));
+            if let (true, Some(requirement)) = (shorthand, &self.version_requirement) {
+                return format!("{} = {requirement:?}", self.key);
+            }
+            let mut fields = Vec::new();
+            if let Some(package) = &self.renamed_from {
+                fields.push(format!("package = {package:?}"));
+            }
+            if let Some(requirement) = &self.version_requirement {
+                fields.push(format!("version = {requirement:?}"));
+            }
+            if self.is_optional {
+                fields.push("optional = true".to_owned());
+            }
+            match &self.source {
+                GeneratedSource::Path(path) => fields.push(format!("path = {path:?}")),
+                GeneratedSource::Git(url, reference) => {
+                    fields.push(format!("git = {url:?}"));
+                    match reference {
+                        GitReference::DefaultBranch => {}
+                        GitReference::Branch(name) => fields.push(format!("branch = {name:?}")),
+                        GitReference::Tag(name) => fields.push(format!("tag = {name:?}")),
+                        GitReference::Rev(name) => fields.push(format!("rev = {name:?}")),
+                    }
+                }
+                GeneratedSource::Registry(registry) => {
+                    if let Some(name) = registry {
+                        fields.push(format!("registry = {name:?}"));
+                    }
+                }
+            }
+            format!("{} = {{ {} }}", self.key, fields.join(", "))
+        }
+
+        /// The declaration the reader must give back for the line, written out from the parts and
+        /// the manifest's directory `/w/crates/a` rather than computed by the reader.
+        fn expected(&self) -> Declaration {
+            Declaration {
+                key: self.key.clone(),
+                package: self
+                    .renamed_from
+                    .clone()
+                    .unwrap_or_else(|| self.key.clone()),
+                rename: self.renamed_from.as_ref().map(|_| self.key.clone()),
+                is_dev: self.is_dev,
+                is_optional: self.is_optional,
+                source: match &self.source {
+                    GeneratedSource::Path(path) => DeclaredSource::Path {
+                        directory: PathBuf::from(format!("/w/crates/a/{path}")),
+                    },
+                    GeneratedSource::Git(url, reference) => DeclaredSource::Git {
+                        url: url.clone(),
+                        reference: reference.clone(),
+                    },
+                    GeneratedSource::Registry(name) => {
+                        DeclaredSource::Registry { name: name.clone() }
+                    }
+                },
+                version_requirement: self.version_requirement.clone(),
+            }
+        }
+    }
+
+    proptest! {
+        /// Writes a generated declaration (its key, a `package =` rename, a path, git or registry
+        /// source, a version requirement, dev and optional) into a manifest, reads the manifest,
+        /// and requires the one declaration it holds to equal the generated one.
+        #[test]
+        fn a_generated_declaration_is_read_back_as_generated(
+            declaration in generated_declaration(),
+        ) {
+            let table = if declaration.is_dev { "dev-dependencies" } else { "dependencies" };
+            let text = format!("[package]\nname = \"a\"\n\n[{table}]\n{}\n", declaration.line());
+
+            let manifest = PackageManifest::parse(&text, Path::new("/w/crates/a"), None);
+
+            prop_assert_eq!(
+                manifest.map(|manifest| manifest.declarations().to_vec()),
+                Ok(vec![declaration.expected()])
+            );
+        }
     }
 }

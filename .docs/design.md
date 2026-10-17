@@ -2288,6 +2288,10 @@ source and writes the reference after it (`?x=1?branch=dev`), and reproducing
 that is not worth it for a shape this rare, so a manifest URL with any query, an
 empty one included, and a lock source whose query is not exactly one `branch`,
 `tag` or `rev` are refused by name, before currency could call the lock stale.
+That refusal is for a manifest whose sources are compared with the lock's. A
+manifest whose sources never are is read past the query, as cargo reads it: a
+located package's own, whose declarations are kept only for their names, and
+those the optional-dependency walk reaches.
 
 The optional-dependency refusal covers an optional dependency of a package
 outside the workspace, or of a path package one reaches, whose requirement on a

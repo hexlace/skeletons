@@ -271,10 +271,14 @@ two spellings of one repository, in a trailing slash, a `.git` suffix, the case
 of a GitHub path or of a host, or a default port, are one source. A `git` value
 cargo itself refuses, such as `git@github.com:foo/bar.git`, makes the manifest
 unreadable. A URL with a query of its own, such as `https://example.test/g?x=1`
-(an empty query too), is refused by name, and so is a lockfile source whose
-query is anything but one `branch`, `tag` or `rev`: cargo keeps that query in
-the source, so the lockfile it wrote is current to cargo, and this library reads
-a source's query only as the one reference.
+(an empty query too), is refused by name in a manifest whose sources are
+compared with the lockfile's: the workspace's own, and those of the path
+packages the lockfile lists. So is a lockfile source whose query is anything
+but one `branch`, `tag` or `rev`: cargo keeps that query in the source, so the
+lockfile it wrote is current to cargo, and this library reads a source's query
+only as the one reference. A manifest whose sources are never compared is read
+past the query, as cargo reads it: a located package's own, whose dependencies
+are kept only by name, and those the optional-dependency check below reaches.
 
 An optional dependency of a package outside the workspace, or of a path package
 that dependency reaches, that asks a worn package for a version the locked one

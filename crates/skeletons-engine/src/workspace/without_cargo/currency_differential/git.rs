@@ -27,7 +27,11 @@ struct GitCases {
 
 impl GitCases {
     fn new() -> Self {
-        let g_repository = GitRepository::new("g");
+        Self::with_repository(GitRepository::new("g"))
+    }
+
+    /// The cases over `g_repository`, which holds the package `g`.
+    fn with_repository(g_repository: GitRepository) -> Self {
         let first = g_repository.revision("main");
         let second = g_repository.revision("dev");
         assert_ne!(first, second, "dev is a commit ahead of main");
@@ -210,6 +214,40 @@ fn a_git_url_respelled_with_a_trailing_slash_or_dot_git_is_current() {
         Verdict::Current,
     );
     cases.assert_change(&dependency_at(&format!("{url}/")), &plain, Verdict::Current);
+}
+
+// There is no `github.com` case beside these. Cargo reads a GitHub URL by other rules, and a
+// differential for them would need GitHub's git database built offline, which means recreating
+// Cargo's cache layout under a directory named by a hash that differs between 1.85 and 1.95.
+// The GitHub rules are held instead by the fixed-value tests in `canonical_git_url.rs`, which
+// carry Cargo's own test pairs.
+
+#[test]
+fn a_git_url_respelled_from_dot_git_to_plain_is_current() {
+    // The respelling the case above cannot reach with a directory named `g`: a `.git` spelling
+    // of it names no repository to fetch. A directory named `g.git` gives one, so the lockfile
+    // is written for `…/g.git` and the dependency then declares `…/g` and `…/g/`, which Cargo
+    // reads as the same source once the `.git` is dropped. Only the locked spelling is fetched:
+    // the plain ones name no directory, so they cannot be, and a lockfile that is current needs
+    // no fetch.
+    let repository = GitRepository::in_directory_ending("g", ".git");
+    let dot_git = repository.url();
+    let plain = dot_git
+        .strip_suffix(".git")
+        .expect("the directory's name ends in .git")
+        .to_owned();
+    let cases = GitCases::with_repository(repository);
+
+    cases.assert_change(
+        &dependency_at(&dot_git),
+        &dependency_at(&plain),
+        Verdict::Current,
+    );
+    cases.assert_change(
+        &dependency_at(&dot_git),
+        &dependency_at(&format!("{plain}/")),
+        Verdict::Current,
+    );
 }
 
 #[test]

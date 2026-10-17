@@ -32,8 +32,20 @@ pub(in crate::workspace::without_cargo) struct GitRepository {
 impl GitRepository {
     /// A repository of the package `package` at version 1.0.0.
     pub(in crate::workspace::without_cargo) fn new(package: &str) -> Self {
+        Self::in_directory_ending(package, "")
+    }
+
+    /// A repository of the package `package` whose directory's name ends in `suffix`, as in
+    /// `….git`, which a URL can then spell with and without.
+    pub(in crate::workspace::without_cargo) fn in_directory_ending(
+        package: &str,
+        suffix: &str,
+    ) -> Self {
         let repository = Self {
-            directory: tempfile::tempdir().expect("a temporary directory"),
+            directory: tempfile::Builder::new()
+                .suffix(suffix)
+                .tempdir()
+                .expect("a temporary directory"),
             home: tempfile::tempdir().expect("a temporary directory"),
         };
         repository.git(&["init", "--quiet", "--initial-branch=main"]);

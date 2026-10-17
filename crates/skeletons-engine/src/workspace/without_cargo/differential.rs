@@ -486,6 +486,52 @@ fn a_virtual_workspace_with_no_members_is_refused_by_cargo_and_by_the_reader() {
 }
 
 #[test]
+fn a_member_above_the_root_is_refused_by_cargo_and_by_the_reader_with_the_same_sentence() {
+    // `members = ["../far"]` names a package above the root that does not point back at it.
+    // Cargo refuses to lock it, and the reader's detail is the sentence Cargo prints.
+    let toolchain = cargo_version();
+    let fixture = Fixture::new();
+    fixture.write("Cargo.toml", "[workspace]\nmembers = [\"../far\"]\n");
+    fixture.package("../far", "far", "");
+
+    let locked = fixture.lock_with_cargo();
+    let read = read_document(&fixture.root, &BTreeMap::new());
+
+    let stderr = locked.expect_err(&format!("{toolchain} locked a member above the root"));
+    let Err(ReadWithoutCargoError::ManifestUnreadable { detail }) = read else {
+        panic!("{toolchain}: the reader gave {:?}", read.map(|_| ()));
+    };
+    assert!(
+        stderr.contains(&detail),
+        "{toolchain} refused it as `{stderr}`, and the reader as `{detail}`"
+    );
+}
+
+#[test]
+fn a_member_above_the_root_that_names_the_root_is_read_by_cargo_and_refused_as_unsupported_by_the_reader()
+ {
+    // With `package.workspace` pointing back at the root, Cargo accepts the member above it. The
+    // reader does not follow that key, so it refuses by name.
+    let toolchain = cargo_version();
+    let fixture = Fixture::new();
+    fixture.write("Cargo.toml", "[workspace]\nmembers = [\"../far\"]\n");
+    fixture.package("../far", "far", "workspace = \"../w\"\n");
+
+    fixture
+        .lock_with_cargo()
+        .unwrap_or_else(|stderr| panic!("{toolchain} could not lock it: {stderr}"));
+    cargo_metadata::fetch(&fixture.root, Network::Refused)
+        .unwrap_or_else(|error| panic!("{toolchain} refused it: {error:?}"));
+    let read = read_document(&fixture.root, &BTreeMap::new());
+
+    assert!(
+        matches!(read, Err(ReadWithoutCargoError::Unsupported { .. })),
+        "{toolchain}: the reader gave {:?}",
+        read.map(|_| ())
+    );
+}
+
+#[test]
 fn a_root_package_with_empty_members_agrees() {
     // The root is a package, so it is its own member and the empty `members` refuses nothing.
     let fixture = Fixture::new();

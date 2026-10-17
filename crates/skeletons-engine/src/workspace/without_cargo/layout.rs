@@ -141,6 +141,12 @@ fn read_packages(root: &Root) -> Result<Vec<PathPackage>, ReadWithoutCargoError>
         by_directory.values().all(|package| package.is_member),
         "read_members reads members and nothing else"
     );
+    assert!(
+        by_directory
+            .keys()
+            .all(|directory| directory.starts_with(&root.directory)),
+        "refuse_outside_the_root leaves only members under the root"
+    );
     read_outsiders(&mut by_directory)?;
 
     // The map is keyed by directory, so a directory holds one package; the key must be that
@@ -192,6 +198,7 @@ fn read_members(
             continue;
         }
         let package = read_member(root, &directory)?;
+        refuse_outside_the_root(root, &package)?;
         if let Some(workspace) = root.workspace() {
             pending.extend(
                 package
@@ -204,6 +211,34 @@ fn read_members(
         by_directory.insert(directory, package);
     }
     Ok(())
+}
+
+/// Refuses `member` when its directory is not under the root's, as Cargo does.
+///
+/// Only a `members` entry such as `../far` can name a directory outside the root, because a path
+/// dependency is followed only under it. Cargo accepts such a member when its manifest points back
+/// at the root with `package.workspace`; this reader does not follow that key, so it refuses that
+/// member by name, as it refuses the key anywhere.
+///
+/// # Errors
+///
+/// Unsupported for a member outside the root that writes `package.workspace`, and unreadable for
+/// one that does not.
+fn refuse_outside_the_root(root: &Root, member: &PathPackage) -> Result<(), ReadWithoutCargoError> {
+    if member.directory.starts_with(&root.directory) {
+        return Ok(());
+    }
+    if member.has_workspace_key {
+        return Err(ReadWithoutCargoError::unsupported(format!(
+            "`package.workspace` in {}",
+            member.manifest_path.display()
+        )));
+    }
+    Err(ReadWithoutCargoError::unreadable(format!(
+        "workspace member `{}` is not hierarchically below the workspace root `{}`",
+        member.manifest_path.display(),
+        root.directory.join(MANIFEST_FILE_NAME).display()
+    )))
 }
 
 /// The member in `directory`.
@@ -283,17 +318,43 @@ mod tests {
     }
 
     #[test]
-    fn a_member_may_sit_outside_the_root() {
-        // A `members` entry such as `../far` names a directory above the root, and Cargo reads
-        // the package there as a member, so a member's directory is not always under the root.
+    fn a_member_outside_the_root_is_unreadable_as_cargo_refuses_it() {
+        // A `members` entry such as `../far` names a directory above the root. Cargo refuses it
+        // unless the package there points back at the root with `package.workspace`, so with no
+        // such key the workspace is unreadable, naming the member and the root as Cargo does.
+        let tree = Tree::new();
+        tree.write("Cargo.toml", "[workspace]\nmembers = [\"../far\"]\n");
+        tree.package("../far", "far", "");
+
+        let error = tree.discover("").expect_err("a member outside the root");
+
+        let far = tree.root.with_file_name("far").join("Cargo.toml");
+        assert_eq!(
+            detail(error),
+            format!(
+                "workspace member `{}` is not hierarchically below the workspace root `{}`",
+                far.display(),
+                tree.root.join("Cargo.toml").display()
+            )
+        );
+    }
+
+    #[test]
+    fn a_member_outside_the_root_that_names_the_root_is_unsupported_by_name() {
+        // Cargo accepts a member above the root when the package there writes `package.workspace`
+        // to point back at the root. This reader does not follow that key, so it refuses the
+        // member by name rather than read a member that is not under the root.
         let tree = Tree::new();
         tree.write("Cargo.toml", "[workspace]\nmembers = [\"../far\"]\n");
         tree.package("../far", "far", "workspace = \"../w\"\n");
 
-        let found = tree.discover("").expect("a workspace");
+        let error = tree.discover("").expect_err("a member outside the root");
 
-        assert_eq!(found.len(), 1);
-        assert!(found[0].1, "the package outside the root is a member");
+        let far = tree.root.with_file_name("far").join("Cargo.toml");
+        assert_eq!(
+            error,
+            ReadWithoutCargoError::unsupported(format!("`package.workspace` in {}", far.display()))
+        );
     }
 
     #[test]

@@ -135,8 +135,8 @@ fn a_newer_worn_version_an_outsider_needs_is_refused_where_check_fails() -> Test
     assert!(
         detail.ends_with(
             "/z/Cargo.toml: `house-rules` requires `house-rules` `4.6`, which the worn \
-             package's locked version 4.5.6 does not meet within its compatible range, so \
-             cargo cannot resolve the workspace once a feature enables it"
+             package's locked version 4.5.6 does not meet, and its path source holds only \
+             that version, so cargo cannot resolve the workspace once a feature enables it"
         ),
         "{detail}"
     );

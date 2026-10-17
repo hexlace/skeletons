@@ -7,7 +7,9 @@
 //! not met by it: Cargo cannot resolve the workspace until the worn package is updated, however
 //! it is asked. That is no stale lock for the reader to report through, and the reader refuses
 //! it. A requirement in another range, or one the locked version meets, gives Cargo a lock to
-//! rewrite, and the reader reports as it always did. Every case runs in a Cargo home the test
+//! rewrite, and the reader reports as it always did. A worn package from a path or a git
+//! repository holds one version, so there Cargo cannot resolve a requirement in any range the
+//! locked version does not meet, and the reader refuses it. Every case runs in a Cargo home the test
 //! owns, which vendors `house-rules` 4.5.6 as the replacement for crates.io, and 4.6.0 and 5.0.0
 //! after the lock where a case needs a version to ask for.
 //!
@@ -19,7 +21,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::super::cargo_configuration::HomeVariables;
-use super::super::fixture::{CargoHome, Fixture, cargo_version};
+use super::super::fixture::{CargoHome, Fixture, GitRepository, cargo_version};
 use super::super::read::read_document;
 use super::{
     Verdict, Y_DEFAULT_ENABLES_Z, Y_OPTIONAL_Z, assert_both_say_in_home, assert_reader_refuses,
@@ -122,6 +124,93 @@ fn an_optional_dependency_enabled_after_the_lock_that_needs_a_newer_worn_version
     );
 }
 
+/// What the reader says when `requirement` of `house-rules` in `manifest` is one that the worn
+/// 1.0.0 does not meet, and its `source` kind (`path` or `git`) holds no other version.
+fn refusal_of_the_only_version(manifest: &Path, requirement: &str, source: &str) -> String {
+    format!(
+        "{}: `house-rules` requires `house-rules` `{requirement}`, which the worn package's \
+         locked version 1.0.0 does not meet, and its {source} source holds only that version, so \
+         cargo cannot resolve the workspace once a feature enables it",
+        manifest.display()
+    )
+}
+
+/// A workspace whose member `app` wears `house-rules` written as `app_dependency` and depends on
+/// `y`, whose optional dependency `z` asks for `house-rules` written as `z_dependency`. Not
+/// locked: the caller writes the package `house-rules` first, where the dependencies say it is.
+fn workspace_of_one_worn_version(app_dependency: &str, z_dependency: &str) -> Fixture {
+    let fixture = locked_members(&["app"]);
+    write_app(
+        &fixture,
+        &format!(
+            "[dependencies]\nhouse-rules = {app_dependency}\ny = {{ path = \"../../y\" }}\n\
+             [package.metadata.skeletons.house-rules]\n"
+        ),
+    );
+    fixture.package("../y", "y", Y_OPTIONAL_Z);
+    fixture.package(
+        "../z",
+        "z",
+        &format!("[dependencies]\nhouse-rules = {z_dependency}\n"),
+    );
+    fixture
+}
+
+#[test]
+fn a_requirement_in_another_range_on_a_worn_path_package_is_refused() {
+    // A path package holds one version. `house-rules` 1.0.0 sits in a directory, `app` wears it
+    // by path, and `z` asks for it at `^2` by the same path. Cargo cannot keep a second version
+    // beside it as it would from a registry, so once `y` enables `z` it fails to select one,
+    // and a relock does not help. `^2` is outside the range 1.0.0 is in, and the reader refuses
+    // it all the same, naming `z`'s manifest.
+    let home = CargoHome::new();
+    let fixture = workspace_of_one_worn_version(
+        "{ path = \"../../house-rules\" }",
+        "{ path = \"../house-rules\", version = \"2\" }",
+    );
+    fixture.package("../house-rules", "house-rules", "version = \"1.0.0\"\n");
+    lock_offline(&fixture, &home);
+    enable_z(&fixture);
+
+    assert_cargo_cannot_resolve_and_reader_refuses(
+        &fixture,
+        &home,
+        &refusal_of_the_only_version(&manifest_of(&fixture, "z"), "2", "path"),
+    );
+}
+
+#[test]
+fn a_requirement_in_another_range_on_a_worn_git_package_is_refused() {
+    // The same for a git source, which also holds one version: `house-rules` 1.0.0 in a
+    // `file://` repository, worn by `app` and asked for at `^2` from that repository by `z`.
+    // Cargo fails to select a version once `y` enables `z`, and the reader refuses it.
+    let repository = GitRepository::new("house-rules");
+    let dependency = format!("{{ git = \"{}\" }}", repository.url());
+    let home = CargoHome::new();
+    home.prime(&[format!("house-rules = {dependency}")]);
+    let fixture = workspace_of_one_worn_version(
+        &dependency,
+        &format!("{{ git = \"{}\", version = \"2\" }}", repository.url()),
+    );
+    let toolchain = cargo_version();
+    home.lock(&fixture.root, Network::Allowed)
+        .unwrap_or_else(|stderr| panic!("{toolchain} could not lock the workspace: {stderr}"));
+    enable_z(&fixture);
+
+    assert_cargo_cannot_resolve_and_reader_refuses(
+        &fixture,
+        &home,
+        &refusal_of_the_only_version(&manifest_of(&fixture, "z"), "2", "git"),
+    );
+}
+
+/// Locks `fixture` in `home`, which Cargo may not fetch into.
+fn lock_offline(fixture: &Fixture, home: &CargoHome) {
+    let toolchain = cargo_version();
+    home.lock(&fixture.root, Network::Refused)
+        .unwrap_or_else(|stderr| panic!("{toolchain} could not lock the workspace: {stderr}"));
+}
+
 #[test]
 fn a_dependency_of_an_optional_package_that_needs_a_newer_worn_version_is_refused() {
     // The indirect shape: `z` takes the requirement through `x`, a package it depends on by
@@ -194,7 +283,8 @@ fn a_requirement_the_locked_worn_version_meets_is_reported_as_after_a_relock() {
 
 #[test]
 fn a_requirement_in_another_range_than_the_locked_one_is_reported_as_after_a_relock() {
-    // The control against over-refusing another range: `z` asks for `^5`. Cargo keeps one
+    // The control against over-refusing another range of a registry package (a path or git
+    // package is refused there, as the two tests above it say): `z` asks for `^5`. Cargo keeps one
     // version for each range, so it adds 5.0.0 beside 4.5.6 and leaves the worn package alone,
     // and a relock fixes the lock. A requirement in a range the lock does not hold is no reason
     // to refuse.

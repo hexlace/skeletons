@@ -1,12 +1,20 @@
 //! Optional dependencies of packages outside the workspace that ask a worn package for a version
 //! its lock does not name.
 //!
-//! Cargo keeps one version of a package for each range of versions it calls compatible
-//! ([`CompatibleRange`]). When a feature enables an optional dependency that asks for a version
-//! in the range a worn package is locked in, and the locked version does not meet it, Cargo
-//! cannot resolve the workspace at all: it keeps the version it has and finds it too old, and
-//! only updating the worn package helps. That is not the stale lock this reader reads through,
-//! where a relock gives Cargo's own document, so it is refused.
+//! A registry holds many versions of a package, and Cargo keeps one of them for each range of
+//! versions it calls compatible ([`compatible_range::CompatibleRange`]). When a feature enables an optional
+//! dependency that asks a registry package for a version in the range a worn package is locked
+//! in, and the locked version does not meet it, Cargo cannot resolve the workspace at all: it
+//! keeps the version it has and finds it too old, and only updating the worn package helps. A
+//! requirement in another range gets a second version beside the locked one, and a relock gives
+//! Cargo's own document.
+//!
+//! A path or git source holds exactly one version of a package, so there is no second version to
+//! give: any requirement the locked version does not meet fails once the dependency is enabled,
+//! in whatever range it is written, and no relock gets past it ([`source_kind::SourceKind`]).
+//!
+//! That is not the stale lock this reader reads through, where a relock gives Cargo's own
+//! document, so it is refused.
 //!
 //! The reader does not resolve features, so it cannot tell whether a feature enables the
 //! dependency, and refuses whenever one could. A workspace where nothing does is refused too,
@@ -15,6 +23,7 @@
 //! compared.
 
 mod compatible_range;
+mod source_kind;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -30,11 +39,13 @@ use super::lockfile::{LockEntry, Lockfile};
 use super::package_manifest::{Declaration, DeclaredSource};
 use super::path_package::{Inherits, read_manifest};
 use super::worn_entries::worn_entries;
-use compatible_range::CompatibleRange;
+use source_kind::SourceKind;
 
 /// Refuses a workspace where a package outside it, or a package reached by path from one of its
-/// optional dependencies, asks for a worn package at a version the lock does not name and the
-/// lock's version could be replaced by, which is a version in the same compatible range.
+/// optional dependencies, asks for a worn package at a version the lock does not name and Cargo
+/// has no way to give. For a registry package that is a version in the locked version's
+/// compatible range, since a requirement in another range gets a second version beside it; for
+/// a path or git package, which holds only the locked version, it is any version.
 ///
 /// The declarations judged are every optional dependency of a package outside the workspace
 /// that the layout holds, and every dependency of each package reached from those by path that
@@ -149,7 +160,8 @@ impl<'input> WornPackages<'input> {
     }
 
     /// Refuses `declaration`, written in `manifest`, when it asks a worn package for a version
-    /// that package's locked version does not meet and that its compatible range can.
+    /// that package's locked version does not meet and that Cargo cannot add beside it: for a
+    /// registry package, one its compatible range can meet; for a path or git package, any.
     fn refuse_if_unmet(
         &self,
         manifest: &Path,
@@ -172,10 +184,11 @@ impl<'input> WornPackages<'input> {
             let Ok(locked) = Version::parse(entry.version()) else {
                 continue;
             };
-            if requirement.matches(&locked) {
-                continue;
-            }
-            if CompatibleRange::of(&locked).admits_a_version_meeting(&requirement) {
+            // The declaration agrees with the lock on the source (`is_targeted_by`), so its
+            // kind of source is the entry's.
+            if let Some(reason) =
+                SourceKind::of(&declaration.source).why_unmet(&locked, &requirement)
+            {
                 assert_eq!(
                     declaration.package,
                     entry.name(),
@@ -183,8 +196,8 @@ impl<'input> WornPackages<'input> {
                 );
                 return Err(ReadWithoutCargoError::unsupported(format!(
                     "{}: `{}` requires `{}` `{text}`, which the worn package's locked version \
-                     {locked} does not meet within its compatible range, so cargo cannot \
-                     resolve the workspace once a feature enables it",
+                     {locked} does not meet{reason}, so cargo cannot resolve the workspace once \
+                     a feature enables it",
                     manifest.display(),
                     declaration.key,
                     declaration.package,

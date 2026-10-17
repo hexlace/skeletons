@@ -111,7 +111,7 @@ const _: () = {
 /// Where there is no cargo to run, or no cargo home holding the locked
 /// sources, use [`check_without_cargo`], which returns the same [`Report`] for
 /// the same workspace and files, or, in the one stale shape its documentation
-/// describes, the one this returns once the lock is regenerated.
+/// describes, the one this returns once Cargo brings the lock up to date.
 ///
 /// # Errors
 ///
@@ -152,9 +152,9 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 ///
 /// The [`Report`] is the one [`check`] returns for the same workspace and
 /// files, or, in the one stale shape described below, the one [`check`]
-/// returns once the lock is regenerated. That is what a caller that builds
-/// without cargo can use: no cargo, no cargo home, and no `PATH`
-/// are needed, and nothing is run.
+/// returns once Cargo brings the lock up to date. That is what a caller that
+/// builds without cargo can use: no cargo, no cargo home, and no `PATH` are
+/// needed, and nothing is run.
 ///
 /// A relative `directory` is taken from the process's current directory, and
 /// any directory at or below the workspace will do; the manifests above it are

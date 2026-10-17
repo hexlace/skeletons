@@ -23,7 +23,7 @@ use crate::worn_skeleton::WornSkeleton;
 ///
 /// Where `check_without_cargo` gives a report, it is the report `check` gives
 /// on the same files, or, in the one stale shape its documentation describes,
-/// the one `check` gives once the lock is regenerated. So everything here
+/// the one `check` gives once Cargo brings the lock up to date. So everything here
 /// reads the same whichever produced it, except that only
 /// `check_without_cargo` can report an
 /// [`Unlocated`](crate::RefusalKind::Unlocated) refusal.

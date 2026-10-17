@@ -19,8 +19,8 @@ const LOCKFILE_NAME: &str = "Cargo.lock";
 /// Reads `directory`'s workspace from its manifests and lockfile, running no Cargo.
 ///
 /// The result is what [`read`](crate::read) gives for the same files, or, in the one stale shape
-/// the lockfile can be in, what it gives once the lock is regenerated: every wearing table any
-/// member declares. No Cargo and no Cargo home is needed.
+/// the lockfile can be in, what it gives once Cargo brings the lock up to date: every wearing
+/// table any member declares. No Cargo and no Cargo home is needed.
 ///
 /// `directory` may be any directory at or below the workspace; the manifests above it are found
 /// as Cargo finds them. `locations` says where the files of each locked package with a `source`
@@ -49,7 +49,7 @@ pub fn read_without_cargo(
 
 /// The document [`read_without_cargo`] builds its workspace from, which stands in for the one
 /// `cargo metadata` prints for the same files, or, in the one stale shape the lockfile can be in,
-/// for the one it prints once the lock is regenerated.
+/// for the one it prints once Cargo brings the lock up to date.
 pub(super) fn read_document(
     directory: &Path,
     locations: &BTreeMap<LockedPackageId, PathBuf>,

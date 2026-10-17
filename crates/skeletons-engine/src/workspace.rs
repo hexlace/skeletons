@@ -7,8 +7,8 @@
 //! document in the shape `cargo metadata` prints, and everything after it is
 //! shared, so the two give the same workspace for the same files, or, in the
 //! one stale shape the lockfile can be in, the workspace the first gives once
-//! the lock is regenerated. The one thing only the second can say is a wearing
-//! whose package has no location, which is [`WearingRefusal::Unlocated`].
+//! Cargo brings the lock up to date. The one thing only the second can say is a
+//! wearing whose package has no location, which is [`WearingRefusal::Unlocated`].
 
 mod cargo_metadata;
 mod crate_name;

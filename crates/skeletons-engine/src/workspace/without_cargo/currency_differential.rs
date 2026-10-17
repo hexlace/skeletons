@@ -310,20 +310,22 @@ fn an_optional_dependency_of_an_outsider_that_no_feature_enables_is_current() {
 }
 
 /// Requires that a workspace whose lock a feature change on a package outside it has made stale
-/// gets, from the reader, the document `cargo metadata --locked` gives once the lock is
-/// regenerated.
+/// gets, from the reader, the document `cargo metadata --locked` gives once Cargo brings the
+/// lock up to date.
 ///
 /// Cargo aborts on the stale lock, and deciding that takes feature resolution, which the reader
 /// does not do, so it reads the lock as it stands. The document it gives is the one it reads
 /// from members, their wearing tables and the packages their dependencies are locked to, and
-/// the feature change touches none of those. The lock is regenerated in place, after the
-/// reader has read the stale one, so that the paths in the two documents are the same.
+/// the feature change touches none of those. `cargo generate-lockfile` stands in for Cargo
+/// bringing the lock up to date: the packages are all `path` packages, so no registry choice
+/// separates the two locks. It runs in place, after the reader has read the stale lock, so that
+/// the paths in the two documents are the same.
 fn assert_stale_report_is_the_relocked_one(fixture: &Fixture) {
     let toolchain = cargo_version();
     assert_eq!(
         cargo_verdict(fixture),
         Verdict::Aborted,
-        "cargo, before the lock is regenerated, on {toolchain}"
+        "cargo, before the lock is brought up to date, on {toolchain}"
     );
     let stale = read_document(&fixture.root, &BTreeMap::new())
         .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the stale lock: {error}"));
@@ -332,7 +334,7 @@ fn assert_stale_report_is_the_relocked_one(fixture: &Fixture) {
     let relocked = cargo_metadata::fetch(&fixture.root, Network::Refused)
         .unwrap_or_else(|error| panic!("{toolchain}: cargo refused the relocked lock: {error:?}"));
 
-    // The whole graph is not compared: the lock the reader read lists `z` where the regenerated
+    // The whole graph is not compared: the lock the reader read lists `z` where the relocked
     // one does not, or the other way round, and no member's edge reaches it.
     assert_eq!(
         shape(&stale).reached_by_members(),

@@ -1,11 +1,13 @@
 //! A feature change on a package outside the workspace, made after the lock,
 //! which `check` aborts on and `check_without_cargo` reports through.
 //!
-//! The oracle is `check` on the same workspace once the lock is regenerated,
-//! held equal with `assert_eq!` and, so that two equal wrong reports cannot
-//! pass, pinned to values written out here. The package outside the workspace
-//! is `y`, a path package with an optional path dependency `z`; no registry is
-//! needed to build it.
+//! The oracle is `check` on the same workspace once Cargo brings the lock up
+//! to date, held equal with `assert_eq!` and, so that two equal wrong reports
+//! cannot pass, pinned to values written out here. The package outside the
+//! workspace is `y`, a path package with an optional path dependency `z`; no
+//! registry is needed to build it. `cargo generate-lockfile` brings the lock up
+//! to date here: with path packages only there is no registry choice, so it
+//! gives the lock Cargo would.
 
 mod support;
 
@@ -25,8 +27,8 @@ const Y_DEFAULT_ENABLES_Z: &str = "[dependencies]\nz = { path = \"../z\", option
 /// Locks a workspace whose member wears `house-rules` and depends on `y`, as
 /// `y` is written by `manifest_tail_when_locked`; then rewrites `y` as
 /// `manifest_tail_after`, without locking again. Requires that `check` aborts
-/// on the stale lock, takes `check_without_cargo`'s report on it, regenerates
-/// the lock, and requires `check`'s report to equal it and to hold the values
+/// on the stale lock, takes `check_without_cargo`'s report on it, brings the
+/// lock up to date, and requires `check`'s report to equal it and to hold the values
 /// written here.
 fn assert_stale_report_is_the_relocked_one(
     manifest_tail_when_locked: &str,
@@ -76,7 +78,7 @@ fn an_outsiders_dependency_enabled_after_the_lock_is_reported_as_after_a_relock(
     // `y` edited so its default feature enables `z`, `check` aborts on the
     // lock, which does not list `z` under `y`. `check_without_cargo` reports
     // through it, and the report equals the one `check` gives after the lock
-    // is regenerated: the feature change touches no member, no wearing and no
+    // is brought up to date: the feature change touches no member, no wearing and no
     // package a member's dependency is locked to.
     assert_stale_report_is_the_relocked_one(Y_OPTIONAL_Z, Y_DEFAULT_ENABLES_Z)
 }

@@ -7,9 +7,9 @@ data, which files its worn skeletons claim and whether each one matches.
 as files, for a program that builds without Cargo. Where
 `check_without_cargo` gives a report, it is the report `check` gives on the same
 files, or, in the one stale shape "Without Cargo" below names, the report
-`check` gives once the lock is regenerated. Neither writes anything in the
-workspace or makes a network request, and neither says anything in words: a caller decides what a
-drifted file or a refusal means to its own users.
+`check` gives once Cargo brings the lock up to date. Neither writes anything in
+the workspace or makes a network request, and neither says anything in words: a
+caller decides what a drifted file or a refusal means to its own users.
 
 A caller that wants the commands themselves, `check`, `sync`, `wear` and
 `remove` with their tables and messages, mounts
@@ -159,7 +159,7 @@ framework.
 git and no `PATH`. It reads `Cargo.toml` files and `Cargo.lock` as files, and
 returns the report `check` returns for the same workspace and files, or, in the
 one stale shape described at the end of this section, the report `check` returns
-once the lock is regenerated. It needs:
+once Cargo brings the lock up to date. It needs:
 
 - A `Cargo.lock` that is up to date. The function never writes one, so make it
   where cargo is. A lockfile that is missing, or that the manifests have

@@ -25,7 +25,9 @@ use reachability::every_entry_is_reached;
 /// Refuses a lockfile that Cargo would call out of date for the workspace whose packages on disk
 /// are `packages`.
 ///
-/// In order: the entries Cargo sets aside when it loads a lockfile are set aside, with every
+/// In order: an entry the lockfile still writes a `replace` on is out of date, because the root
+/// manifest writes no `[replace]` by the time this runs (one that does is refused before), and
+/// Cargo drops the replacement on a relock. Then the entries Cargo sets aside when it loads a lockfile are set aside, with every
 /// dependency entry that names one. Then every package on disk is locked as a package with no
 /// `source`, under its name and version. Then each package's declarations are among the
 /// dependencies of its entry, and each of those dependencies is a declared package, agreeing on
@@ -39,6 +41,9 @@ pub(super) fn verify_lockfile_is_current(
     lockfile: &Lockfile,
     packages: &[PathPackage],
 ) -> Result<(), ReadWithoutCargoError> {
+    if lockfile.entries().iter().any(LockEntry::is_replaced) {
+        return Err(ReadWithoutCargoError::Lockfile);
+    }
     let set_aside = set_aside_entries(lockfile, packages);
 
     let mut entry_indexes = Vec::with_capacity(packages.len());
@@ -270,6 +275,28 @@ mod tests {
         let fixture = workspace(APP_DEPENDS_ON_DEP, &lock_of_app_and_dep("\"dep\"", ghost));
 
         assert!(is_current(&fixture));
+    }
+
+    #[test]
+    fn an_entry_still_replaced_after_the_root_stopped_writing_replace_is_stale() {
+        // The root writes no `[replace]`, and the lock still redirects `r` to the path package
+        // it once named. The same lock without the `replace` line is current, so the line is
+        // what makes it stale.
+        let lock = |replace: &str| {
+            format!(
+                "version = 4\n\n[[package]]\nname = \"app\"\nversion = \"0.0.0\"\n\
+                 dependencies = [\"r 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)\"]\n\n\
+                 [[package]]\nname = \"r\"\nversion = \"1.4.0\"\n\n\
+                 [[package]]\nname = \"r\"\nversion = \"1.4.0\"\nsource = \"{CRATES_IO}\"\n{replace}"
+            )
+        };
+        let app = "[dependencies]\nr = \"1\"\n";
+
+        assert!(is_current(&workspace(app, &lock(""))));
+        assert!(!is_current(&workspace(
+            app,
+            &lock("replace = \"r 1.4.0\"\n")
+        )));
     }
 
     #[test]

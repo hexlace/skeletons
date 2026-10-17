@@ -21,6 +21,7 @@ pub(crate) struct LockEntry {
     version: String,
     source: Option<String>,
     dependency_indexes: Vec<usize>,
+    replaced: bool,
 }
 
 #[derive(Deserialize)]
@@ -41,6 +42,8 @@ struct RawPackage {
     source: Option<String>,
     #[serde(default)]
     dependencies: Vec<String>,
+    /// The package id a `[replace]` in the root manifest redirected this package to.
+    replace: Option<String>,
 }
 
 /// One dependency entry, split into the parts it spells: `name`, `name version` or
@@ -131,6 +134,13 @@ impl LockEntry {
     pub(crate) fn dependency_indexes(&self) -> &[usize] {
         &self.dependency_indexes
     }
+
+    /// Whether the lockfile writes a `replace` on this package: Cargo resolved it through a
+    /// `[replace]` in the root manifest.
+    #[must_use]
+    pub(crate) const fn is_replaced(&self) -> bool {
+        self.replaced
+    }
 }
 
 /// `package` with each of its dependency entries resolved among `packages`.
@@ -145,6 +155,7 @@ fn resolved_entry(package: &RawPackage, packages: &[RawPackage]) -> Result<LockE
         version: package.version.clone(),
         source: package.source.clone(),
         dependency_indexes,
+        replaced: package.replace.is_some(),
     })
 }
 
@@ -781,6 +792,7 @@ name = "a"
                     version: package.version.to_owned(),
                     source: package.source(),
                     dependency_indexes: indexes,
+                    replaced: false,
                 });
             }
 

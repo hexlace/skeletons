@@ -58,3 +58,27 @@ fn a_removed_registry_dependency_is_aborted() {
 
     assert_both_say_in_home(&fixture, &home, Verdict::Aborted);
 }
+
+#[test]
+fn a_replacement_the_root_no_longer_writes_is_aborted() {
+    // The lock keeps `replace = "r 1.4.0"` on the registry entry, and the path package it
+    // named, after `[replace]` leaves the root manifest. Cargo drops both on a relock, so
+    // `--locked` aborts; the path entry alone is one Cargo sets aside, which is why the reader
+    // has to read the `replace` key itself.
+    let home = CargoHome::new();
+    home.vendor("r", "1.4.0");
+    let fixture = locked_members(&["app"]);
+    let members = "[workspace]\nmembers = [\"app\"]\n";
+    fixture.write(
+        "Cargo.toml",
+        &format!("{members}[replace]\n\"r:1.4.0\" = {{ path = \"../r\" }}\n"),
+    );
+    write_app(&fixture, "[dependencies]\nr = \"1\"\n");
+    fixture.package("../r", "r", "version = \"1.4.0\"\n");
+    let toolchain = cargo_version();
+    home.lock(&fixture.root, Network::Refused)
+        .unwrap_or_else(|stderr| panic!("{toolchain} could not lock the workspace: {stderr}"));
+    fixture.write("Cargo.toml", members);
+
+    assert_both_say_in_home(&fixture, &home, Verdict::Aborted);
+}

@@ -57,11 +57,10 @@ impl Fixture {
 }
 
 /// Runs `cargo generate-lockfile --offline` in `directory`, with the cargo that runs the tests,
-/// and says what it printed on failure.
+/// and says what it printed on failure. Cargo gets a `HOME` that holds no configuration.
 pub(super) fn lock_with_cargo_in(directory: &Path) -> Result<(), String> {
-    let output = crate::cargo::command()
-        .current_dir(directory)
-        .args(["generate-lockfile", "--offline"])
+    let home = tempfile::tempdir().expect("a temporary directory");
+    let output = lock_command(directory, home.path())
         .output()
         .map_err(|error| format!("cargo could not be run: {error}"))?;
     if output.status.success() {
@@ -69,6 +68,18 @@ pub(super) fn lock_with_cargo_in(directory: &Path) -> Result<(), String> {
     } else {
         Err(String::from_utf8_lossy(&output.stderr).into_owned())
     }
+}
+
+/// The command [`lock_with_cargo_in`] runs: `cargo generate-lockfile --offline` in `directory`,
+/// with `home` as `HOME`, so that Cargo's git reads no configuration of the user who runs the
+/// tests.
+fn lock_command(directory: &Path, home: &Path) -> std::process::Command {
+    let mut command = crate::cargo::command();
+    command
+        .current_dir(directory)
+        .args(["generate-lockfile", "--offline"])
+        .env("HOME", home);
+    command
 }
 
 /// What `cargo --version` prints, for a failure message to name the toolchain it ran on.
@@ -80,4 +91,29 @@ pub(super) fn cargo_version() -> String {
             |error| format!("cargo could not be run: {error}"),
             |output| String::from_utf8_lossy(&output.stdout).trim().to_owned(),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::ffi::OsStr;
+    use std::path::Path;
+
+    use super::lock_command;
+
+    #[test]
+    fn the_lock_command_has_a_home_of_its_own() {
+        // Cargo reads git's configuration through `HOME`, so the command a test runs to lock a
+        // workspace must not inherit the running user's. The command is built and inspected
+        // without being run: its `HOME` must be the directory it was given.
+        let command = lock_command(Path::new("/workspace"), Path::new("/home"));
+
+        let environment: BTreeMap<&OsStr, Option<&OsStr>> = command.get_envs().collect();
+
+        assert_eq!(
+            environment.get(OsStr::new("HOME")),
+            Some(&Some(OsStr::new("/home"))),
+            "HOME is the directory it was given"
+        );
+    }
 }

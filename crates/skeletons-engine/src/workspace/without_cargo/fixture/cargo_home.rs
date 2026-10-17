@@ -36,6 +36,11 @@ impl CargoHome {
         self.directory.path()
     }
 
+    /// The `HOME` of the Cargo this home runs: a directory that holds no configuration.
+    pub(in crate::workspace::without_cargo) fn home(&self) -> &Path {
+        self.home.path()
+    }
+
     /// Adds the crate `name` at `version` to the directory that replaces crates.io in this home.
     /// A lockfile still names crates.io as the crate's source.
     pub(in crate::workspace::without_cargo) fn vendor(&self, name: &str, version: &str) {

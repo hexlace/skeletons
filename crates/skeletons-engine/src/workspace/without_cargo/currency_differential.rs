@@ -51,6 +51,7 @@ fn cargo_verdict_in_home(fixture: &Fixture, home: &CargoHome) -> Verdict {
     cargo_verdict_of(cargo_metadata::fetch_in_cargo_home(
         &fixture.root,
         home.path(),
+        home.home(),
     ))
 }
 

@@ -5,7 +5,8 @@ would say about a workspace. Two functions read a workspace and return, as
 data, which files its worn skeletons claim and whether each one matches.
 `check` asks cargo. `check_without_cargo` reads the manifests and `Cargo.lock`
 as files, for a program that builds without Cargo. Both give the same report for
-the same workspace and files. Neither writes anything in the workspace or makes
+the same workspace and files, bar a lockfile stale in one of two ways that only
+cargo can see (see "Without Cargo" below). Neither writes anything in the workspace or makes
 a network request, and neither says anything in words: a caller decides what a
 drifted file or a refusal means to its own users.
 
@@ -155,7 +156,9 @@ framework.
 
 `check_without_cargo` runs no cargo, so it needs no cargo, no cargo home, no
 git and no `PATH`. It reads `Cargo.toml` files and `Cargo.lock` as files, and
-returns the report `check` returns for the same workspace and files. It needs:
+returns the report `check` returns for the same workspace and files, except for
+a lockfile stale in one of the two ways described at the end of this section,
+which `check` aborts on and this reads as it stands. It needs:
 
 - A `Cargo.lock` that is up to date. The function never writes one, so make it
   where cargo is. A lockfile that is missing, or that the manifests have

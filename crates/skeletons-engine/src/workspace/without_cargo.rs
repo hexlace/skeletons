@@ -7,6 +7,7 @@
 //! `cargo metadata`'s output share.
 
 mod canonical_git_url;
+mod cargo_cannot_load;
 mod cargo_configuration;
 mod currency;
 mod document;

@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 
 use semver::{Version, VersionReq};
 
+use super::cargo_cannot_load::CargoCannotLoad;
 use super::error::ReadWithoutCargoError;
 use super::file_system::{MANIFEST_FILE_NAME, normalized};
 use super::layout::Layout;
@@ -52,19 +53,22 @@ use source_kind::SourceKind;
 /// that the layout holds, and every dependency of each package reached from those by path that
 /// the layout does not hold, and of each package reached from those in turn. The layout holds
 /// the packages the lock lists, and currency has judged their requirements already; the others
-/// are the ones an optional dependency no feature has enabled yet leads to. A package among
-/// them whose manifest Cargo itself refuses is passed over: Cargo does not load it until a
-/// feature enables it, and it fails then, so a refusal here would fire on workspaces Cargo
-/// reads. A manifest Cargo loads is read whole, a git URL's own query included, and its other
-/// requirements and path dependencies are judged: nothing here compares the source of a git
-/// dependency read past, which can name no worn package. The packages read here do not join the
-/// layout, because currency would then ask for them in the lock.
+/// are the ones an optional dependency no feature has enabled yet leads to. A manifest Cargo
+/// loads is read whole, a git URL's own query included, and its other requirements and path
+/// dependencies are judged whether or not a feature enables the package: nothing here compares
+/// the source of a git dependency read past, which can name no worn package. Exactly two
+/// shapes are passed over, because Cargo fails on them too: a manifest that is not there, and a
+/// dependency that writes both `git` and `path`. Any other manifest this reader cannot read is
+/// refused, naming the file, though Cargo may never load the package. The packages read here do
+/// not join the layout, because currency would then ask for them in the lock.
 ///
 /// A requirement `semver` does not parse is passed over, as currency passes it over.
 ///
 /// # Errors
 ///
-/// Unsupported, naming the manifest, the dependency and the worn package.
+/// Unsupported, naming the manifest, the dependency and the worn package. Unreadable or
+/// Unsupported, naming the file, for a package reached that this reader cannot read in a way
+/// that is neither of the two shapes above.
 pub(super) fn refuse_unmet_optional_requirements(
     layout: &Layout,
     lockfile: &Lockfile,
@@ -104,13 +108,18 @@ fn refuse_in_packages_reached(
         if !visited.insert(directory.clone()) {
             continue;
         }
-        // A package whose manifest Cargo refuses is not judged: Cargo loads it only once a
-        // feature enables it, and this reader cannot tell whether one does. A git URL with a
-        // query of its own is not such a manifest, since Cargo loads it, so it is read past
-        // and the package's other requirements and path dependencies are judged.
-        let Ok(manifest) = read_manifest(&directory, Inherits::Ancestors, Unfollowed::ReadPast)
-        else {
-            continue;
+        // A manifest is passed over only where Cargo fails to load it too, and only for the two
+        // shapes `CargoCannotLoad` names, each measured against Cargo. The match has no
+        // wildcard: a manifest this reader cannot read in any other way carries no shape and is
+        // refused by name, and so is one that a refusal added to the manifest reader later makes
+        // unreadable. A git URL with a query of its own is a manifest Cargo loads, so it is read
+        // past and the package's other requirements and path dependencies are judged.
+        let manifest = match read_manifest(&directory, Inherits::Ancestors, Unfollowed::ReadPast) {
+            Ok(manifest) => manifest,
+            Err(failure) => match failure.cargo_cannot_load() {
+                Some(CargoCannotLoad::Missing | CargoCannotLoad::GitAndPath) => continue,
+                None => return Err(failure.into()),
+            },
         };
         let manifest_path = directory.join(MANIFEST_FILE_NAME);
         for declaration in manifest

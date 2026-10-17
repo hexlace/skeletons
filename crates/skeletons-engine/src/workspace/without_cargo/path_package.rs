@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use super::error::ReadWithoutCargoError;
+use super::error::{ManifestFailure, ReadWithoutCargoError};
 use super::file_system::{MANIFEST_FILE_NAME, normalized};
 use super::package_manifest::{
     Declaration, DeclaredSource, PackageManifest, Unfollowed, WorkspaceRoot,
@@ -134,19 +134,20 @@ impl PathPackage {
 ///
 /// Unreadable when the file is missing or unreadable, is not a manifest, or inherits what nothing
 /// gives it. Unsupported for a shape Cargo loads and this reader does not follow, when
-/// `unfollowed` refuses it.
+/// `unfollowed` refuses it. The failure says which shape Cargo cannot load either it is, when it
+/// is one: a manifest that is not there, or a dependency that writes both `git` and `path`.
 pub(super) fn read_manifest(
     directory: &Path,
     inherits: Inherits<'_>,
     unfollowed: Unfollowed,
-) -> Result<PackageManifest, ReadWithoutCargoError> {
+) -> Result<PackageManifest, ManifestFailure> {
     let manifest_path = directory.join(MANIFEST_FILE_NAME);
     let text = std::fs::read_to_string(&manifest_path)
-        .map_err(|error| ReadWithoutCargoError::file(&manifest_path, &error))?;
+        .map_err(|error| ManifestFailure::file(&manifest_path, &error))?;
     match inherits {
         Inherits::Workspace(workspace) => {
             PackageManifest::parse_with(&text, directory, workspace, unfollowed)
-                .map_err(|error| ReadWithoutCargoError::text(&manifest_path, &error))
+                .map_err(|error| ManifestFailure::text(&manifest_path, &error))
         }
         Inherits::Ancestors => parse_inheriting(&text, directory, &manifest_path, unfollowed),
     }

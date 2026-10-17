@@ -4,7 +4,7 @@
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use super::error::ReadWithoutCargoError;
+use super::error::{ManifestFailure, ReadWithoutCargoError};
 use super::file_system::{MANIFEST_FILE_NAME, normalized};
 use super::package_manifest::{PackageManifest, Unfollowed, WorkspaceRoot};
 use super::text_error::TextError;
@@ -118,23 +118,26 @@ fn inherited_workspace(
 /// # Errors
 ///
 /// The text's own error when it cannot be read alone and no workspace above gives it what it
-/// needs, and an error from reading a manifest above.
+/// needs, which carries the shape Cargo fails on too when the text is one, and an error from
+/// reading a manifest above, which carries none: the manifest above is not the one asked for.
 pub(super) fn parse_inheriting(
     text: &str,
     directory: &Path,
     manifest_path: &Path,
     unfollowed: Unfollowed,
-) -> Result<PackageManifest, ReadWithoutCargoError> {
+) -> Result<PackageManifest, ManifestFailure> {
     let alone = PackageManifest::parse_with(text, directory, None, unfollowed);
     let error = match alone {
         Ok(manifest) => return Ok(manifest),
         Err(error) => error,
     };
-    let Some(workspace) = inherited_workspace(directory, unfollowed)? else {
-        return Err(ReadWithoutCargoError::text(manifest_path, &error));
+    let Some(workspace) =
+        inherited_workspace(directory, unfollowed).map_err(ManifestFailure::refused)?
+    else {
+        return Err(ManifestFailure::text(manifest_path, &error));
     };
     PackageManifest::parse_with(text, directory, Some(&workspace), unfollowed)
-        .map_err(|error| ReadWithoutCargoError::text(manifest_path, &error))
+        .map_err(|error| ManifestFailure::text(manifest_path, &error))
 }
 
 #[cfg(test)]
@@ -142,6 +145,7 @@ mod tests {
     use std::path::Path;
 
     use super::{declares_workspace, excludes, nearest_above, parse_inheriting};
+    use crate::workspace::without_cargo::cargo_cannot_load::CargoCannotLoad;
     use crate::workspace::without_cargo::error::ReadWithoutCargoError;
     use crate::workspace::without_cargo::package_manifest::{
         PackageManifest, Unfollowed, WorkspaceRoot,
@@ -301,6 +305,7 @@ mod tests {
             Unfollowed::Refuse,
         )
         .expect_err("the root's query is refused");
+        let refused = ReadWithoutCargoError::from(refused);
 
         let [declaration] = read_past.declarations() else {
             panic!(
@@ -329,9 +334,27 @@ mod tests {
         )
         .expect_err("nothing gives the version");
 
+        assert_eq!(error.cargo_cannot_load(), None);
+        let error = ReadWithoutCargoError::from(error);
         assert!(
             matches!(error, ReadWithoutCargoError::ManifestUnreadable { .. }),
             "{error:?}"
         );
+    }
+
+    #[test]
+    fn a_git_and_path_dependency_is_refused_carrying_its_shape() {
+        // The shape travels with the refusal: a read that passes over a manifest Cargo cannot
+        // load needs to tell this one from any other text error.
+        let error = parse_inheriting(
+            "[package]\nname = \"m\"\n[dependencies]\n\
+             g = { git = \"https://example.invalid/g\", path = \"../g\" }\n",
+            Path::new("/absent/m"),
+            Path::new("/absent/m/Cargo.toml"),
+            Unfollowed::Refuse,
+        )
+        .expect_err("git and path at once");
+
+        assert_eq!(error.cargo_cannot_load(), Some(CargoCannotLoad::GitAndPath));
     }
 }

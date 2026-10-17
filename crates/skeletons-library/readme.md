@@ -293,10 +293,13 @@ where cargo is available. For a worn package from a registry, a requirement in
 another range is not refused, since cargo then keeps a second version beside the
 locked one. Nor is a requirement the locked version meets, one that does not
 parse, or one in the manifest of a registry package, which is not a file the
-function has. An optional path dependency whose manifest cannot be read is
-passed over, because cargo does not load it until a feature enables it. A git
-URL with a query of its own does not stop the walk, because cargo loads that
-manifest: the package is read whole and its other requirements are judged.
+function has. The walk passes over a reached manifest it cannot read only where
+cargo cannot load it either, and only for two shapes: a manifest that is not
+there, and a dependency that writes both `git` and `path`. Any other manifest it
+cannot read is refused, naming the file, though cargo may never load that
+package. A git URL with a query of its own does not stop the walk, because cargo
+loads that manifest: the package is read whole and its other requirements are
+judged.
 
 A wearing's dependency declared with `registry = "name"` is refused because only
 Cargo's configuration says which index that name stands for: the lock entry

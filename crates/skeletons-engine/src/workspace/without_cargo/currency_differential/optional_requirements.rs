@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::super::cargo_configuration::HomeVariables;
+use super::super::error::ReadWithoutCargoError;
 use super::super::fixture::{CargoHome, Fixture, GitRepository, cargo_version};
 use super::super::read::read_document;
 use super::{
@@ -458,8 +459,8 @@ fn an_optional_dependency_whose_directory_is_gone_is_read_past() {
     // Measured on cargo 1.85.0 and 1.95.0: with `z` off, Cargo does not load `z`, so a `z`
     // whose directory is removed after the lock leaves the workspace current, and it fails
     // only once a feature enables `z`. The reader cannot know the feature is off, and a refusal
-    // here would fire on workspaces Cargo reads, so it passes over a package it cannot read, as
-    // it does a requirement `semver` cannot parse.
+    // here would fire on workspaces Cargo reads, so it passes over a manifest that is not
+    // there, one of the two shapes it knows Cargo fails on too.
     let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"4.6\"\n");
     std::fs::remove_dir_all(fixture.root.with_file_name("z")).expect("take z away");
 
@@ -473,6 +474,117 @@ fn a_dependency_of_an_optional_package_whose_directory_is_gone_is_read_past() {
     let (fixture, home) = locked_with_optional_z("[dependencies]\nx = { path = \"../x\" }\n");
 
     assert_both_say_in_home(&fixture, &home, Verdict::Current);
+}
+
+/// What Cargo, in `home`, says when it cannot resolve the workspace at `fixture`'s root.
+fn cargo_failure_in_home(fixture: &Fixture, home: &CargoHome) -> String {
+    let toolchain = cargo_version();
+    match cargo_metadata::fetch_in_cargo_home(&fixture.root, home.path(), home.home()) {
+        Err(ReadWorkspaceError::CargoMetadataFailed { stderr }) => stderr,
+        other => panic!("cargo, on {toolchain}: expected a failed resolution, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_optional_dependency_whose_directory_is_gone_fails_in_cargo_once_enabled() {
+    // The reason the reader may pass over a package whose directory is gone: Cargo fails on it
+    // too, as soon as a feature enables it. `z` is locked while off and removed, `y` then enables
+    // it, and Cargo cannot load it.
+    let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"4.6\"\n");
+    std::fs::remove_dir_all(fixture.root.with_file_name("z")).expect("take z away");
+    enable_z(&fixture);
+
+    let stderr = cargo_failure_in_home(&fixture, &home);
+
+    assert!(
+        stderr.contains("failed to load source for dependency `z`"),
+        "cargo, on {}, failed some other way:\n{stderr}",
+        cargo_version()
+    );
+}
+
+#[test]
+fn a_git_and_path_dependency_of_an_optional_package_is_read_past_while_it_is_off() {
+    // Cargo does not load `z` while a feature leaves it off, so a `z` that writes
+    // `foo = { git, path }` leaves the lock current, and the reader, which passes over exactly
+    // this manifest, agrees.
+    let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"4.6\"\n");
+    fixture.package(
+        "../z",
+        "z",
+        "[dependencies]\nfoo = { git = \"file:///nowhere/foo\", path = \"../foo\" }\n",
+    );
+
+    assert_both_say_in_home(&fixture, &home, Verdict::Current);
+}
+
+#[test]
+fn a_git_and_path_dependency_of_an_optional_package_fails_in_cargo_once_enabled() {
+    // The reason the reader may pass over `{ git, path }`: Cargo fails on it too, as soon as a
+    // feature enables the package, because the dependency is ambiguous.
+    let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"4.6\"\n");
+    fixture.package(
+        "../z",
+        "z",
+        "[dependencies]\nfoo = { git = \"file:///nowhere/foo\", path = \"../foo\" }\n",
+    );
+    enable_z(&fixture);
+
+    let stderr = cargo_failure_in_home(&fixture, &home);
+
+    assert!(
+        stderr.contains("specification is ambiguous"),
+        "cargo, on {}, failed some other way:\n{stderr}",
+        cargo_version()
+    );
+}
+
+#[test]
+fn an_optional_package_whose_manifest_cargo_refuses_in_another_way_is_refused_naming_it() {
+    // A manifest the reader cannot read that is neither missing nor `{ git, path }` is no
+    // shape the reader knows Cargo fails on, so it is not passed over: the reader refuses the
+    // workspace, naming `z`'s manifest, though `z` is off and Cargo says the lock is current.
+    // That is the cost of passing over only the two named shapes: `version = "one"` is a
+    // manifest Cargo refuses too, but only once something enables `z`.
+    let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"4.6\"\n");
+    fixture.package(
+        "../z",
+        "z",
+        "version = \"one\"\n[dependencies]\nhouse-rules = \"4.6\"\n",
+    );
+    let toolchain = cargo_version();
+
+    assert_eq!(
+        cargo_verdict_in_home(&fixture, &home),
+        Verdict::Current,
+        "cargo, on {toolchain}"
+    );
+    let Err(ReadWithoutCargoError::ManifestUnreadable { detail }) = read_document(
+        &fixture.root,
+        &BTreeMap::new(),
+        &HomeVariables::cargo_home(home.path()),
+    ) else {
+        panic!("the reader, on {toolchain}: expected an unreadable manifest");
+    };
+    assert!(
+        detail.starts_with(&manifest_of(&fixture, "z").display().to_string()),
+        "the reader, on {toolchain}, named another file: {detail}"
+    );
+}
+
+#[test]
+fn an_optional_package_with_a_version_cargo_refuses_fails_in_cargo_once_enabled() {
+    // The same manifest with `y` enabling `z`: Cargo fails, and the reader refuses it, naming
+    // `z`'s manifest, so a refusal that fires early is at least one Cargo would give.
+    let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"4.6\"\n");
+    fixture.package(
+        "../z",
+        "z",
+        "version = \"one\"\n[dependencies]\nhouse-rules = \"4.6\"\n",
+    );
+    enable_z(&fixture);
+
+    assert_both_say_in_home(&fixture, &home, Verdict::Refused);
 }
 
 #[test]

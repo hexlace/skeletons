@@ -2304,10 +2304,13 @@ reader does not resolve features, so it refuses whenever a feature could enable
 the dependency, and a workspace where nothing does is refused too, though cargo
 reads it. A registry package's requirement in another range is left alone, since
 cargo adds a second version beside the locked one and the lock only needs
-rewriting. An optional path package whose manifest cannot be read is passed
-over, since cargo does not load it until a feature enables it. A git URL with a
-query of its own does not stop the walk, because cargo loads that manifest: the
-package is read whole and its other requirements are judged. A requirement
+rewriting. The walk passes over a reached manifest it cannot read only where
+cargo cannot load it either, and only for two shapes: a manifest that is not
+there, and a dependency that writes both `git` and `path`. Any other manifest it
+cannot read is refused, naming the file, though cargo may never load that
+package. A git URL with a query of its own does not stop the walk, because cargo
+loads that manifest: the package is read whole and its other requirements are
+judged. A requirement
 inside a registry package's manifest is out of reach, which is the limit left:
 an unlocked registry dependency that needs a newer version of a worn package is
 a lock cargo refuses until the package is updated, the update takes the newest

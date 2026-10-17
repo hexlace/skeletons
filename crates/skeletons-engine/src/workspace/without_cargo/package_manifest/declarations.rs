@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::super::canonical_git_url::CanonicalGitUrl;
+use super::super::cargo_cannot_load::CargoCannotLoad;
 use super::super::text_error::TextError;
 use super::{RawDependencies, RawDependencyTables, RawManifest, Unfollowed, WorkspaceRoot};
 
@@ -287,10 +288,13 @@ impl Written<'_> {
     fn source(&self) -> Result<DeclaredSource, TextError> {
         match (self.string("git")?, self.string("path")?) {
             (Some(text), None) => self.git_source(&text),
-            (Some(_), Some(_)) => Err(TextError::unreadable(format!(
-                "{} `{}` writes both `git` and `path`, and Cargo allows only one of them",
-                self.site.table, self.key
-            ))),
+            (Some(_), Some(_)) => Err(TextError::unreadable_as(
+                CargoCannotLoad::GitAndPath,
+                format!(
+                    "{} `{}` writes both `git` and `path`, and Cargo allows only one of them",
+                    self.site.table, self.key
+                ),
+            )),
             (None, Some(path)) => Ok(DeclaredSource::Path {
                 directory: self.site.directory.join(path),
             }),
@@ -364,7 +368,7 @@ mod tests {
     use proptest::prelude::*;
 
     use super::super::{PackageManifest, Unfollowed};
-    use super::{CanonicalGitUrl, Declaration, DeclaredSource, GitReference};
+    use super::{CanonicalGitUrl, CargoCannotLoad, Declaration, DeclaredSource, GitReference};
     use crate::workspace::without_cargo::text_error::TextErrorKind;
 
     /// Reads `text` as the manifest in `/w/crates/a`, with no workspace above it.
@@ -772,6 +776,11 @@ by_tag = { git = "https://example.invalid/g", tag = "v1" }
         .expect_err("git and path at once");
 
         assert_eq!(error.kind(), TextErrorKind::Unreadable);
+        assert_eq!(
+            error.cargo_cannot_load(),
+            Some(CargoCannotLoad::GitAndPath),
+            "the shape a read that passes over manifests matches on"
+        );
         assert_eq!(
             error.detail(),
             "[dependencies] `g` writes both `git` and `path`, and Cargo allows only one of them"

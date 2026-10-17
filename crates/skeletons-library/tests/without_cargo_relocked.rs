@@ -93,6 +93,57 @@ fn an_outsiders_dependency_dropped_after_the_lock_is_reported_as_after_a_relock(
 }
 
 #[test]
+fn a_newer_worn_version_an_outsider_needs_is_refused_where_check_fails() -> TestOutcome {
+    // Given a lock made while `y`'s optional `z` was enabled by nothing, where `z` takes the
+    // worn `house-rules`, at 4.5.6, by path and asks for 4.6, then `y` edited so its default
+    // feature enables `z`: cargo cannot resolve the workspace, because no version of a path
+    // package is both 4.5.6 and 4.6, and `check` fails with cargo's words. A relock would fail
+    // too, so this is no stale lock to report through: `check_without_cargo` refuses, naming
+    // `z`'s manifest, the dependency and the package.
+    let fixture = Fixture::new()?;
+    let y_directory = fixture.write_crate("y", "0.1.0", Y_OPTIONAL_Z)?;
+    fixture.write_crate(
+        "z",
+        "0.1.0",
+        &format!(
+            "[dependencies]\nhouse-rules = {{ path = \"{}\", version = \"4.6\" }}\n",
+            fixture.house_rules_directory().display()
+        ),
+    )?;
+    fixture.write_member(
+        "tools",
+        &format!(
+            "{}{}",
+            fixture.rules_dependency(),
+            path_dependency("y", "y", &y_directory)
+        ),
+        &wearing_table("rules"),
+    )?;
+    fixture.generate_lockfile()?;
+    fixture.write_crate("y", "0.1.0", Y_DEFAULT_ENABLES_Z)?;
+
+    let Err(checked) = check(fixture.project()) else {
+        return Err("check read a workspace cargo cannot resolve".into());
+    };
+    let Err(refused) = check_without_cargo(fixture.project(), &PackageLocations::new()) else {
+        return Err("check_without_cargo read a workspace cargo cannot resolve".into());
+    };
+
+    assert!(checked.is_cargo_metadata_failed(), "{checked:?}");
+    assert!(refused.is_unsupported_without_cargo(), "{refused:?}");
+    let detail = refused.detail().unwrap_or_default();
+    assert!(
+        detail.ends_with(
+            "/z/Cargo.toml: `house-rules` requires `house-rules` `4.6`, which the worn \
+             package's locked version 4.5.6 does not meet within its compatible range, so \
+             cargo cannot resolve the workspace once a feature enables it"
+        ),
+        "{detail}"
+    );
+    Ok(())
+}
+
+#[test]
 fn the_stale_pair_is_not_vacuous_without_the_edit() -> TestOutcome {
     // Control for the two above: with `y` left as it was when locked, `check`
     // succeeds, so the abort they require comes from the edit and not from the

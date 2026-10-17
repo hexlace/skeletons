@@ -10,7 +10,7 @@
 //! source. What it does not decide needs Cargo's feature resolution or its configuration, and the
 //! library's readme names both.
 
-mod locked_source;
+pub(super) mod locked_source;
 mod reachability;
 
 use std::collections::BTreeSet;

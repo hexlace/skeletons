@@ -237,15 +237,19 @@ What it does not read, because only cargo does, it refuses by name rather than
 guess: `[patch]` and `[replace]` tables, a `package.workspace` key, one package
 declared under two dependency keys, two path packages with one name and
 version, a wearing whose own dependency is declared with `registry =`, a
-lockfile in a format other than 3 or 4, and in a cargo configuration file
-`paths`, `[patch]` or `include`. The configuration files are
+lockfile in a format other than 3 or 4, an optional dependency of a package
+outside the workspace that asks a worn package for a newer version than the
+locked one, in the range of versions cargo takes for the same package, and in a
+cargo configuration file `paths`, `[patch]` or `include`. The configuration
+files are
 `.cargo/config` (or `.cargo/config.toml` when there is no `config`) in the
 directory given and in each directory above it, then the cargo home's: the
 `CARGO_HOME` that is set and not empty, taken from the directory given when
 relative, and otherwise `.cargo` in a `HOME` that is set and not empty. The
 error has `is_unsupported_without_cargo` true, and `detail()` names the
 manifest or configuration file and what it uses. `check` reads such a workspace
-where cargo is available. A manifest, lockfile or configuration file that
+where cargo is available, except for that optional dependency once a feature
+enables it, where cargo cannot resolve the workspace at all. A manifest, lockfile or configuration file that
 cannot be read, or that cargo would refuse too, has
 `is_manifest_or_lockfile_unreadable` true instead.
 

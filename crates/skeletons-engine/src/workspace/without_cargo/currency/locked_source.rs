@@ -15,7 +15,10 @@ use crate::workspace::without_cargo::package_manifest::{DeclaredSource, GitRefer
 /// query. A registry declaration
 /// with no `registry =` name is locked from crates.io exactly, and one with a name from some
 /// registry: this reader has no Cargo configuration to say which index a name stands for.
-pub(super) fn agrees(locked: Option<&str>, declared: &DeclaredSource) -> bool {
+pub(in crate::workspace::without_cargo) fn agrees(
+    locked: Option<&str>,
+    declared: &DeclaredSource,
+) -> bool {
     match (declared, locked) {
         (DeclaredSource::Path { .. }, None) => true,
         (DeclaredSource::Path { .. }, Some(_))

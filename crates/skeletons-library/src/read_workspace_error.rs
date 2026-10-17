@@ -184,10 +184,16 @@ impl ReadWorkspaceError {
     /// `check_without_cargo` did not guess: `[patch]`, `[replace]`,
     /// `package.workspace`, one package under two dependency keys, two path
     /// packages with one name and version, a lockfile in a format other than 3
-    /// or 4, and in a cargo configuration file `paths`, `[patch]` or
-    /// `include`. [`detail`](Self::detail) names the manifest, lockfile or
-    /// configuration file and what it uses. `check` reads such a workspace
-    /// where cargo is available, and never makes this true. The command line has no word for it.
+    /// or 4, an optional dependency of a package outside the workspace that asks
+    /// a worn package for a version its locked one does not meet but its
+    /// compatible range could (cargo cannot resolve the workspace once a
+    /// feature enables it), and in a cargo configuration file `paths`,
+    /// `[patch]` or `include`. [`detail`](Self::detail) names the manifest,
+    /// lockfile or configuration file and what it uses. `check` reads such a
+    /// workspace where cargo is available, except for that optional dependency
+    /// once a feature enables it, where cargo cannot resolve the workspace and
+    /// `check` fails with [`is_cargo_metadata_failed`](Self::is_cargo_metadata_failed);
+    /// it never makes this true. The command line has no word for it.
     #[must_use]
     pub fn is_unsupported_without_cargo(&self) -> bool {
         matches!(self.kind, ErrorKind::UnsupportedWithoutCargo)

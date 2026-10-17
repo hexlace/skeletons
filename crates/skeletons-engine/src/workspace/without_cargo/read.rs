@@ -10,6 +10,7 @@ use super::document;
 use super::error::ReadWithoutCargoError;
 use super::layout;
 use super::lockfile::Lockfile;
+use super::optional_requirements::refuse_unmet_optional_requirements;
 use super::unsupported;
 use crate::workspace::schema::Document;
 use crate::workspace::{LockedPackageId, Workspace, from_document};
@@ -47,7 +48,9 @@ const LOCKFILE_NAME: &str = "Cargo.lock";
 /// such as `git@github.com:foo/bar.git`, are three),
 /// [`ReadWithoutCargoError::Unsupported`] when the workspace uses something only Cargo reads
 /// (`[patch]`, `[replace]`, `package.workspace`, one package under two dependency keys, a lockfile
-/// format other than 3 and 4, and in a configuration file `paths`, `[patch]` or `include`), and
+/// format other than 3 and 4, an optional dependency of a package outside the workspace that asks
+/// a worn package for a version in the range of the locked one that the locked one does not meet,
+/// and in a configuration file `paths`, `[patch]` or `include`), and
 /// [`ReadWithoutCargoError::Lockfile`] when `Cargo.lock` is missing or out of date. A missing
 /// `Cargo.lock` is that last error even when the workspace also uses something only Cargo reads.
 pub fn read_without_cargo(
@@ -94,6 +97,7 @@ pub(super) fn read_document(
     configuration.refuse_what_only_cargo_follows()?;
     unsupported::check(&layout)?;
     verify_lockfile_is_current(&lockfile, &layout.packages)?;
+    refuse_unmet_optional_requirements(&layout, &lockfile)?;
     document::build(&layout, &lockfile, locations)
 }
 

@@ -17,6 +17,7 @@ mod located;
 mod lock_entries;
 pub(super) mod lockfile;
 mod member_patterns;
+mod optional_requirements;
 pub(super) mod package_manifest;
 mod path_package;
 mod read;

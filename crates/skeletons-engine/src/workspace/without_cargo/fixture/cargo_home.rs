@@ -44,12 +44,23 @@ impl CargoHome {
     /// Adds the crate `name` at `version` to the directory that replaces crates.io in this home.
     /// A lockfile still names crates.io as the crate's source.
     pub(in crate::workspace::without_cargo) fn vendor(&self, name: &str, version: &str) {
-        let crate_directory = self.vendored().join(format!("{name}-{version}"));
+        self.vendor_with_dependencies(name, version, "");
+    }
+
+    /// Adds the crate `name` at `version` as [`vendor`](Self::vendor) does, with `dependencies`,
+    /// the text of its `[dependencies]` table and whatever follows, after its `[package]` table.
+    pub(in crate::workspace::without_cargo) fn vendor_with_dependencies(
+        &self,
+        name: &str,
+        version: &str,
+        dependencies: &str,
+    ) {
+        let crate_directory = self.vendored_directory(name, version);
         std::fs::create_dir_all(crate_directory.join("src")).expect("a crate directory");
         std::fs::write(crate_directory.join("src/lib.rs"), "").expect("a source file");
         std::fs::write(
             crate_directory.join("Cargo.toml"),
-            format!("[package]\nname = \"{name}\"\nversion = \"{version}\"\n"),
+            format!("[package]\nname = \"{name}\"\nversion = \"{version}\"\n{dependencies}"),
         )
         .expect("a manifest");
         std::fs::write(
@@ -138,6 +149,16 @@ impl CargoHome {
             .env("CARGO_HOME", self.path())
             .env("HOME", self.home.path());
         command
+    }
+
+    /// The directory [`vendor`](Self::vendor) puts the crate `name` at `version` in, which is
+    /// where a `cargo metadata` document says its manifest is.
+    pub(in crate::workspace::without_cargo) fn vendored_directory(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> PathBuf {
+        self.vendored().join(format!("{name}-{version}"))
     }
 
     fn vendored(&self) -> PathBuf {

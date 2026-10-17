@@ -197,7 +197,10 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 /// guessed at: `[patch]`, `[replace]`, `package.workspace`, one package under
 /// two dependency keys, two path packages with one name and version, a wearing
 /// whose own dependency is declared with `registry =`, a lockfile in a format
-/// other than 3 or 4, and in a configuration file `paths`, `[patch]` or
+/// other than 3 or 4, an optional dependency of a package outside the workspace
+/// that asks a worn package for a version the lock does not name but that
+/// version's compatible range could (cargo cannot resolve the workspace once a
+/// feature enables it), and in a configuration file `paths`, `[patch]` or
 /// `include`.
 ///
 /// The call writes nothing, runs no build script, needs no git and makes no
@@ -215,9 +218,13 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 ///   is one cargo would refuse too.
 /// - [`is_unsupported_without_cargo`](ReadWorkspaceError::is_unsupported_without_cargo)
 ///   when the workspace uses something only cargo reads, a wearing whose own
-///   dependency is declared with `registry =`, and `paths`, `[patch]` or
-///   `include` in a configuration file, among them. `check` reads it where
-///   cargo is available.
+///   dependency is declared with `registry =`, an optional dependency that
+///   asks a worn package for a newer version in the range of its locked one,
+///   and `paths`, `[patch]` or `include` in a configuration file, among them.
+///   `check` reads it where cargo is available, except for that optional
+///   dependency once a feature enables it: cargo cannot resolve the workspace
+///   then, and `check` fails with
+///   [`is_cargo_metadata_failed`](ReadWorkspaceError::is_cargo_metadata_failed).
 ///
 /// [`is_cargo_metadata_failed`](ReadWorkspaceError::is_cargo_metadata_failed),
 /// [`is_cargo_not_started`](ReadWorkspaceError::is_cargo_not_started) and

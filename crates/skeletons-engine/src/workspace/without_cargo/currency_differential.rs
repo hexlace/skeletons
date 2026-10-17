@@ -18,21 +18,24 @@
 //! Cargo: a test that has a home passes it to the reader as its `CARGO_HOME`, and one that has
 //! none gives the reader no home, so that the files of whoever runs the tests are never read.
 //!
-//! The cases for path packages are here, and those for git and registry packages, and for
-//! Cargo's configuration files, are in the files beside them.
+//! The cases for path packages are here, and those for git and registry packages, for Cargo's
+//! configuration files, and for an optional dependency that asks a worn package for a version
+//! the lock does not name, are in the files beside them.
 
 mod configuration;
 mod git;
+mod optional_requirements;
 mod registry;
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use super::cargo_configuration::HomeVariables;
 use super::differential::shape;
 use super::error::ReadWithoutCargoError;
 use super::fixture::{CargoHome, Fixture, cargo_version};
 use super::read::read_document;
-use crate::workspace::{Network, ReadWorkspaceError, cargo_metadata};
+use crate::workspace::{LockedPackageId, Network, ReadWorkspaceError, cargo_metadata};
 
 /// What a reader of a workspace says of its lockfile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -348,6 +351,43 @@ fn assert_stale_report_is_the_relocked_one(fixture: &Fixture) {
 
     // The whole graph is not compared: the lock the reader read lists `z` where the relocked
     // one does not, or the other way round, and no member's edge reaches it.
+    assert_eq!(
+        shape(&stale).reached_by_members(),
+        shape(&relocked).reached_by_members(),
+        "on {toolchain}"
+    );
+}
+
+/// [`assert_stale_report_is_the_relocked_one`] for a workspace locked in the Cargo home `home`,
+/// which the reader is given as its `CARGO_HOME` too, with `locations` for the packages from a
+/// registry that the document should hold.
+///
+/// Cargo brings the lock up to date with `cargo generate-lockfile` in `home`, which is the lock
+/// Cargo would write only when the registry holds nothing newer than the lock needs: a test
+/// vendors only the versions the relocked workspace is to use.
+fn assert_stale_report_is_the_relocked_one_in_home(
+    fixture: &Fixture,
+    home: &CargoHome,
+    locations: &BTreeMap<LockedPackageId, PathBuf>,
+) {
+    let toolchain = cargo_version();
+    assert_eq!(
+        cargo_verdict_in_home(fixture, home),
+        Verdict::Aborted,
+        "cargo, before the lock is brought up to date, on {toolchain}"
+    );
+    let stale = read_document(
+        &fixture.root,
+        locations,
+        &HomeVariables::cargo_home(home.path()),
+    )
+    .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the stale lock: {error}"));
+
+    home.lock(&fixture.root, Network::Refused)
+        .unwrap_or_else(|stderr| panic!("{toolchain} could not relock the workspace: {stderr}"));
+    let relocked = cargo_metadata::fetch_in_cargo_home(&fixture.root, home.path(), home.home())
+        .unwrap_or_else(|error| panic!("{toolchain}: cargo refused the relocked lock: {error:?}"));
+
     assert_eq!(
         shape(&stale).reached_by_members(),
         shape(&relocked).reached_by_members(),

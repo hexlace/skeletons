@@ -4,6 +4,7 @@
 mod cargo_metadata;
 mod crate_name;
 mod locate;
+mod locked_package_id;
 #[cfg(feature = "commands")]
 mod pin;
 #[cfg(feature = "commands")]
@@ -18,6 +19,7 @@ pub use cargo_metadata::ReadWorkspaceError;
 #[cfg(feature = "commands")]
 pub(crate) use crate_name::{same_crate, underscored};
 pub(crate) use locate::PackageIdentity;
+pub use locked_package_id::LockedPackageId;
 #[cfg(feature = "commands")]
 pub(crate) use pin::{CRATES_IO_SOURCE, Pin};
 #[cfg(feature = "commands")]
@@ -30,7 +32,7 @@ pub(crate) use wearing_table::ShapeFound;
 pub use worn::WornDependency;
 pub(crate) use worn::WornId;
 
-use locate::LocateRefusal;
+use locate::{LocateRefusal, Target};
 use schema::{Document, Package};
 use wearing_table::{TableEntryRefusal, WholeTableRefusal};
 
@@ -99,7 +101,21 @@ pub(crate) enum WearingRefusal {
         dependency: String,
         package: PackageIdentity,
     },
+    /// The declared dependency resolved to one locked package whose files
+    /// are not available, so whether it is a skeleton is unknown.
+    Unlocated {
+        manifest: String,
+        dependency: String,
+        package: LockedPackageId,
+    },
 }
+
+/// Why a command meets no [`WearingRefusal::Unlocated`], for the arms that
+/// state it cannot happen: only a reader that does not run cargo makes one,
+/// and no command reads that way.
+#[cfg(feature = "commands")]
+pub(crate) const UNLOCATED_NEVER_MET: &str =
+    "only read_without_cargo makes an Unlocated refusal, and no command reads without cargo";
 
 /// Whether [`read`] may let `cargo metadata` reach the network for a locked
 /// source it does not already have.
@@ -252,7 +268,20 @@ fn read_one_wearing(
     };
 
     let skeleton = match locate::locate(document, member, declared) {
-        Ok(skeleton) => skeleton,
+        Ok(Target::Package(skeleton)) => skeleton,
+        // Checked before `declares_skeleton`: with no manifest to read, whether
+        // the package is a skeleton is unknown, not "no".
+        Ok(Target::Unlocated(unlocated)) => {
+            return Wearing::Refused(WearingRefusal::Unlocated {
+                manifest: manifest.to_owned(),
+                dependency: key.to_owned(),
+                package: LockedPackageId {
+                    name: unlocated.name.clone(),
+                    version: unlocated.version.clone(),
+                    source: unlocated.source.clone(),
+                },
+            });
+        }
         Err(LocateRefusal::Unresolved) => {
             return Wearing::Refused(WearingRefusal::Unresolved {
                 manifest: manifest.to_owned(),
@@ -357,9 +386,78 @@ pub(crate) fn relative_to_root(root: &Path, path: &Path) -> String {
 mod tests {
     use serde_json::json;
 
-    use super::schema::Dependency;
+    use super::schema::{
+        Dependency, Document, Node, NodeDependency, Package, Resolve, UnlocatedPackage,
+    };
     use super::wearing_table::TableEntryRefusal;
-    use super::{WearingRefusal, declares_skeleton, entry_refusal, relative_to_root};
+    use super::{
+        LockedPackageId, Wearing, WearingRefusal, declares_skeleton, entry_refusal, from_document,
+        relative_to_root,
+    };
+
+    /// A document with one member wearing `house-rules`, whose only resolve
+    /// edge points at a package that only the `unlocated` list holds.
+    fn wearing_an_unlocated_package() -> Document {
+        let member = Package {
+            id: "id-wearer".to_owned(),
+            name: "wearer".to_owned(),
+            version: "0.1.0".to_owned(),
+            #[cfg(feature = "commands")]
+            source: None,
+            manifest_path: "/WORKSPACE/Cargo.toml".into(),
+            dependencies: vec![Dependency {
+                name: "house-rules".to_owned(),
+                rename: None,
+            }],
+            metadata: json!({"skeletons": {"house-rules": {}}}),
+        };
+        Document {
+            version: 1,
+            workspace_root: "/WORKSPACE".into(),
+            workspace_members: vec!["id-wearer".to_owned()],
+            packages: vec![member],
+            resolve: Resolve {
+                nodes: vec![Node {
+                    id: "id-wearer".to_owned(),
+                    deps: vec![NodeDependency {
+                        name: "house_rules".to_owned(),
+                        pkg: "id-house-rules".to_owned(),
+                    }],
+                }],
+            },
+            unlocated: vec![UnlocatedPackage {
+                id: "id-house-rules".to_owned(),
+                name: "house-rules".to_owned(),
+                version: "4.5.6".to_owned(),
+                source: "registry+https://example.test/index".to_owned(),
+            }],
+        }
+    }
+
+    #[test]
+    fn a_wearing_of_an_unlocated_package_is_refused_as_unlocated() {
+        // The package has no manifest, so whether it is a skeleton is
+        // unknown: the wearing must be refused as unlocated, naming the exact
+        // lockfile identity, and not as `not-a-skeleton`, which would claim
+        // its manifest was read and held no skeletons table.
+        let workspace = from_document(&wearing_an_unlocated_package());
+
+        let [Wearing::Refused(refusal)] = workspace.wearing.as_slice() else {
+            panic!("expected exactly one refused wearing");
+        };
+        assert_eq!(
+            *refusal,
+            WearingRefusal::Unlocated {
+                manifest: "Cargo.toml".to_owned(),
+                dependency: "house-rules".to_owned(),
+                package: LockedPackageId {
+                    name: "house-rules".to_owned(),
+                    version: "4.5.6".to_owned(),
+                    source: "registry+https://example.test/index".to_owned(),
+                },
+            }
+        );
+    }
 
     #[test]
     fn a_package_with_a_skeletons_table_declares_a_skeleton() {

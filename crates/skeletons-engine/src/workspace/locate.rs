@@ -5,7 +5,7 @@
 use std::collections::BTreeSet;
 
 use super::crate_name::underscored;
-use super::schema::{Dependency, Document, Package};
+use super::schema::{Dependency, Document, Package, UnlocatedPackage};
 
 /// Whether `dependencies` (a member's own `[dependencies]`, `[dev-dependencies]`,
 /// `[build-dependencies]`, or a target-specific table — `cargo metadata`
@@ -46,6 +46,47 @@ pub(crate) enum LocateRefusal {
     Ambiguous { packages: Vec<PackageIdentity> },
 }
 
+/// The one locked package a declared dependency names: one whose manifest is
+/// known, or one the resolve graph names that has no manifest to read.
+#[derive(Debug)]
+pub(crate) enum Target<'a> {
+    Package(&'a Package),
+    Unlocated(&'a UnlocatedPackage),
+}
+
+impl Target<'_> {
+    fn name(&self) -> &str {
+        match self {
+            Self::Package(package) => &package.name,
+            Self::Unlocated(unlocated) => &unlocated.name,
+        }
+    }
+
+    fn version(&self) -> &str {
+        match self {
+            Self::Package(package) => &package.version,
+            Self::Unlocated(unlocated) => &unlocated.version,
+        }
+    }
+}
+
+/// Finds the package `id` names, in the located packages or the unlocated
+/// ones.
+fn find_target<'a>(document: &'a Document, id: &str) -> Option<Target<'a>> {
+    document
+        .packages
+        .iter()
+        .find(|package| package.id == id)
+        .map(Target::Package)
+        .or_else(|| {
+            document
+                .unlocated
+                .iter()
+                .find(|unlocated| unlocated.id == id)
+                .map(Target::Unlocated)
+        })
+}
+
 /// Resolves `declared` — found under workspace member `member`'s own
 /// `[dependencies]` — to the one locked package it names.
 ///
@@ -67,7 +108,8 @@ pub(crate) enum LocateRefusal {
 /// # Panics
 ///
 /// Panics if `member` has no resolve node, or if a resolve node names a
-/// package id absent from `document.packages` — both contradict cargo's own
+/// package id absent from both `document.packages` and `document.unlocated` —
+/// both contradict cargo's own
 /// documented `--format-version 1` shape (`resolve.nodes` carries exactly
 /// one entry per package, and every edge's `pkg` is a package cargo also
 /// lists), so either is a defect in cargo's own output, not a case this
@@ -76,7 +118,7 @@ pub(crate) fn locate<'a>(
     document: &'a Document,
     member: &Package,
     declared: &Dependency,
-) -> Result<&'a Package, LocateRefusal> {
+) -> Result<Target<'a>, LocateRefusal> {
     let Some(node) = document
         .resolve
         .nodes
@@ -92,11 +134,7 @@ pub(crate) fn locate<'a>(
     let claimed_by_a_rename = names_taken_by_renames(&member.dependencies, &declared.name);
     let mut distinct_ids: Vec<&str> = Vec::new();
     for edge in &node.deps {
-        let Some(candidate) = document
-            .packages
-            .iter()
-            .find(|package| package.id == edge.pkg)
-        else {
+        let Some(candidate) = find_target(document, &edge.pkg) else {
             unreachable!(
                 "cargo metadata lists every package a resolve node names, including {}",
                 edge.pkg
@@ -106,7 +144,7 @@ pub(crate) fn locate<'a>(
         // `name` is the name of the package it resolves to), so this is package
         // identity, not a name a person typed: compared exactly. Two packages
         // spelt `a-b` and `a_b` can sit in one graph, and are two packages.
-        if candidate.name != declared.name {
+        if candidate.name() != declared.name {
             continue;
         }
         let is_declareds_own_edge = declared.rename.as_deref().map_or_else(
@@ -121,16 +159,16 @@ pub(crate) fn locate<'a>(
     match distinct_ids.as_slice() {
         [] => Err(LocateRefusal::Unresolved),
         [only] => {
-            let Some(package) = document.packages.iter().find(|package| package.id == *only) else {
-                unreachable!("distinct_ids only ever holds an id already found in packages")
+            let Some(target) = find_target(document, only) else {
+                unreachable!("distinct_ids only ever holds an id already found in the document")
             };
-            Ok(package)
+            Ok(target)
         }
         many => Err(LocateRefusal::Ambiguous {
             packages: many
                 .iter()
-                .filter_map(|id| document.packages.iter().find(|package| package.id == *id))
-                .map(|package| (package.name.clone(), package.version.clone()))
+                .filter_map(|id| find_target(document, id))
+                .map(|target| (target.name().to_owned(), target.version().to_owned()))
                 .collect(),
         }),
     }
@@ -165,8 +203,27 @@ fn names_taken_by_renames(
 
 #[cfg(test)]
 mod tests {
-    use super::{LocateRefusal, declares_dependency_key, find_declared, locate};
-    use crate::workspace::schema::{Dependency, Document, Node, NodeDependency, Package, Resolve};
+    use super::{
+        LocateRefusal, Target, declares_dependency_key, find_declared, locate as locate_target,
+    };
+    use crate::workspace::schema::{
+        Dependency, Document, Node, NodeDependency, Package, Resolve, UnlocatedPackage,
+    };
+
+    /// [`locate_target`] for the tests whose package has a manifest: the
+    /// located package, or the refusal.
+    fn locate<'a>(
+        document: &'a Document,
+        member: &Package,
+        declared: &Dependency,
+    ) -> Result<&'a Package, LocateRefusal> {
+        match locate_target(document, member, declared)? {
+            Target::Package(package) => Ok(package),
+            Target::Unlocated(unlocated) => {
+                panic!("expected a located package, got unlocated {}", unlocated.id)
+            }
+        }
+    }
 
     /// Builds a resolved package with no declared dependencies of its own —
     /// every test skeleton this file locates.
@@ -206,7 +263,89 @@ mod tests {
             workspace_members: Vec::new(),
             packages,
             resolve: Resolve { nodes },
+            unlocated: Vec::new(),
         }
+    }
+
+    /// A package the lockfile names and no manifest backs.
+    fn unlocated(id: &str, name: &str) -> UnlocatedPackage {
+        UnlocatedPackage {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            version: "4.5.6".to_owned(),
+            source: "registry+https://example.test/index".to_owned(),
+        }
+    }
+
+    #[test]
+    fn an_edge_to_an_unlocated_package_resolves_to_it() {
+        // The wearer's resolve node has one edge, to a package that only the
+        // `unlocated` list holds. `locate` must find it there and say so
+        // rather than report the dependency as resolving to nothing.
+        let mut document = document(
+            Vec::new(),
+            vec![Node {
+                id: "id-wearer".to_owned(),
+                deps: vec![NodeDependency {
+                    name: "house_rules".to_owned(),
+                    pkg: "id-house-rules".to_owned(),
+                }],
+            }],
+        );
+        document
+            .unlocated
+            .push(unlocated("id-house-rules", "house-rules"));
+        let member = member("id-wearer", vec![dependency("house-rules", None)]);
+
+        let target = locate_target(&document, &member, &dependency("house-rules", None))
+            .expect("must resolve");
+
+        assert!(
+            matches!(target, Target::Unlocated(found) if found.id == "id-house-rules"),
+            "expected the unlocated package, got {target:?}"
+        );
+    }
+
+    #[test]
+    fn two_versions_split_between_located_and_unlocated_are_ambiguous() {
+        // One dependency whose edges reach a located 0.1.0 and an unlocated
+        // 4.5.6 of the same name is ambiguous, and names both versions.
+        let mut document = document(
+            vec![package("id-located", "house-rules", "0.1.0")],
+            vec![Node {
+                id: "id-wearer".to_owned(),
+                deps: vec![
+                    NodeDependency {
+                        name: "house_rules".to_owned(),
+                        pkg: "id-located".to_owned(),
+                    },
+                    NodeDependency {
+                        name: "house_rules".to_owned(),
+                        pkg: "id-house-rules".to_owned(),
+                    },
+                ],
+            }],
+        );
+        document
+            .unlocated
+            .push(unlocated("id-house-rules", "house-rules"));
+        let member = member("id-wearer", vec![dependency("house-rules", None)]);
+
+        let refusal = locate_target(&document, &member, &dependency("house-rules", None))
+            .expect_err("must be ambiguous");
+
+        assert!(
+            matches!(
+                &refusal,
+                LocateRefusal::Ambiguous { packages }
+                    if *packages
+                        == vec![
+                            ("house-rules".to_owned(), "0.1.0".to_owned()),
+                            ("house-rules".to_owned(), "4.5.6".to_owned()),
+                        ]
+            ),
+            "got {refusal:?}"
+        );
     }
 
     /// Builds a declared `[dependencies]` entry — `Dependency` derives

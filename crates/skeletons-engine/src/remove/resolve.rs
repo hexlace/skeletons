@@ -10,7 +10,7 @@
 
 use super::names::{ManifestShown, WearingKey};
 use super::non_empty::NonEmpty;
-use crate::workspace::{Declared, Wearing, WearingRefusal, Workspace};
+use crate::workspace::{Declared, UNLOCATED_NEVER_MET, Wearing, WearingRefusal, Workspace};
 
 /// What the workspace reader made of a wearing, as far as the success message
 /// needs it: whether its dependency resolved to a skeleton it can name.
@@ -247,6 +247,7 @@ fn refused_key(refusal: &WearingRefusal) -> Option<(&str, &str)> {
             dependency,
             ..
         } => Some((manifest.as_str(), dependency.as_str())),
+        WearingRefusal::Unlocated { .. } => unreachable!("{UNLOCATED_NEVER_MET}"),
     }
 }
 
@@ -259,6 +260,7 @@ fn refused_crate(refusal: &WearingRefusal) -> Option<&str> {
         WearingRefusal::ReservedKey { .. }
         | WearingRefusal::NamesNoDependency { .. }
         | WearingRefusal::Ambiguous { .. } => None,
+        WearingRefusal::Unlocated { .. } => unreachable!("{UNLOCATED_NEVER_MET}"),
     }
 }
 

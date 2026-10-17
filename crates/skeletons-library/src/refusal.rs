@@ -126,6 +126,11 @@ impl RefusalKind {
             skeletons_engine::RefusalKind::SkeletonInvalid => Self::SkeletonInvalid,
             skeletons_engine::RefusalKind::Overlap => Self::Overlap,
             skeletons_engine::RefusalKind::UnsafePath => Self::UnsafePath,
+            skeletons_engine::RefusalKind::Unlocated => {
+                unreachable!(
+                    "only a read without cargo makes an unlocated refusal, and check reads through cargo"
+                )
+            }
         }
     }
 }

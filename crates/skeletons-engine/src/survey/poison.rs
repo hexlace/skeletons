@@ -41,7 +41,7 @@ pub(crate) fn claim(text: &str) -> ClaimPath {
 /// How many kinds of [`RefusalKind`] there are. The match in [`kind_index`]
 /// has no wildcard, so a variant added without an arm does not compile, and
 /// the samples that go through [`assert_every_kind`] must then cover it.
-pub(crate) const REFUSAL_KINDS: usize = 10;
+pub(crate) const REFUSAL_KINDS: usize = 11;
 
 /// The index of a refusal kind, below [`REFUSAL_KINDS`].
 pub(crate) const fn kind_index(kind: RefusalKind) -> usize {
@@ -56,6 +56,7 @@ pub(crate) const fn kind_index(kind: RefusalKind) -> usize {
         RefusalKind::SkeletonInvalid => 7,
         RefusalKind::Overlap => 8,
         RefusalKind::UnsafePath => 9,
+        RefusalKind::Unlocated => 10,
     }
 }
 

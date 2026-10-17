@@ -67,7 +67,9 @@ mod workspace;
 
 pub use claim::{ClaimPath, Claimant, Drift, DriftReason};
 pub use survey::{RefusalKind, RefusalRecord, RefusedWearing, Row, Survey, survey};
-pub use workspace::{Network, ReadWorkspaceError, Workspace, WornDependency, read};
+pub use workspace::{
+    LockedPackageId, Network, ReadWorkspaceError, Workspace, WornDependency, read,
+};
 
 // Tests for `skeleton::render`, read from real skeleton crates under
 // `test-skeletons/`, which `exclude = ["/test-skeletons"]` in this crate's manifest

@@ -9,7 +9,9 @@
 use super::refusal::WearRefusal;
 use super::request::Key;
 use crate::survey::Refusal;
-use crate::workspace::{Wearing, WearingRefusal, Workspace, WornDependency, same_crate};
+use crate::workspace::{
+    UNLOCATED_NEVER_MET, Wearing, WearingRefusal, Workspace, WornDependency, same_crate,
+};
 
 /// The skeleton that is now worn, as the success message names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,6 +143,7 @@ fn refusal_location(refusal: &WearingRefusal) -> (&str, Option<&str>) {
             dependency,
             ..
         } => (manifest, Some(dependency)),
+        WearingRefusal::Unlocated { .. } => unreachable!("{UNLOCATED_NEVER_MET}"),
     }
 }
 

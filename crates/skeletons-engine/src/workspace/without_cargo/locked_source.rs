@@ -29,25 +29,48 @@ pub(super) fn agrees(locked: Option<&str>, declared: &DeclaredSource) -> bool {
     }
 }
 
+/// Whether the lock's git `source` has a query that is not exactly one of `tag`, `branch` and
+/// `rev`: a query of the dependency URL's own, which Cargo keeps in the source and writes the
+/// reference after (`git+<url>?x=1?branch=dev#<commit>`), or one that names no reference.
+///
+/// This reader compares no such source, so reading the lockfile refuses it by name, before
+/// [`agrees`] could call the lock out of date for a source Cargo reads back as current. A source
+/// that is not a git one has no such query.
+pub(super) fn has_unread_query(source: &str) -> bool {
+    match split_git_source(source) {
+        Some((_url, Some(query))) => parsed_git_query(query).is_none(),
+        Some((_, None)) | None => false,
+    }
+}
+
 /// Whether the git `source` `git+<url>[?<query>]#<commit>` is `url` at `reference`, the URLs
-/// compared as Cargo canonicalises them. A locked URL that is not one Cargo reads is not `url`.
+/// compared as Cargo canonicalises them. A locked URL that is not one Cargo reads is not `url`,
+/// and neither is a source whose query is not exactly one reference, which the lockfile read
+/// refuses before it gets here ([`has_unread_query`]).
 fn git_agrees(source: &str, url: &CanonicalGitUrl, reference: &GitReference) -> bool {
-    let Some(without_kind) = source.strip_prefix("git+") else {
+    let Some((locked_url, query)) = split_git_source(source) else {
         return false;
-    };
-    let without_commit = without_kind
-        .split_once('#')
-        .map_or(without_kind, |(before, _commit)| before);
-    let (locked_url, query) = match without_commit.split_once('?') {
-        Some((locked_url, query)) => (locked_url, Some(query)),
-        None => (without_commit, None),
     };
     CanonicalGitUrl::parse(locked_url).as_ref() == Ok(url)
         && locked_reference(query).as_ref() == Some(reference)
 }
 
+/// The URL and the query of the git `source` `git+<url>[?<query>]#<commit>`, cut at the first
+/// `#` and then the first `?`; `None` for a source that is not a git one.
+fn split_git_source(source: &str) -> Option<(&str, Option<&str>)> {
+    let without_kind = source.strip_prefix("git+")?;
+    let without_commit = without_kind
+        .split_once('#')
+        .map_or(without_kind, |(before, _commit)| before);
+    Some(match without_commit.split_once('?') {
+        Some((url, query)) => (url, Some(query)),
+        None => (without_commit, None),
+    })
+}
+
 /// The reference a git source's `query` names: the remote's default branch when there is none,
-/// and nothing when the query is not exactly one of `tag`, `branch` and `rev`.
+/// and nothing when the query is not exactly one of `tag`, `branch` and `rev`, which is a query
+/// [`has_unread_query`] says so of.
 fn locked_reference(query: Option<&str>) -> Option<GitReference> {
     query.map_or(Some(GitReference::DefaultBranch), |query| {
         parsed_git_query(query).map(|decoded| match decoded {
@@ -70,7 +93,7 @@ fn registry_agrees(source: &str, registry: Option<&str>) -> bool {
 mod tests {
     use std::path::PathBuf;
 
-    use super::agrees;
+    use super::{agrees, has_unread_query};
     use crate::workspace::without_cargo::canonical_git_url::CanonicalGitUrl;
     use crate::workspace::without_cargo::package_manifest::{DeclaredSource, GitReference};
 
@@ -101,6 +124,21 @@ mod tests {
             Some("registry+https://example.test/index"),
             &path()
         ));
+    }
+
+    #[test]
+    fn only_a_git_source_with_a_query_that_is_not_one_reference_has_an_unread_query() {
+        // The query is read as one `branch`, `tag` or `rev`; a query of the URL's own before it,
+        // an unknown key and an empty query are not, and a source that is not a git one has none.
+        for query in ["?branch=main", "?tag=v1", "?rev=3f2a9c1d", ""] {
+            let source = format!("git+https://example.test/g{query}#{COMMIT}");
+            assert!(!has_unread_query(&source), "{source}");
+        }
+        for query in ["?x=1", "?x=1?branch=dev", "?ref=v1", "?"] {
+            let source = format!("git+https://example.test/g{query}#{COMMIT}");
+            assert!(has_unread_query(&source), "{source}");
+        }
+        assert!(!has_unread_query("registry+https://example.test/index?x=1"));
     }
 
     #[test]

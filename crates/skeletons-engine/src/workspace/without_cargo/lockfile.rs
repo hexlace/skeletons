@@ -2,6 +2,7 @@
 
 use serde::Deserialize;
 
+use super::locked_source;
 use super::text_error::TextError;
 
 /// The lockfile format versions this reader follows. Cargo writes `3` from 1.53 and `4` from 1.78;
@@ -55,13 +56,15 @@ struct DependencyEntry<'text> {
 }
 
 impl Lockfile {
-    /// Reads a lockfile's text, refusing a format other than 3 or 4 and any dependency entry that
-    /// does not name exactly one package.
+    /// Reads a lockfile's text, refusing a format other than 3 or 4, a git source whose query is
+    /// not exactly one `branch`, `tag` or `rev`, and any dependency entry that does not name
+    /// exactly one package.
     ///
     /// # Errors
     ///
-    /// Unsupported for a format version other than 3 or 4, or none. Unreadable for text that is
-    /// not a lockfile, and for a dependency entry that names no package or several.
+    /// Unsupported for a format version other than 3 or 4, or none, and for a git source with a
+    /// query of the dependency URL's own, which Cargo keeps. Unreadable for text that is not a
+    /// lockfile, and for a dependency entry that names no package or several.
     pub(crate) fn parse(text: &str) -> Result<Self, TextError> {
         let format: RawFormat = toml::from_str(text).map_err(|error| {
             TextError::unreadable(format!("Cargo.lock is not valid TOML: {error}"))
@@ -84,6 +87,9 @@ impl Lockfile {
         let raw: RawLockfile = toml::from_str(text).map_err(|error| {
             TextError::unreadable(format!("Cargo.lock is not a lockfile: {error}"))
         })?;
+        raw.package
+            .iter()
+            .try_for_each(refused_for_an_unread_query)?;
         let entries = raw
             .package
             .iter()
@@ -140,6 +146,22 @@ impl LockEntry {
     #[must_use]
     pub(crate) const fn is_replaced(&self) -> bool {
         self.replaced
+    }
+}
+
+/// Refuses `package` when it is locked from a git source whose query is not exactly one
+/// reference, which is what Cargo writes for a dependency URL that has a query of its own.
+fn refused_for_an_unread_query(package: &RawPackage) -> Result<(), TextError> {
+    match package.source.as_deref() {
+        Some(source) if locked_source::has_unread_query(source) => {
+            Err(TextError::unsupported(format!(
+                "Cargo.lock: package `{}` {} is locked from `{source}`, whose query is not one \
+                 `branch`, `tag` or `rev`; Cargo keeps a query of the URL's own in the source, \
+                 which this reader does not follow",
+                package.name, package.version
+            )))
+        }
+        Some(_) | None => Ok(()),
     }
 }
 
@@ -634,6 +656,77 @@ name = "a"
     #[test]
     fn a_lockfile_with_no_packages_has_no_entries() {
         assert!(parsed("version = 4\n").entries().is_empty());
+    }
+
+    /// A lockfile of one package `g` 1.0.0 locked from the git `source`.
+    fn locked_from(source: &str) -> String {
+        format!(
+            "version = 4\n\n[[package]]\nname = \"g\"\nversion = \"1.0.0\"\nsource = \"{source}\"\n"
+        )
+    }
+
+    #[test]
+    fn a_git_source_with_no_query_or_one_reference_is_read() {
+        // The controls for the refusal below: Cargo writes no query for the default branch and
+        // one `branch`, `tag` or `rev` otherwise, and each is read, a `/` percent-encoded.
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        for query in [
+            "",
+            "?branch=main",
+            "?tag=v1",
+            "?rev=3f2a9c1d",
+            "?branch=feat%2Fx",
+        ] {
+            let source = format!("git+https://example.test/g{query}#{commit}");
+
+            assert!(Lockfile::parse(&locked_from(&source)).is_ok(), "{source}");
+        }
+    }
+
+    #[test]
+    fn a_git_source_with_a_query_that_is_not_one_reference_is_unsupported() {
+        // Cargo keeps a query the URL had in the source (`?x=1`) and writes the reference after
+        // it (`?x=1?branch=dev`); an unknown key (`?ref=v1`), an empty query and two references
+        // are none of the shapes that name one. The reader does not model the first two, and
+        // the refusal comes from reading the lockfile, before currency can call it stale.
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        for query in [
+            "?x=1",
+            "?x=1?branch=dev",
+            "?ref=v1",
+            "?",
+            "?branch=main&tag=v1",
+        ] {
+            let source = format!("git+https://example.test/g{query}#{commit}");
+
+            let error = Lockfile::parse(&locked_from(&source)).expect_err(&source);
+
+            assert_eq!(error.kind(), TextErrorKind::Unsupported, "{source}");
+            assert_eq!(
+                error.detail(),
+                format!(
+                    "Cargo.lock: package `g` 1.0.0 is locked from `{source}`, whose query is not \
+                     one `branch`, `tag` or `rev`; Cargo keeps a query of the URL's own in the \
+                     source, which this reader does not follow"
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn a_registry_or_path_source_is_not_judged_by_a_query() {
+        // Only a git source carries a reference in its query; a registry's index URL is left
+        // alone, as is a package with no source.
+        for source in [
+            "registry+https://example.test/index?x=1",
+            "sparse+https://example.test/index/?x=1",
+        ] {
+            assert!(Lockfile::parse(&locked_from(source)).is_ok(), "{source}");
+        }
+        assert!(
+            Lockfile::parse("version = 4\n\n[[package]]\nname = \"g\"\nversion = \"1.0.0\"\n")
+                .is_ok()
+        );
     }
 
     /// A package as the generator holds it, before it is written as lockfile text: the source is

@@ -2280,7 +2280,12 @@ cargo reads a package and never which package the lock names, so the report
 cannot differ. Two spellings of one git repository are one source after cargo's
 canonicalisation, which the lock holds only one spelling of; comparing the URLs
 as written would call a lock cargo just wrote stale, and so the reader ports
-that canonicalisation and does not compare text.
+that canonicalisation and does not compare text. A git URL with a query of its
+own is the one shape it does not port: cargo keeps that query in the lock's
+source and writes the reference after it (`?x=1?branch=dev`), and reproducing
+that is not worth it for a shape this rare, so a manifest URL with any query,
+an empty one included, and a lock source whose query is not exactly one `branch`,
+`tag` or `rev` are refused by name, before currency could call the lock stale.
 
 The optional-dependency refusal covers an optional dependency of a package
 outside the workspace, or of a path package one reaches, whose requirement on a

@@ -48,7 +48,8 @@ const LOCKFILE_NAME: &str = "Cargo.lock";
 /// such as `git@github.com:foo/bar.git`, are three),
 /// [`ReadWithoutCargoError::Unsupported`] when the workspace uses something only Cargo reads
 /// (`[patch]`, `[replace]`, `package.workspace`, one package under two dependency keys, a lockfile
-/// format other than 3 and 4, an optional dependency of a package outside the workspace that asks
+/// format other than 3 and 4, a `git` URL with a query of its own and a locked git source whose
+/// query is not one `branch`, `tag` or `rev`, an optional dependency of a package outside the workspace that asks
 /// a worn package for a version the locked one does not meet and Cargo cannot add beside it, which
 /// is a version in the locked one's range for a registry package and any for a path or git
 /// package, and in a configuration file `paths`, `[patch]` or `include`), and
@@ -278,6 +279,33 @@ mod tests {
             (
                 vec!["app/Cargo.toml house-rules house-rules 4.5.6".to_owned()],
                 vec![]
+            )
+        );
+    }
+
+    #[test]
+    fn a_lock_with_a_query_of_the_urls_own_is_refused_not_called_out_of_date() {
+        // The manifest writes the URL plain, so the lock's `?x=1` is not what it asks for and
+        // currency would call the lock stale. The lockfile is read first, and refuses it by
+        // name, as unsupported and not as `Lockfile`.
+        let source = "git+https://example.test/house-rules?x=1#0123456789abcdef";
+        let fixture = wearer(
+            "{ git = \"https://example.test/house-rules\" }",
+            &lock_of_app_and_skeleton(Some(source)),
+        );
+
+        let error = read(&fixture).err().expect("a source this reader refuses");
+
+        let ReadWithoutCargoError::Unsupported { detail } = error else {
+            panic!("expected a refusal, got {error:?}");
+        };
+        assert_eq!(
+            detail,
+            format!(
+                "{}: Cargo.lock: package `house-rules` 4.5.6 is locked from `{source}`, whose \
+                 query is not one `branch`, `tag` or `rev`; Cargo keeps a query of the URL's own \
+                 in the source, which this reader does not follow",
+                fixture.root.join("Cargo.lock").display()
             )
         );
     }

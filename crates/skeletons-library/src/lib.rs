@@ -242,7 +242,9 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 ///   is one cargo would refuse too.
 /// - [`is_unsupported_without_cargo`](ReadWorkspaceError::is_unsupported_without_cargo)
 ///   when the workspace uses something only cargo reads, a wearing whose own
-///   dependency is declared with `registry =`, an optional dependency that
+///   dependency is declared with `registry =`, a git URL with a query of its
+///   own (or a lockfile git source whose query is not one `branch`, `tag` or
+///   `rev`), an optional dependency that
 ///   asks a worn package for a version its locked one does not meet and cargo
 ///   cannot add beside it (a version in the locked one's compatible range for
 ///   a registry package, any version for a path or git package),

@@ -237,10 +237,11 @@ What it does not read, because only cargo does, it refuses by name rather than
 guess: `[patch]` and `[replace]` tables, a `package.workspace` key, one package
 declared under two dependency keys, two path packages with one name and
 version, a wearing whose own dependency is declared with `registry =`, a
-lockfile in a format other than 3 or 4, in a cargo configuration file a
-non-empty `paths`, a `[patch]` with an entry, or any `include`, and an optional
-dependency that asks a worn package for a version the locked one does not meet
-(the last is described below). The error has `is_unsupported_without_cargo` true, and `detail()` names
+lockfile in a format other than 3 or 4, a git URL with a query of its own, in a
+cargo configuration file a non-empty `paths`, a `[patch]` with an entry, or any
+`include`, and an optional dependency that asks a worn package for a version the
+locked one does not meet (the last is described below). The error has
+`is_unsupported_without_cargo` true, and `detail()` names
 the manifest or configuration file and what it uses. `check` reads such a
 workspace where cargo is available, except for that optional dependency once a
 feature enables it, where cargo cannot resolve the workspace at all. A
@@ -268,7 +269,11 @@ A git dependency's URL is compared with the lockfile's as cargo compares them:
 two spellings of one repository, in a trailing slash, a `.git` suffix, the case
 of a GitHub path or of a host, or a default port, are one source. A `git` value
 cargo itself refuses, such as `git@github.com:foo/bar.git`, makes the manifest
-unreadable.
+unreadable. A URL with a query of its own, such as `https://example.test/g?x=1`
+(an empty query too), is refused by name, and so is a lockfile source whose
+query is anything but one `branch`, `tag` or `rev`: cargo keeps that query in
+the source, so the lockfile it wrote is current to cargo, and this library
+reads a source's query only as the one reference.
 
 An optional dependency of a package outside the workspace, or of a path
 package that dependency reaches, that asks a worn package for a version the

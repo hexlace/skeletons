@@ -47,6 +47,12 @@ impl CanonicalGitUrl {
         Ok(Self(url))
     }
 
+    /// Whether the URL has a query, an empty one (a bare `?`) included: Cargo keeps it in a
+    /// lockfile's source, where this reader looks for a reference.
+    pub(crate) fn has_query(&self) -> bool {
+        self.0.query().is_some()
+    }
+
     /// The canonical URL as text, which tests state their expectations in.
     #[cfg(test)]
     pub(crate) fn as_str(&self) -> &str {
@@ -151,6 +157,21 @@ mod tests {
     /// Requires `left` and `right` to be two sources to Cargo.
     fn assert_two_sources(left: &str, right: &str) {
         assert_ne!(canonical(left), canonical(right), "{left} against {right}");
+    }
+
+    #[test]
+    fn a_url_has_a_query_when_it_writes_a_question_mark_even_with_nothing_after() {
+        // The empty query counts, and a GitHub URL, which is rebuilt as `https`, keeps its query.
+        for text in [
+            "https://example.test/g?x=1",
+            "https://example.test/g?",
+            "https://github.com/Foo/Bar.git?branch=dev",
+        ] {
+            assert!(canonical(text).has_query(), "{text}");
+        }
+        for text in ["https://example.test/g", "https://github.com/Foo/Bar.git/"] {
+            assert!(!canonical(text).has_query(), "{text}");
+        }
     }
 
     #[test]

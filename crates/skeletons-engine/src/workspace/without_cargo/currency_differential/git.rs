@@ -1,8 +1,12 @@
 //! The cases where a package comes from a git repository, which the test builds as a `file://`
 //! source and fetches into a Cargo home before the workspace is changed.
 
-use super::super::fixture::{CargoHome, GitRepository, cargo_version};
-use super::{Verdict, assert_both_say_in_home, locked_members, write_app};
+use super::super::cargo_configuration::HomeVariables;
+use super::super::fixture::{CargoHome, Fixture, GitRepository, cargo_version};
+use super::{
+    Verdict, assert_both_say_in_home, assert_reader_refuses, cargo_verdict_in_home, locked_members,
+    write_app,
+};
 use crate::workspace::Network;
 
 /// The line that depends on `g` by the default branch, at `url` as the manifest writes it.
@@ -117,6 +121,44 @@ impl GitCases {
     fn assert_current(&self, dependencies: &str) {
         self.assert_change(dependencies, dependencies, Verdict::Current);
     }
+
+    /// Locks `app` with `dependency`, a line that depends on `g`, and requires that Cargo calls
+    /// the lockfile current, as it is just written, and that the reader refuses it with the
+    /// detail `detail` gives for the fixture.
+    fn assert_current_to_cargo_and_refused_by_the_reader(
+        &self,
+        dependency: &str,
+        detail: impl FnOnce(&Fixture) -> String,
+    ) {
+        let fixture = locked_members(&["app"]);
+        write_app(&fixture, &format!("[dependencies]\n{dependency}"));
+        let toolchain = cargo_version();
+        self.home
+            .lock(&fixture.root, Network::Allowed)
+            .unwrap_or_else(|stderr| panic!("{toolchain} could not lock the workspace: {stderr}"));
+
+        assert_eq!(
+            cargo_verdict_in_home(&fixture, &self.home),
+            Verdict::Current,
+            "cargo, on {toolchain}"
+        );
+        assert_reader_refuses(
+            &fixture,
+            &HomeVariables::cargo_home(self.home.path()),
+            &detail(&fixture),
+        );
+    }
+}
+
+/// The words the reader refuses the dependency `g` of the member `app` with when `url`, as the
+/// manifest writes it, carries a query of its own. The manifest is read before the lockfile, so
+/// it is the manifest that is refused, whatever Cargo then wrote in the lock.
+fn query_refusal(fixture: &Fixture, url: &str) -> String {
+    format!(
+        "{}: [dependencies] `g`: `git = \"{url}\"` has a query of its own, which Cargo keeps in \
+         the lockfile's source and this reader does not follow",
+        fixture.root.join("app/Cargo.toml").display()
+    )
 }
 
 #[test]
@@ -274,6 +316,38 @@ fn a_file_url_naming_localhost_is_current_once_locked() {
         .expect("the fixture's URL is a file URL");
 
     cases.assert_current(&dependency_at(&format!("file://localhost{path}")));
+}
+
+/// The cases over a repository whose directory is named `repo?x=1`: the query reaches git as
+/// part of a `file://` path, so a URL with that query names it.
+fn cases_with_a_query_in_the_url() -> GitCases {
+    GitCases::with_repository(GitRepository::in_directory_named("g", "repo?x=1"))
+}
+
+#[test]
+fn a_git_url_with_a_query_of_its_own_is_current_to_cargo_and_refused_by_the_reader() {
+    // Cargo keeps the URL's `?x=1` in the lock (`git+…/repo?x=1#<commit>`) and reads it back as
+    // the same source. The reader does not model that, and refuses the dependency by name
+    // rather than call the lock stale.
+    let cases = cases_with_a_query_in_the_url();
+    let url = cases.g_repository.url();
+
+    cases.assert_current_to_cargo_and_refused_by_the_reader(&cases.g_dependency(""), |fixture| {
+        query_refusal(fixture, &url)
+    });
+}
+
+#[test]
+fn a_git_url_with_a_query_of_its_own_and_a_branch_is_current_to_cargo_and_refused_by_the_reader() {
+    // The reference is written after the URL's own query (`…/repo?x=1?branch=dev`), which is
+    // not one `branch` either.
+    let cases = cases_with_a_query_in_the_url();
+    let url = cases.g_repository.url();
+
+    cases.assert_current_to_cargo_and_refused_by_the_reader(
+        &cases.g_dependency("branch = \"dev\""),
+        |fixture| query_refusal(fixture, &url),
+    );
 }
 
 #[test]

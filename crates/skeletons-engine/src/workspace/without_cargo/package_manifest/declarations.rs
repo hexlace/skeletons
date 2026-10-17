@@ -268,15 +268,7 @@ impl Written<'_> {
     /// Where the entry says its package comes from.
     fn source(&self) -> Result<DeclaredSource, TextError> {
         match (self.string("git")?, self.string("path")?) {
-            (Some(text), None) => Ok(DeclaredSource::Git {
-                url: CanonicalGitUrl::parse(&text).map_err(|reason| {
-                    TextError::unreadable(format!(
-                        "{} `{}`: `git = \"{text}\"` is not a URL cargo reads: {reason}",
-                        self.site.table, self.key
-                    ))
-                })?,
-                reference: self.git_reference()?,
-            }),
+            (Some(text), None) => self.git_source(&text),
             (Some(_), Some(_)) => Err(TextError::unsupported(format!(
                 "{} `{}` writes both `git` and `path`, which Cargo only warns about",
                 self.site.table, self.key
@@ -288,6 +280,32 @@ impl Written<'_> {
                 name: self.string("registry")?,
             }),
         }
+    }
+
+    /// The git source of the entry whose `git` is `text`, with the one reference it writes.
+    ///
+    /// A URL with a query of its own is refused, an empty query included. Cargo keeps that query
+    /// in the lockfile's source, writing the reference after it, and reads the source back as
+    /// the same one; this reader reads a source's query only as one reference, so the two could
+    /// not be compared, and `?branch=dev` written with no `branch` key would lock as a branch.
+    fn git_source(&self, text: &str) -> Result<DeclaredSource, TextError> {
+        let url = CanonicalGitUrl::parse(text).map_err(|reason| {
+            TextError::unreadable(format!(
+                "{} `{}`: `git = \"{text}\"` is not a URL cargo reads: {reason}",
+                self.site.table, self.key
+            ))
+        })?;
+        if url.has_query() {
+            return Err(TextError::unsupported(format!(
+                "{} `{}`: `git = \"{text}\"` has a query of its own, which Cargo keeps in the \
+                 lockfile's source and this reader does not follow",
+                self.site.table, self.key
+            )));
+        }
+        Ok(DeclaredSource::Git {
+            url,
+            reference: self.git_reference()?,
+        })
     }
 
     /// The one of `branch`, `tag` and `rev` the entry writes.
@@ -590,6 +608,55 @@ by_tag = { git = "https://example.invalid/g", tag = "v1" }
                 format!("[dependencies] `g`: `git = \"{url}\"` is not a URL cargo reads: {reason}")
             );
         }
+    }
+
+    #[test]
+    fn a_git_url_with_a_query_of_its_own_is_unsupported_naming_the_url() {
+        // Cargo keeps a URL's query in the lock and reads it back as the same source; this
+        // reader compares none, so any query is refused by name, an empty one included, and so
+        // is one that spells `branch=` with no `branch` key, which would lock as a branch.
+        for url in [
+            "https://example.invalid/g?x=1",
+            "https://example.invalid/g?",
+            "https://example.invalid/g?branch=dev",
+        ] {
+            let error = PackageManifest::parse(
+                &format!("[package]\nname = \"a\"\n[dependencies]\ng = {{ git = \"{url}\" }}\n"),
+                Path::new("/w"),
+                None,
+            )
+            .expect_err("a git URL with a query");
+
+            assert_eq!(error.kind(), TextErrorKind::Unsupported, "{url}");
+            assert_eq!(
+                error.detail(),
+                format!(
+                    "[dependencies] `g`: `git = \"{url}\"` has a query of its own, which Cargo \
+                     keeps in the lockfile's source and this reader does not follow"
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn a_git_url_with_a_query_is_refused_in_the_workspace_dependencies_too() {
+        // A `workspace = true` member takes the root's declaration, which is read through the
+        // same path, so the root's table is where the refusal is named.
+        let error = PackageManifest::parse(
+            "[workspace]\nmembers = []\n\
+             [workspace.dependencies]\ng = { git = \"https://example.invalid/g?x=1\" }\n",
+            Path::new("/w"),
+            None,
+        )
+        .expect_err("a git URL with a query");
+
+        assert_eq!(error.kind(), TextErrorKind::Unsupported);
+        assert_eq!(
+            error.detail(),
+            "[workspace.dependencies] `g`: `git = \"https://example.invalid/g?x=1\"` has a query \
+             of its own, which Cargo keeps in the lockfile's source and this reader does not \
+             follow"
+        );
     }
 
     #[test]

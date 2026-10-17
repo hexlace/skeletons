@@ -24,7 +24,10 @@ const REMOVED_VARIABLES: [&str; 6] = [
 /// feature: a `HOME` of its own, no system configuration, and no signing, maintenance or
 /// identity taken from the machine.
 pub(in crate::workspace::without_cargo) struct GitRepository {
-    directory: TempDir,
+    /// The temporary directory that holds the repository, removed with it.
+    holder: TempDir,
+    /// The repository's own directory: the holder itself, or a directory named inside it.
+    directory: PathBuf,
     /// A `HOME` that holds no configuration.
     home: TempDir,
 }
@@ -41,11 +44,31 @@ impl GitRepository {
         package: &str,
         suffix: &str,
     ) -> Self {
+        let holder = tempfile::Builder::new()
+            .suffix(suffix)
+            .tempdir()
+            .expect("a temporary directory");
+        let directory = holder.path().to_path_buf();
+        Self::built(package, holder, directory)
+    }
+
+    /// A repository of the package `package` in a directory named exactly `name`, inside a
+    /// temporary one, so that a name such as `repo?x=1` can be spelled into a URL as its query.
+    pub(in crate::workspace::without_cargo) fn in_directory_named(
+        package: &str,
+        name: &str,
+    ) -> Self {
+        let holder = tempfile::tempdir().expect("a temporary directory");
+        let directory = holder.path().join(name);
+        std::fs::create_dir(&directory).expect("the repository's directory");
+        Self::built(package, holder, directory)
+    }
+
+    /// The repository of `package` made in `directory`, which `holder` removes.
+    fn built(package: &str, holder: TempDir, directory: PathBuf) -> Self {
         let repository = Self {
-            directory: tempfile::Builder::new()
-                .suffix(suffix)
-                .tempdir()
-                .expect("a temporary directory"),
+            holder,
+            directory,
             home: tempfile::tempdir().expect("a temporary directory"),
         };
         repository.git(&["init", "--quiet", "--initial-branch=main"]);
@@ -74,7 +97,11 @@ impl GitRepository {
     }
 
     fn path(&self) -> &Path {
-        self.directory.path()
+        assert!(
+            self.directory.starts_with(self.holder.path()),
+            "the repository's directory is the holder or inside it, so the holder removes it"
+        );
+        &self.directory
     }
 
     fn write(&self, relative: &str, text: &str) {

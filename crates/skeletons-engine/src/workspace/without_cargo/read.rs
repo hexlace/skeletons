@@ -55,9 +55,13 @@ pub(super) fn read_document(
     let start = canonical_directory(directory)?;
     let layout = layout::discover(&start)?;
     let (lockfile_path, lockfile_text) = lockfile_text(&layout.root_directory)?;
-    unsupported::check(&layout)?;
     let lockfile = Lockfile::parse(&lockfile_text)
         .map_err(|error| ReadWithoutCargoError::text(&lockfile_path, &error))?;
+    // The lockfile says which optional dependencies of a package outside the workspace a
+    // feature enabled, so it is read before the packages are final, and the check for shapes
+    // only Cargo reads follows, to cover every package on disk.
+    let layout = layout::follow_locked_optional_dependencies(layout, &lockfile)?;
+    unsupported::check(&layout)?;
     verify_lockfile_is_current(&lockfile, &layout.packages)?;
     document::build(&layout, &lockfile, locations)
 }
@@ -470,6 +474,27 @@ mod tests {
             error,
             ReadWithoutCargoError::ManifestUnreadable { .. }
         ));
+    }
+
+    #[test]
+    fn a_lockfile_that_is_not_toml_wins_over_an_unsupported_shape() {
+        // The root writes `[patch]`, which only Cargo reads, and the lockfile cannot be parsed.
+        // Cargo refuses an unparseable lockfile too, so the error is the lockfile's.
+        let fixture = Fixture::new();
+        fixture.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"app\"]\n[patch.crates-io]\nx = { path = \"x\" }\n",
+        );
+        fixture.package("app", "app", "");
+        fixture.write("Cargo.lock", "not [toml");
+
+        let error = read(&fixture).err().expect("not TOML");
+
+        assert!(matches!(
+            error,
+            ReadWithoutCargoError::ManifestUnreadable { .. }
+        ));
+        assert!(detail_of(error).contains("Cargo.lock"));
     }
 
     #[test]

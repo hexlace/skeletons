@@ -1,7 +1,7 @@
 //! A package whose files sit in the workspace's own file system: what a reader without Cargo
 //! keeps of its manifest and files.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::error::ReadWithoutCargoError;
@@ -22,13 +22,20 @@ pub(super) enum Inherits<'workspace> {
 
 /// Which of a package's path dependencies to follow.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Followed {
+pub(super) enum Followed<'names> {
     /// Every one, of any kind: a workspace member's dev, build and optional dependencies are all
     /// in the graph.
     All,
     /// Only those a package outside the workspace brings along: not its dev-dependencies, and not
     /// its optional dependencies until a feature enables one.
     NeededByAnOutsider,
+    /// Only the optional dependencies of a package outside the workspace that a feature has
+    /// enabled, which the lockfile shows by listing them: those, not dev-dependencies, whose
+    /// package is among `locked_path_packages`.
+    LockedOptional {
+        /// The names of the path packages the package's lock entry lists.
+        locked_path_packages: &'names BTreeSet<&'names str>,
+    },
 }
 
 /// One package whose manifest and files are read from disk.
@@ -96,12 +103,19 @@ impl PathPackage {
 
     /// The directories of this package's path dependencies, normalized, of the kinds `followed`
     /// names.
-    pub(super) fn path_dependency_directories(&self, followed: Followed) -> Vec<PathBuf> {
+    pub(super) fn path_dependency_directories(&self, followed: Followed<'_>) -> Vec<PathBuf> {
         self.declarations
             .iter()
             .filter(|declaration| match followed {
                 Followed::All => true,
                 Followed::NeededByAnOutsider => !declaration.is_dev && !declaration.is_optional,
+                Followed::LockedOptional {
+                    locked_path_packages,
+                } => {
+                    !declaration.is_dev
+                        && declaration.is_optional
+                        && locked_path_packages.contains(declaration.package.as_str())
+                }
             })
             .filter_map(|declaration| match &declaration.source {
                 DeclaredSource::Path { directory } => Some(normalized(directory)),
@@ -159,7 +173,8 @@ fn refuse_a_key_with_two_paths(
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
 
     use super::{Followed, PathPackage, refuse_a_key_with_two_paths};
     use crate::workspace::without_cargo::error::ReadWithoutCargoError;
@@ -226,6 +241,47 @@ building = { path = "../building" }
         ];
         expected.sort();
         assert_eq!(followed, expected);
+    }
+
+    #[test]
+    fn an_outsider_follows_only_the_optional_dependencies_the_lock_lists() {
+        // `optional` is in the set and optional: followed. `normal` is in the set but required,
+        // `development` is dev, and `unlisted` is optional but the set lacks it, and none of the
+        // three is selected. The set is matched on the package a declaration names, not its key.
+        let package = package(
+            "[package]\nname = \"p\"\n\
+             [dependencies]\n\
+             optional = { path = \"../optional\", optional = true }\n\
+             renamed = { path = \"../renamed\", optional = true, package = \"actual\" }\n\
+             unlisted = { path = \"../unlisted\", optional = true }\n\
+             normal = { path = \"../normal\" }\n\
+             [dev-dependencies]\n\
+             development = { path = \"../development\", optional = true }\n",
+        )
+        .expect("a package");
+        let parent = package.directory.parent().expect("a parent").to_owned();
+        let locked = BTreeSet::from(["optional", "actual", "normal", "development"]);
+
+        let mut followed = package.path_dependency_directories(Followed::LockedOptional {
+            locked_path_packages: &locked,
+        });
+        followed.sort();
+
+        let mut expected = vec![parent.join("optional"), parent.join("renamed")];
+        expected.sort();
+        assert_eq!(followed, expected);
+    }
+
+    #[test]
+    fn an_empty_set_of_locked_packages_follows_nothing() {
+        let package = package(DEPENDENCIES).expect("a package");
+        let locked = BTreeSet::new();
+
+        let followed = package.path_dependency_directories(Followed::LockedOptional {
+            locked_path_packages: &locked,
+        });
+
+        assert_eq!(followed, Vec::<PathBuf>::new());
     }
 
     #[test]

@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use super::error::ReadWithoutCargoError;
 use super::file_system::MANIFEST_FILE_NAME;
+use super::lock_entries::locked_path_dependency_names;
+use super::lockfile::Lockfile;
 use super::member_patterns;
 use super::package_manifest::{PackageManifest, WorkspaceRoot};
 use super::path_package::{Followed, Inherits, PathPackage, read_manifest};
@@ -267,18 +269,104 @@ fn read_member(root: &Root, directory: &Path) -> Result<PathPackage, ReadWithout
 fn read_outsiders(
     by_directory: &mut BTreeMap<PathBuf, PathPackage>,
 ) -> Result<(), ReadWithoutCargoError> {
-    let mut pending: Vec<PathBuf> = by_directory
+    let pending: Vec<PathBuf> = by_directory
         .values()
         .flat_map(|member| member.path_dependency_directories(Followed::All))
         .collect();
+    read_reached(by_directory, pending, |package| {
+        package.path_dependency_directories(Followed::NeededByAnOutsider)
+    })
+}
 
+/// Adds to the layout each package a package outside the workspace reaches only through an
+/// optional dependency that a feature has enabled, as `lockfile` shows by listing it, and each
+/// package those reach.
+///
+/// Cargo reads such a dependency whether or not this reader can resolve features: the lockfile
+/// that lists it was written with the feature on, and Cargo checks the lockfile against what it
+/// reads. A dependency the lockfile does not list is not followed, because nothing says a feature
+/// enabled it. A package that is on disk under a stale lockfile is read all the same, and the
+/// lockfile's currency is what refuses it.
+///
+/// # Errors
+///
+/// Unreadable when a package reached cannot be read, as for any other package outside the
+/// workspace.
+pub(super) fn follow_locked_optional_dependencies(
+    layout: Layout,
+    lockfile: &Lockfile,
+) -> Result<Layout, ReadWithoutCargoError> {
+    let member_count = layout
+        .packages
+        .iter()
+        .filter(|package| package.is_member)
+        .count();
+    let package_count = layout.packages.len();
+    let mut by_directory: BTreeMap<PathBuf, PathPackage> = layout
+        .packages
+        .into_iter()
+        .map(|package| (package.directory.clone(), package))
+        .collect();
+    assert!(
+        by_directory.len() == package_count,
+        "a directory holds one package, so the layout lists each directory once"
+    );
+    let pending: Vec<PathBuf> = by_directory
+        .values()
+        .filter(|package| !package.is_member)
+        .flat_map(|package| locked_optional_directories(package, lockfile))
+        .collect();
+    read_reached(&mut by_directory, pending, |package| {
+        let mut next = package.path_dependency_directories(Followed::NeededByAnOutsider);
+        next.extend(locked_optional_directories(package, lockfile));
+        next
+    })?;
+
+    assert!(
+        by_directory
+            .values()
+            .filter(|package| package.is_member)
+            .count()
+            == member_count,
+        "a package read as an outsider is not a member, and no member is read as one"
+    );
+    assert!(
+        by_directory.len() >= package_count,
+        "following only adds packages"
+    );
+    Ok(Layout {
+        packages: by_directory.into_values().collect(),
+        ..layout
+    })
+}
+
+/// The directories of the optional path dependencies of `package` that `lockfile` lists under its
+/// entry.
+fn locked_optional_directories(package: &PathPackage, lockfile: &Lockfile) -> Vec<PathBuf> {
+    let locked_path_packages =
+        locked_path_dependency_names(lockfile, &package.name, &package.version);
+    package.path_dependency_directories(Followed::LockedOptional {
+        locked_path_packages: &locked_path_packages,
+    })
+}
+
+/// Reads into `by_directory` each package in `pending` that it does not hold yet, as a package
+/// outside the workspace, and each package that `next` names for one read.
+///
+/// A directory already in `by_directory` is skipped, so each is read once and `next` runs once
+/// per directory, which bounds the loop by the dependencies of the packages read.
+fn read_reached(
+    by_directory: &mut BTreeMap<PathBuf, PathPackage>,
+    mut pending: Vec<PathBuf>,
+    next: impl Fn(&PathPackage) -> Vec<PathBuf>,
+) -> Result<(), ReadWithoutCargoError> {
     while let Some(directory) = pending.pop() {
         if by_directory.contains_key(&directory) {
             continue;
         }
         let manifest = read_manifest(&directory, Inherits::Ancestors)?;
         let package = PathPackage::from_manifest(&directory, &manifest, false)?;
-        pending.extend(package.path_dependency_directories(Followed::NeededByAnOutsider));
+        pending.extend(next(&package));
         by_directory.insert(directory, package);
     }
     Ok(())
@@ -286,9 +374,10 @@ fn read_outsiders(
 
 #[cfg(test)]
 mod tests {
-    use super::discover;
+    use super::{discover, follow_locked_optional_dependencies};
     use crate::workspace::without_cargo::error::ReadWithoutCargoError;
     use crate::workspace::without_cargo::fixture::Fixture as Tree;
+    use crate::workspace::without_cargo::lockfile::Lockfile;
 
     impl Tree {
         /// Every package found from `relative`, as its directory under the root and whether it
@@ -498,6 +587,135 @@ mod tests {
         let layout = discover(&tree.root).expect("a workspace");
 
         assert_eq!(layout.packages[0].version, "4.5.6");
+    }
+
+    /// A workspace whose member `app` depends on `y`, outside the root, which has the optional
+    /// dependency `z` enabled by default; `z` depends on `q`, and has its own optional `o`.
+    fn app_y_z() -> Tree {
+        let tree = Tree::new();
+        tree.write("Cargo.toml", "[workspace]\nmembers = [\"app\"]\n");
+        tree.package("app", "app", "[dependencies]\ny = { path = \"../../y\" }\n");
+        tree.package(
+            "../y",
+            "y",
+            "[dependencies]\nz = { path = \"../z\", optional = true }\n\
+             [features]\ndefault = [\"z\"]\n",
+        );
+        tree.package(
+            "../z",
+            "z",
+            "[dependencies]\nq = { path = \"../q\" }\n\
+             o = { path = \"../o\", optional = true }\n",
+        );
+        tree.package("../q", "q", "");
+        tree.package("../o", "o", "");
+        tree
+    }
+
+    /// Every package of `tree` after following what `lock` lists, as the name of its directory
+    /// and whether it is a member.
+    fn followed(tree: &Tree, lock: &str) -> Result<Vec<(String, bool)>, ReadWithoutCargoError> {
+        let layout = discover(&tree.root)?;
+        let lockfile = Lockfile::parse(lock).expect("a lockfile");
+        let layout = follow_locked_optional_dependencies(layout, &lockfile)?;
+        Ok(layout
+            .packages
+            .iter()
+            .map(|package| {
+                let name = package
+                    .directory
+                    .file_name()
+                    .expect("a directory name")
+                    .to_string_lossy()
+                    .into_owned();
+                (name, package.is_member)
+            })
+            .collect())
+    }
+
+    /// A lockfile of `app_y_z`'s packages in which `y` lists `y_lists`, `z` lists `z_lists`.
+    fn lock_of_app_y_z(y_lists: &str, z_lists: &str) -> String {
+        let entry = |name: &str, lists: &str| {
+            format!(
+                "[[package]]\nname = \"{name}\"\nversion = \"0.0.0\"\ndependencies = [{lists}]\n\n"
+            )
+        };
+        format!(
+            "version = 4\n\n{}{}{}{}{}",
+            entry("app", "\"y\""),
+            entry("o", ""),
+            entry("q", ""),
+            entry("y", y_lists),
+            entry("z", z_lists),
+        )
+    }
+
+    #[test]
+    fn an_optional_dependency_the_lock_lists_under_an_outsider_is_followed_with_what_it_needs() {
+        // `y` lists `z`, so `z` is read as a non-member, and so is `q`, which `z` requires.
+        // `o` is optional under `z` and `z` does not list it, so it stays unread.
+        let tree = app_y_z();
+
+        let found = followed(&tree, &lock_of_app_y_z("\"z\"", "\"q\"")).expect("a layout");
+
+        assert_eq!(
+            found,
+            [
+                ("q".to_owned(), false),
+                ("app".to_owned(), true),
+                ("y".to_owned(), false),
+                ("z".to_owned(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_optional_dependency_of_an_outsider_the_lock_does_not_list_is_not_followed() {
+        // Nothing says a feature enabled `z`, so it stays unread, as before.
+        let tree = app_y_z();
+
+        let found = followed(&tree, &lock_of_app_y_z("", "")).expect("a layout");
+
+        assert_eq!(found, [("app".to_owned(), true), ("y".to_owned(), false)]);
+    }
+
+    #[test]
+    fn an_optional_dependency_the_lock_lists_under_a_followed_one_is_followed_too() {
+        // `z` lists `o`, so `o` is enabled in the lock and is read, through two steps.
+        let tree = app_y_z();
+
+        let found = followed(&tree, &lock_of_app_y_z("\"z\"", "\"o\", \"q\"")).expect("a layout");
+
+        assert_eq!(found.len(), 5, "{found:?}");
+        assert!(found.contains(&("o".to_owned(), false)), "{found:?}");
+    }
+
+    #[test]
+    fn a_locked_optional_dependency_with_no_package_on_disk_is_unreadable() {
+        let tree = app_y_z();
+        std::fs::remove_dir_all(tree.root.with_file_name("z")).expect("take z away");
+
+        let error = followed(&tree, &lock_of_app_y_z("\"z\"", "\"q\"")).expect_err("no z");
+
+        assert!(detail(error).contains("z/Cargo.toml could not be read"));
+    }
+
+    #[test]
+    fn a_members_optional_dependencies_are_not_read_a_second_time() {
+        // A member's own optional dependencies are followed already, whether the lock lists
+        // them or not, so following changes nothing for a layout with no outsider.
+        let tree = Tree::new();
+        tree.write("Cargo.toml", "[workspace]\nmembers = [\"app\"]\n");
+        tree.package(
+            "app",
+            "app",
+            "[dependencies]\nz = { path = \"../z\", optional = true }\n",
+        );
+        tree.package("z", "z", "");
+
+        let found = followed(&tree, &lock_of_app_y_z("", "")).expect("a layout");
+
+        assert_eq!(found, [("app".to_owned(), true), ("z".to_owned(), true)]);
     }
 
     #[test]

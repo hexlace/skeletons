@@ -29,14 +29,14 @@ rituals-compose = "0.2.0"
 # `ritual` command line mounts it by; `wearer` mounts it under another. `path`
 # is what a build in this repository uses; `version` is what a published
 # crate's manifest keeps, since crates.io has no path to follow.
-skeletons = { path = "crates/skeletons", version = "0.2.1" }
+skeletons = { path = "crates/skeletons", version = "0.2.2" }
 # The engine behind it, which the bundle and `skeletons-library` are both built
 # on. The three crates are built against one another and released at one
 # version, so the requirement admits that version alone, and both of the others
 # take the engine through this entry and no other. It names no feature: the
 # bundle asks for the engine's `commands` in its own manifest, and the library
 # asks for none.
-skeletons-engine = { path = "crates/skeletons-engine", version = "=0.2.1" }
+skeletons-engine = { path = "crates/skeletons-engine", version = "=0.2.2" }
 # Property-based testing for the engine's parsers and pure functions: the
 # skeleton text grammars, git output, version tags, source strings and path
 # rules. A parser needs inputs no one would think to write by hand. Dev-only, so it
@@ -162,7 +162,7 @@ unicode-normalization = { version = "0.1.25", default-features = false }
 unicode-properties = { version = "0.1.4", default-features = false, features = ["general-category"] }
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 # The oldest toolchain the workspace builds and passes its tests on: what the
 # code uses decides it, and CI checks it with the `msrv` job. Raising it is not a

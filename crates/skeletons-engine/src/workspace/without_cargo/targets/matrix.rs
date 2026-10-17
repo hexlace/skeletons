@@ -449,7 +449,8 @@ fn test_and_example_rows() -> Vec<Row> {
             "two tests with one name",
             package(
                 E2021,
-                "[[test]]\nname = \"x\"\npath = \"a.rs\"\n[[test]]\nname = \"x\"\npath = \"b.rs\"\n",
+                "[[test]]\nname = \"x\"\npath = \"a.rs\"\n\
+                 [[test]]\nname = \"x\"\npath = \"b.rs\"\n",
             ),
             &["src/lib.rs"],
             Err("found duplicate test name x, but all test targets must have a unique name"),

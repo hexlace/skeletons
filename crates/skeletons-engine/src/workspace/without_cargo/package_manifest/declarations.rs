@@ -287,8 +287,8 @@ impl Written<'_> {
     fn source(&self) -> Result<DeclaredSource, TextError> {
         match (self.string("git")?, self.string("path")?) {
             (Some(text), None) => self.git_source(&text),
-            (Some(_), Some(_)) => Err(TextError::unsupported(format!(
-                "{} `{}` writes both `git` and `path`, which Cargo only warns about",
+            (Some(_), Some(_)) => Err(TextError::unreadable(format!(
+                "{} `{}` writes both `git` and `path`, and Cargo allows only one of them",
                 self.site.table, self.key
             ))),
             (None, Some(path)) => Ok(DeclaredSource::Path {
@@ -760,7 +760,9 @@ by_tag = { git = "https://example.invalid/g", tag = "v1" }
     }
 
     #[test]
-    fn a_dependency_with_both_git_and_path_is_unsupported() {
+    fn a_dependency_with_both_git_and_path_is_unreadable() {
+        // Cargo refuses the manifest: the dependency is ambiguous, and only one of `git` or
+        // `path` is allowed.
         let error = PackageManifest::parse(
             "[package]\nname = \"a\"\n[dependencies]\n\
              g = { git = \"https://example.invalid/g\", path = \"../g\" }\n",
@@ -769,7 +771,11 @@ by_tag = { git = "https://example.invalid/g", tag = "v1" }
         )
         .expect_err("git and path at once");
 
-        assert_eq!(error.kind(), TextErrorKind::Unsupported);
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
+        assert_eq!(
+            error.detail(),
+            "[dependencies] `g` writes both `git` and `path`, and Cargo allows only one of them"
+        );
     }
 
     #[test]

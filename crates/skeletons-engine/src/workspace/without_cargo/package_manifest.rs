@@ -166,7 +166,8 @@ impl PackageManifest {
     ///
     /// # Errors
     ///
-    /// Unreadable for text that is not a manifest Cargo would read, and for an inherited value
+    /// Unreadable for text that is not a manifest Cargo would read, among it a `git` dependency
+    /// that also writes a `path`, which Cargo refuses as ambiguous, and for an inherited value
     /// that no workspace gives. Unsupported for a `git` dependency whose URL has a query of its
     /// own, which Cargo loads.
     pub(crate) fn parse(

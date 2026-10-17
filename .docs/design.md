@@ -2306,7 +2306,9 @@ reads it. A registry package's requirement in another range is left alone, since
 cargo adds a second version beside the locked one and the lock only needs
 rewriting. The walk passes over a reached manifest it cannot read only where
 cargo cannot load it either, and only for two shapes: a manifest that is not
-there, and a dependency that writes both `git` and `path`. Any other manifest it
+there, and a dependency that writes both `git` and `path`. The same entry in a
+root's `[workspace.dependencies]` is not passed over, because cargo loads it
+until a member inherits it. Any other manifest it
 cannot read is refused, naming the file, though cargo may never load that
 package. A git URL with a query of its own does not stop the walk, because cargo
 loads that manifest: the package is read whole and its other requirements are

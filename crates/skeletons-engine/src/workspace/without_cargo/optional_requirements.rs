@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use semver::{Version, VersionReq};
 
 use super::cargo_cannot_load::CargoCannotLoad;
-use super::error::ReadWithoutCargoError;
+use super::error::{ManifestFailure, ReadWithoutCargoError};
 use super::file_system::{MANIFEST_FILE_NAME, normalized};
 use super::layout::Layout;
 use super::lock_entries::set_aside_entries;
@@ -58,9 +58,11 @@ use source_kind::SourceKind;
 /// dependencies are judged whether or not a feature enables the package: nothing here compares
 /// the source of a git dependency read past, which can name no worn package. Exactly two
 /// shapes are passed over, because Cargo fails on them too: a manifest that is not there, and a
-/// dependency that writes both `git` and `path`. Any other manifest this reader cannot read is
-/// refused, naming the file, though Cargo may never load the package. The packages read here do
-/// not join the layout, because currency would then ask for them in the lock.
+/// dependency of the package that writes both `git` and `path`. The same entry in a workspace
+/// root's `[workspace.dependencies]` is not one of them, since Cargo loads it until a member
+/// inherits it. Any other manifest this reader cannot read is refused, naming the file, though
+/// Cargo may never load the package. The packages read here do not join the layout, because
+/// currency would then ask for them in the lock.
 ///
 /// A requirement `semver` does not parse is passed over, as currency passes it over.
 ///
@@ -108,18 +110,12 @@ fn refuse_in_packages_reached(
         if !visited.insert(directory.clone()) {
             continue;
         }
-        // A manifest is passed over only where Cargo fails to load it too, and only for the two
-        // shapes `CargoCannotLoad` names, each measured against Cargo. The match has no
-        // wildcard: a manifest this reader cannot read in any other way carries no shape and is
-        // refused by name, and so is one that a refusal added to the manifest reader later makes
-        // unreadable. A git URL with a query of its own is a manifest Cargo loads, so it is read
-        // past and the package's other requirements and path dependencies are judged.
+        // A git URL with a query of its own is a manifest Cargo loads, so it is read past and
+        // the package's other requirements and path dependencies are judged.
         let manifest = match read_manifest(&directory, Inherits::Ancestors, Unfollowed::ReadPast) {
             Ok(manifest) => manifest,
-            Err(failure) => match failure.cargo_cannot_load() {
-                Some(CargoCannotLoad::Missing | CargoCannotLoad::GitAndPath) => continue,
-                None => return Err(failure.into()),
-            },
+            Err(failure) if passed_over(&failure) => continue,
+            Err(failure) => return Err(failure.into()),
         };
         let manifest_path = directory.join(MANIFEST_FILE_NAME);
         for declaration in manifest
@@ -140,6 +136,22 @@ fn refuse_in_packages_reached(
         "no directory the layout holds is read again"
     );
     Ok(())
+}
+
+/// Whether the walk passes over the package whose manifest read failed with `failure`, rather
+/// than refusing the workspace.
+///
+/// A manifest is passed over only where Cargo fails to load it too, and only for the two shapes
+/// [`CargoCannotLoad`] names, each measured against Cargo. The match has no wildcard: a failure
+/// that carries no shape is refused by name, so a refusal added to the manifest reader later
+/// refuses the workspace instead of silently hiding the packages that raise it.
+const fn passed_over(failure: &ManifestFailure) -> bool {
+    let Some(shape) = failure.cargo_cannot_load() else {
+        return false;
+    };
+    match shape {
+        CargoCannotLoad::Missing | CargoCannotLoad::GitAndPath => true,
+    }
 }
 
 /// The lock entries a wearing can resolve to, and the packages on disk their declarations are
@@ -239,5 +251,56 @@ impl<'input> WornPackages<'input> {
                 }
                 DeclaredSource::Git { .. } | DeclaredSource::Registry { .. } => true,
             }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::passed_over;
+    use crate::workspace::without_cargo::cargo_cannot_load::CargoCannotLoad;
+    use crate::workspace::without_cargo::error::ManifestFailure;
+    use crate::workspace::without_cargo::text_error::TextError;
+
+    const MANIFEST: &str = "/w/z/Cargo.toml";
+
+    #[test]
+    fn a_refusal_the_manifest_reader_gains_later_is_not_passed_over() {
+        // The walk may pass over a manifest only where Cargo fails on it too, and a refusal
+        // added to the manifest reader later has not been measured against Cargo. Wrap one of
+        // each kind as `read_manifest` wraps a refused text, with no shape, and require that the
+        // walk refuses it: a refusal the reader gains does not make the walk silently pass
+        // over the packages that raise it.
+        let path = Path::new(MANIFEST);
+        let unreadable = TextError::unreadable("a refusal added to the manifest reader later");
+        let unsupported = TextError::unsupported("a refusal added to the manifest reader later");
+
+        assert!(!passed_over(&ManifestFailure::text(path, &unreadable)));
+        assert!(!passed_over(&ManifestFailure::text(path, &unsupported)));
+    }
+
+    #[test]
+    fn the_two_shapes_cargo_fails_on_too_are_passed_over() {
+        // A manifest that is not there and a dependency that writes both `git` and `path` are
+        // the shapes measured to fail in Cargo as well, so the walk passes over them.
+        let path = Path::new(MANIFEST);
+        let gone = std::io::Error::from(std::io::ErrorKind::NotFound);
+        let ambiguous = TextError::unreadable_as(CargoCannotLoad::GitAndPath, "ambiguous");
+
+        assert!(passed_over(&ManifestFailure::file(path, &gone)));
+        assert!(passed_over(&ManifestFailure::text(path, &ambiguous)));
+    }
+
+    #[test]
+    fn a_file_error_other_than_not_found_is_not_passed_over() {
+        // A manifest that exists but cannot be read, say for its permissions, is one Cargo may
+        // read, so it is no shape the walk passes over.
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+
+        assert!(!passed_over(&ManifestFailure::file(
+            Path::new(MANIFEST),
+            &denied
+        )));
     }
 }

@@ -326,6 +326,42 @@ fn a_git_url_with_a_query_beside_a_requirement_the_worn_path_package_meets_is_re
 }
 
 #[test]
+fn a_git_and_path_in_the_workspace_dependencies_of_a_reached_root_is_refused_naming_it() {
+    // `z` is a workspace root of its own, and its `[workspace.dependencies]` writes
+    // `foo = { git, path }`, which nothing in `z` inherits. Cargo refuses the entry only when a
+    // member inherits it, so it loads `z`, and `z`'s other requirements bind once `y` enables
+    // it: `house-rules` 1.0.0, worn by path, does not meet `^1.1`, and Cargo fails to select a
+    // version, not on the ambiguous specification. The reader does not follow the entry and
+    // cannot pass `z` over as a manifest Cargo refuses, so it refuses the workspace, naming
+    // `z`'s manifest, rather than report a lock Cargo cannot resolve.
+    let fixture = workspace_of_one_worn_version(
+        "{ path = \"../../house-rules\" }",
+        "{ path = \"../house-rules\", version = \"1.1\" }",
+    );
+    fixture.package("../house-rules", "house-rules", "version = \"1.0.0\"\n");
+    fixture.package(
+        "../z",
+        "z",
+        "[workspace]\n[workspace.dependencies]\n\
+         foo = { git = \"file:///nowhere/foo\", path = \"../foo\" }\n\
+         [dependencies]\nhouse-rules = { path = \"../house-rules\", version = \"1.1\" }\n",
+    );
+    let home = CargoHome::new();
+    lock_offline(&fixture, &home);
+    enable_z(&fixture);
+
+    assert_cargo_cannot_select_a_version_and_reader_refuses(
+        &fixture,
+        &home,
+        &format!(
+            "{}: [workspace.dependencies] `foo` writes both `git` and `path`, which Cargo loads \
+             until a member inherits it and this reader does not follow",
+            manifest_of(&fixture, "z").display()
+        ),
+    );
+}
+
+#[test]
 fn a_dependency_of_an_optional_package_that_needs_a_newer_worn_version_is_refused() {
     // The indirect shape: `z` takes the requirement through `x`, a package it depends on by
     // path, which asks for `^4.6`. The reader follows the path from `z` and names `x`'s

@@ -58,10 +58,23 @@ pub(crate) enum GitReference {
     Rev(String),
 }
 
+/// Which kind of table a declaration is written in, which decides what Cargo does with some
+/// shapes.
+#[derive(Clone, Copy)]
+enum TableKind {
+    /// The `[workspace.dependencies]` of a workspace root, whose entries Cargo reads only when a
+    /// member inherits them.
+    WorkspaceDependencies,
+    /// A package's own `dependencies`, `dev-dependencies` or `build-dependencies`, in the manifest
+    /// or in a `[target.<cfg>]` table.
+    PackageDependencies,
+}
+
 /// Where a table of dependencies sits, which every declaration in it needs to be read.
 struct Site<'site> {
     /// The table as a reader of the manifest names it, such as `[dependencies]`.
     table: &'site str,
+    kind: TableKind,
     is_dev: bool,
     /// The directory of the manifest the table is in.
     directory: &'site Path,
@@ -87,6 +100,7 @@ pub(super) fn workspace_declarations(
 ) -> Result<BTreeMap<String, Declaration>, TextError> {
     let site = Site {
         table: "[workspace.dependencies]",
+        kind: TableKind::WorkspaceDependencies,
         is_dev: false,
         directory,
         workspace: None,
@@ -159,6 +173,7 @@ fn collect_declarations(
         let label = format!("[{prefix}{name}]");
         let site = Site {
             table: &label,
+            kind: TableKind::PackageDependencies,
             is_dev,
             directory: reading.directory,
             workspace: reading.workspace,
@@ -288,19 +303,37 @@ impl Written<'_> {
     fn source(&self) -> Result<DeclaredSource, TextError> {
         match (self.string("git")?, self.string("path")?) {
             (Some(text), None) => self.git_source(&text),
-            (Some(_), Some(_)) => Err(TextError::unreadable_as(
-                CargoCannotLoad::GitAndPath,
-                format!(
-                    "{} `{}` writes both `git` and `path`, and Cargo allows only one of them",
-                    self.site.table, self.key
-                ),
-            )),
+            (Some(_), Some(_)) => Err(self.git_and_path()),
             (None, Some(path)) => Ok(DeclaredSource::Path {
                 directory: self.site.directory.join(path),
             }),
             (None, None) => Ok(DeclaredSource::Registry {
                 name: self.string("registry")?,
             }),
+        }
+    }
+
+    /// The refusal for an entry that writes both `git` and `path`.
+    ///
+    /// Cargo refuses such a dependency as ambiguous in every table of a package, so there it is
+    /// the shape [`CargoCannotLoad::GitAndPath`]. In `[workspace.dependencies]` Cargo loads the
+    /// entry while no member inherits it, and refuses it only once one does, so it is no shape
+    /// Cargo fails on: this reader does not follow it, and a read that passes over manifests
+    /// Cargo cannot load must not pass over a root that holds one.
+    fn git_and_path(&self) -> TextError {
+        let (table, key) = (self.site.table, self.key);
+        match self.site.kind {
+            TableKind::PackageDependencies => TextError::unreadable_as(
+                CargoCannotLoad::GitAndPath,
+                format!(
+                    "{table} `{key}` writes both `git` and `path`, and Cargo allows only one of \
+                     them"
+                ),
+            ),
+            TableKind::WorkspaceDependencies => TextError::unsupported(format!(
+                "{table} `{key}` writes both `git` and `path`, which Cargo loads until a member \
+                 inherits it and this reader does not follow"
+            )),
         }
     }
 
@@ -784,6 +817,31 @@ by_tag = { git = "https://example.invalid/g", tag = "v1" }
         assert_eq!(
             error.detail(),
             "[dependencies] `g` writes both `git` and `path`, and Cargo allows only one of them"
+        );
+    }
+
+    #[test]
+    fn a_dependency_with_both_git_and_path_in_the_workspace_dependencies_is_unsupported() {
+        // Measured against Cargo: an entry of `[workspace.dependencies]` that writes both `git`
+        // and `path` loads while no member inherits it, and is refused only once one does. It is
+        // not a shape Cargo fails on in this table, so the refusal is Unsupported and carries
+        // none, and a read that passes over manifests Cargo cannot load does not pass this one
+        // over.
+        let error = PackageManifest::parse(
+            "[workspace]\nmembers = []\n\
+             [workspace.dependencies]\n\
+             g = { git = \"https://example.invalid/g\", path = \"../g\" }\n",
+            Path::new("/w"),
+            None,
+        )
+        .expect_err("git and path at once");
+
+        assert_eq!(error.kind(), TextErrorKind::Unsupported);
+        assert_eq!(error.cargo_cannot_load(), None);
+        assert_eq!(
+            error.detail(),
+            "[workspace.dependencies] `g` writes both `git` and `path`, which Cargo loads until \
+             a member inherits it and this reader does not follow"
         );
     }
 

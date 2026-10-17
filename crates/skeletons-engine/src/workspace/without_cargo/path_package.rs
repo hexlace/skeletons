@@ -135,7 +135,8 @@ impl PathPackage {
 /// Unreadable when the file is missing or unreadable, is not a manifest, or inherits what nothing
 /// gives it. Unsupported for a shape Cargo loads and this reader does not follow, when
 /// `unfollowed` refuses it. The failure says which shape Cargo cannot load either it is, when it
-/// is one: a manifest that is not there, or a dependency that writes both `git` and `path`.
+/// is one: a manifest that is not there, or a dependency of the package that writes both `git`
+/// and `path`.
 pub(super) fn read_manifest(
     directory: &Path,
     inherits: Inherits<'_>,

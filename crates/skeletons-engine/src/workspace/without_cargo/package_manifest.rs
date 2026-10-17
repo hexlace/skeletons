@@ -167,9 +167,11 @@ impl PackageManifest {
     /// # Errors
     ///
     /// Unreadable for text that is not a manifest Cargo would read, among it a `git` dependency
-    /// that also writes a `path`, which Cargo refuses as ambiguous, and for an inherited value
-    /// that no workspace gives. Unsupported for a `git` dependency whose URL has a query of its
-    /// own, which Cargo loads.
+    /// of a package that also writes a `path`, which Cargo refuses as ambiguous, and for an
+    /// inherited value that no workspace gives. Unsupported for a `git` dependency whose URL has
+    /// a query of its own, which Cargo loads, and for a `git` dependency in
+    /// `[workspace.dependencies]` that also writes a `path`, which Cargo loads until a member
+    /// inherits it.
     pub(crate) fn parse(
         text: &str,
         directory: &Path,

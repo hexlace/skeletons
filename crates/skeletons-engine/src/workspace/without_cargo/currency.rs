@@ -27,12 +27,12 @@ use reachability::every_entry_is_reached;
 ///
 /// In order: an entry the lockfile still writes a `replace` on is out of date, because the root
 /// manifest writes no `[replace]` by the time this runs (one that does is refused before), and
-/// Cargo drops the replacement on a relock. Then the entries Cargo sets aside when it loads a lockfile are set aside, with every
-/// dependency entry that names one. Then every package on disk is locked as a package with no
-/// `source`, under its name and version. Then each package's declarations are among the
-/// dependencies of its entry, and each of those dependencies is a declared package, agreeing on
-/// source, git reference, version requirement and, for a path, the manifest it names. Last, the
-/// members reach every entry that is left.
+/// Cargo drops the replacement on a relock. Then the entries Cargo sets aside when it loads a
+/// lockfile are set aside, with every dependency entry that names one. Then every package on disk
+/// is locked as a package with no `source`, under its name and version. Then each package's
+/// declarations are among the dependencies of its entry, and each of those dependencies is a
+/// declared package, agreeing on source, git reference, version requirement and, for a path, the
+/// manifest it names. Last, the members reach every entry that is left.
 ///
 /// # Errors
 ///
@@ -285,9 +285,10 @@ mod tests {
         let lock = |replace: &str| {
             format!(
                 "version = 4\n\n[[package]]\nname = \"app\"\nversion = \"0.0.0\"\n\
-                 dependencies = [\"r 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)\"]\n\n\
+                 dependencies = [\"r 1.4.0 ({CRATES_IO})\"]\n\n\
                  [[package]]\nname = \"r\"\nversion = \"1.4.0\"\n\n\
-                 [[package]]\nname = \"r\"\nversion = \"1.4.0\"\nsource = \"{CRATES_IO}\"\n{replace}"
+                 [[package]]\nname = \"r\"\nversion = \"1.4.0\"\n\
+                 source = \"{CRATES_IO}\"\n{replace}"
             )
         };
         let app = "[dependencies]\nr = \"1\"\n";

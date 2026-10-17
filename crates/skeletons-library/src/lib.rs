@@ -180,28 +180,49 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 /// cargo would drop. One stale shape it reports through, because seeing it is
 /// cargo's own resolution: a feature change on a package outside the workspace
 /// that enables or disables an optional dependency. `check` aborts there,
-/// asking for a relock, and this call reads the lock as it stands. The report
-/// is still right, because it reads the members, their wearing tables and the
-/// package each wearing's dependency is locked to, and the change touches none
-/// of them. A dependency that no wearing names and that moved to another
-/// registry is a named limit: it is read as the lock has it.
+/// asking for the lock to be brought up to date, and this call reads the lock as
+/// it stands. The report is still right, because it reads the members, their
+/// wearing tables and the package each wearing's dependency is locked to, and
+/// the change touches none of them. It is shown with the version it read:
+/// [`WornSkeleton::version`] is the locked one.
+///
+/// One limit is left. A newly enabled, unlocked registry dependency that needs a
+/// newer version of a worn package than the lock names is a lock cargo refuses
+/// until the worn package is updated, and an update takes the newest compatible
+/// version. `check` gives no report there, and this call reports the version
+/// the lock names, because that dependency's requirement is in a manifest it
+/// does not have. A dependency that no wearing names and that moved to another
+/// registry is a named limit too: it is read as the lock has it.
 ///
 /// Cargo's configuration files are read, because three things in them change
 /// what cargo reads: `.cargo/config` (or `.cargo/config.toml` when there is no
-/// `config`) in `directory` and in each directory above it, then the cargo
-/// home's `config` or `config.toml`. The home is `CARGO_HOME` when that is set
-/// and not empty, taken from `directory` when relative, and otherwise `.cargo`
-/// in a `HOME` that is set and not empty.
+/// `config`) in `directory` and in each directory above it up to `/`, then the
+/// cargo home's `config` or `config.toml`. The home is `CARGO_HOME` when that is
+/// set and not empty, and otherwise `.cargo` in a `HOME` that is set and not
+/// empty; a relative one is taken from `directory`. With neither set there is
+/// no home: cargo would ask the system's user database, and this call reads only
+/// the environment. `--config` and the `CARGO_*` variables other than
+/// `CARGO_HOME` are not read, because they come from the caller's own
+/// invocation and not from the workspace. A `[source]` replacement is read
+/// past, because it moves where cargo reads a package and never which package
+/// is locked.
+///
+/// A git dependency's URL is compared with the lock's as cargo compares them,
+/// so two spellings of one repository are one source, and a `git` value cargo
+/// itself refuses makes the manifest unreadable.
 ///
 /// A workspace that uses something only cargo reads is refused rather than
 /// guessed at: `[patch]`, `[replace]`, `package.workspace`, one package under
 /// two dependency keys, two path packages with one name and version, a wearing
 /// whose own dependency is declared with `registry =`, a lockfile in a format
-/// other than 3 or 4, an optional dependency of a package outside the workspace
-/// that asks a worn package for a version the lock does not name but that
-/// version's compatible range could (cargo cannot resolve the workspace once a
-/// feature enables it), and in a configuration file `paths`, `[patch]` or
-/// `include`.
+/// other than 3 or 4, a non-empty `paths`, a `[patch]` with an entry or any
+/// `include` in a configuration file, and an optional dependency of a package
+/// outside the workspace, or of a path package it reaches, that asks a worn
+/// package for a version the lock does not name but that version's compatible
+/// range could. Cargo cannot resolve the workspace once a feature enables that
+/// dependency, and a relock does not help. This call does not resolve features,
+/// so it refuses when a feature could enable it: a workspace where that
+/// dependency is off is refused too, and `check` reads it.
 ///
 /// The call writes nothing, runs no build script, needs no git and makes no
 /// network request.

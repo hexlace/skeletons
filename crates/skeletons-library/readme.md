@@ -237,21 +237,57 @@ What it does not read, because only cargo does, it refuses by name rather than
 guess: `[patch]` and `[replace]` tables, a `package.workspace` key, one package
 declared under two dependency keys, two path packages with one name and
 version, a wearing whose own dependency is declared with `registry =`, a
-lockfile in a format other than 3 or 4, an optional dependency of a package
-outside the workspace that asks a worn package for a newer version than the
-locked one, in the range of versions cargo takes for the same package, and in a
-cargo configuration file `paths`, `[patch]` or `include`. The configuration
-files are
-`.cargo/config` (or `.cargo/config.toml` when there is no `config`) in the
-directory given and in each directory above it, then the cargo home's: the
-`CARGO_HOME` that is set and not empty, taken from the directory given when
-relative, and otherwise `.cargo` in a `HOME` that is set and not empty. The
-error has `is_unsupported_without_cargo` true, and `detail()` names the
-manifest or configuration file and what it uses. `check` reads such a workspace
-where cargo is available, except for that optional dependency once a feature
-enables it, where cargo cannot resolve the workspace at all. A manifest, lockfile or configuration file that
-cannot be read, or that cargo would refuse too, has
-`is_manifest_or_lockfile_unreadable` true instead.
+lockfile in a format other than 3 or 4, in a cargo configuration file a
+non-empty `paths`, a `[patch]` with an entry, or any `include`, and an optional
+dependency that asks a worn package for a newer version than the locked one, in
+the range of versions cargo takes for the same package (the last is described
+below). The error has `is_unsupported_without_cargo` true, and `detail()` names
+the manifest or configuration file and what it uses. `check` reads such a
+workspace where cargo is available, except for that optional dependency once a
+feature enables it, where cargo cannot resolve the workspace at all. A
+manifest, lockfile or configuration file that cannot be read, or that cargo
+would refuse too, has `is_manifest_or_lockfile_unreadable` true instead.
+
+The configuration files are `.cargo/config` (or `.cargo/config.toml` when there
+is no `config`) in the directory given and in each directory above it up to
+`/`, then the cargo home's. The cargo home is `CARGO_HOME` when that is set and
+not empty, and otherwise `.cargo` in a `HOME` that is set and not empty; a
+relative one is taken from the directory given, as cargo, started there, takes
+it. With neither set there is no cargo home. Cargo then asks the system's user
+database for one, and this library reads only the environment. `--config` and
+the `CARGO_*` variables other than `CARGO_HOME` are not read: they come from
+the invocation of whoever calls cargo, not from the workspace, so they are not
+something the files show. A `[source]` replacement is read past, because it
+moves where cargo reads a package, never which package the lock names. These
+three keys are refused because each changes which package cargo reads or which
+files it reads: `paths` puts a package at another directory, even past
+`--locked`, `[patch]` swaps a dependency for another one, and `include` pulls
+in more files. Following any of them is cargo's resolution, so the answer is a
+refusal and never a report that could differ from `check`'s.
+
+A git dependency's URL is compared with the lockfile's as cargo compares them:
+two spellings of one repository, in a trailing slash, a `.git` suffix, the case
+of a GitHub path or of a host, or a default port, are one source. A `git` value
+cargo itself refuses, such as `git@github.com:foo/bar.git`, makes the manifest
+unreadable.
+
+An optional dependency of a package outside the workspace, or of a path
+package that dependency reaches, that asks a worn package for a version the
+locked one does not meet, but a version in the same range of versions cargo
+takes for one package could, is refused, naming the manifest, the dependency and
+the worn package. Once a feature enables that dependency cargo cannot resolve
+the workspace: it keeps one version of a package for each such range, finds the
+locked one too old, and fails, and a relock does not help; only updating the
+worn package does. That is not the stale lock described below, where a relock
+gives the document the report equals. The cost is that the reader does not
+resolve features, so it refuses whenever a feature could enable the
+dependency, and a workspace where that dependency is off is refused too, though
+`check` reads it where cargo is available. A requirement in another range is not
+refused, since cargo then keeps a second version beside the locked one. Nor is a
+requirement the locked version meets, one that does not parse, or one in the
+manifest of a registry package, which is not a file the function has. An
+optional path dependency whose manifest cannot be read is passed over, because
+cargo does not load it until a feature enables it.
 
 A wearing's dependency declared with `registry = "name"` is refused because only
 Cargo's configuration says which index that name stands for: the lock entry
@@ -266,12 +302,22 @@ It checks `Cargo.lock` against the manifests as far as the files show, and gives
 the lockfile error where cargo would. One stale shape it reports through, because
 seeing it is cargo's own resolution: a feature change on a package outside the
 workspace that enables or disables an optional dependency, with no relock.
-`check` aborts there, asking for the relock, and `check_without_cargo` reads the
-lock as it stands. The report is still right, because it reads the members,
-their wearing tables and the package each wearing's dependency is locked to, and
-such a change touches none of them. It is the report `check` gives once the lock
-is current. A program that has to be sure the lock is current runs
-`cargo metadata --locked` where cargo is, or calls `check` there.
+`check` aborts there, asking for the lock to be brought up to date, and
+`check_without_cargo` reads the lock as it stands. The report is still right,
+because it reads the members, their wearing tables and the package each
+wearing's dependency is locked to, and such a change touches none of them. It is
+the report `check` gives once the lock is current. A program that has to be sure
+the lock is current runs `cargo metadata --locked` where cargo is, or calls
+`check` there.
+
+One limit is left. If the newly enabled dependency is an unlocked registry
+dependency that needs a newer version of a worn package than the lock names,
+cargo refuses the lock until the worn package is updated, and an update takes
+the newest compatible version. There is no report from `check` to equal, and
+`check_without_cargo` reports the version the lock names, because the registry
+dependency's requirement is in a manifest the function does not have. The
+report shows the version it read: `WornSkeleton::version` is the locked one, so
+a caller that cares which version was checked reads it there.
 
 ## Support
 

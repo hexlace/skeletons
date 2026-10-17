@@ -38,6 +38,9 @@ pub(super) fn normalized(path: &Path) -> PathBuf {
 
 /// Whether `directory` holds at least one Rust file or one subdirectory with a `main.rs`: how
 /// Cargo discovers the targets of `src/bin`, `tests`, `examples` and `benches`.
+///
+/// A directory that cannot be read, and an entry in it that cannot be read, hold no target source:
+/// Cargo discovers nothing from them either, and goes on to read the package without them.
 pub(super) fn holds_a_target_source(directory: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(directory) else {
         return false;
@@ -84,6 +87,39 @@ mod tests {
         let directory = tempfile::tempdir().expect("a temporary directory");
 
         assert!(!holds_a_target_source(&directory.path().join("absent")));
+    }
+
+    #[test]
+    #[expect(
+        clippy::print_stderr,
+        reason = "a test that cannot establish its premise says so rather than passing silently"
+    )]
+    fn a_directory_that_cannot_be_read_holds_no_target_source() {
+        // `cargo metadata` lists no target from a `tests` it cannot read and still succeeds, so
+        // the reader treats the directory as holding none. Takes every permission from a
+        // directory holding a Rust file, then asks. A process that may read it anyway, such as
+        // root, cannot show this, and the test says so.
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let tests = directory.path().join("tests");
+        std::fs::create_dir(&tests).expect("a directory");
+        std::fs::write(tests.join("t.rs"), "").expect("a file");
+        std::fs::set_permissions(&tests, std::fs::Permissions::from_mode(0o000))
+            .expect("permissions taken away");
+
+        let may_read_anyway = std::fs::read_dir(&tests).is_ok();
+        let holds = holds_a_target_source(&tests);
+        // Restored before any assertion, so a failure leaves nothing the temporary directory
+        // cannot remove.
+        std::fs::set_permissions(&tests, std::fs::Permissions::from_mode(0o755))
+            .expect("permissions given back");
+
+        if may_read_anyway {
+            eprintln!("skipped: this process can read a directory with no permissions");
+            return;
+        }
+        assert!(!holds);
     }
 
     #[test]

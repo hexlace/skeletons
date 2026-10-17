@@ -142,9 +142,36 @@ fn run(command: Command) -> Result<subprocess::Finished, ReadWorkspaceError> {
 /// `--offline` too, when `network` is [`Network::Refused`]) in `directory`,
 /// and parses its output.
 pub(crate) fn fetch(directory: &Path, network: Network) -> Result<Document, ReadWorkspaceError> {
-    let mut locked = command(directory, network);
-    locked.arg("--locked");
-    let finished = run(locked)?;
+    read_locked(command(directory, network))
+}
+
+/// [`fetch`] with Cargo given `cargo_home` as its home and `home` as the user's, offline, so that
+/// a test can lock and read a workspace whose git and registry sources sit in a home it owns. It
+/// goes through the same [`read_locked`] as [`fetch`], so what it classifies is what `check`
+/// classifies.
+#[cfg(test)]
+pub(crate) fn fetch_in_cargo_home(
+    directory: &Path,
+    cargo_home: &Path,
+    home: &Path,
+) -> Result<Document, ReadWorkspaceError> {
+    read_locked(command_in_cargo_home(directory, cargo_home, home))
+}
+
+/// The command [`fetch_in_cargo_home`] runs, before `--locked`: [`command`] offline, with
+/// `cargo_home` as `CARGO_HOME` and `home` as `HOME`, so that Cargo's git reads no configuration
+/// of the user who runs the tests when it fetches a git source.
+#[cfg(test)]
+fn command_in_cargo_home(directory: &Path, cargo_home: &Path, home: &Path) -> Command {
+    let mut metadata = command(directory, Network::Refused);
+    metadata.env("CARGO_HOME", cargo_home).env("HOME", home);
+    metadata
+}
+
+/// Runs `metadata`, built by [`command`], with `--locked`, and parses its output.
+fn read_locked(mut metadata: Command) -> Result<Document, ReadWorkspaceError> {
+    metadata.arg("--locked");
+    let finished = run(metadata)?;
     match finished.stdout() {
         Err(_truncated) => Err(ReadWorkspaceError::MetadataUnreadable {
             detail: oversized_output_detail(),
@@ -201,7 +228,14 @@ fn parse(bytes: &[u8]) -> Result<Document, ReadWorkspaceError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CARGO_LOCKED_REFUSAL, ReadWorkspaceError, oversized_output_detail, parse};
+    use std::collections::BTreeMap;
+    use std::ffi::OsStr;
+    use std::path::Path;
+
+    use super::{
+        CARGO_LOCKED_REFUSAL, ReadWorkspaceError, command_in_cargo_home, oversized_output_detail,
+        parse,
+    };
     #[cfg(feature = "commands")]
     use super::{Network, fetch, relock};
 
@@ -240,6 +274,32 @@ mod tests {
             panic!("expected MetadataUnreadable");
         };
         assert!(detail.contains('2'));
+    }
+
+    #[test]
+    fn the_command_in_a_cargo_home_has_a_home_of_its_own_and_that_cargo_home() {
+        // Cargo reads git's configuration through `HOME` when it fetches a git source, so the
+        // command a test runs in a Cargo home of its own must not inherit the running user's.
+        // The command is built and inspected without being run: its `HOME` and `CARGO_HOME` must
+        // be the two directories it was given.
+        let command = command_in_cargo_home(
+            Path::new("/workspace"),
+            Path::new("/cargo-home"),
+            Path::new("/home"),
+        );
+
+        let environment: BTreeMap<&OsStr, Option<&OsStr>> = command.get_envs().collect();
+
+        assert_eq!(
+            environment.get(OsStr::new("HOME")),
+            Some(&Some(OsStr::new("/home"))),
+            "HOME is the directory it was given"
+        );
+        assert_eq!(
+            environment.get(OsStr::new("CARGO_HOME")),
+            Some(&Some(OsStr::new("/cargo-home"))),
+            "CARGO_HOME is the Cargo home it was given"
+        );
     }
 
     #[test]

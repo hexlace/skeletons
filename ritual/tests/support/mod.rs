@@ -319,6 +319,48 @@ pub(crate) fn path_dependency_on_test_skeleton(
     format!("{dependency_key} = {{ path = \"{quoted_path}\" }}\n")
 }
 
+/// Copies the checked-in test skeleton `skeleton_name` to
+/// `skeletons/<skeleton_name>` under `workspace_root` and returns a
+/// `path = "…"` dependency line naming `dependency_key` that points at the
+/// copy by that relative path.
+///
+/// `check` prints a path pin relative to the workspace when the skeleton
+/// shares a directory with it, and absolute when it does not, so a pin on
+/// the checked-in skeleton prints differently depending on where the
+/// checkout sits. A copy inside the workspace prints the same relative path
+/// everywhere, which is what a test that pins the exact bytes needs.
+pub(crate) fn path_dependency_on_copied_test_skeleton(
+    workspace_root: &Path,
+    dependency_key: &str,
+    skeleton_name: &str,
+) -> Result<String, Box<dyn Error>> {
+    let relative = format!("skeletons/{skeleton_name}");
+    copy_directory(
+        &checked_in_test_skeleton(skeleton_name),
+        &workspace_root.join(&relative),
+    )?;
+    Ok(format!("{dependency_key} = {{ path = \"{relative}\" }}\n"))
+}
+
+/// Copies the directory `source` and everything under it to `destination`,
+/// walking an explicit stack of directories still to copy.
+fn copy_directory(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
+    let mut pending = vec![(source.to_path_buf(), destination.to_path_buf())];
+    while let Some((source_directory, destination_directory)) = pending.pop() {
+        fs::create_dir_all(&destination_directory)?;
+        for entry in fs::read_dir(&source_directory)? {
+            let entry = entry?;
+            let target = destination_directory.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                pending.push((entry.path(), target));
+            } else {
+                fs::copy(entry.path(), target)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// A `path = "…"` dependency line naming `dependency_key`, pointing at
 /// `absolute_path`.
 pub(crate) fn path_dependency_on(dependency_key: &str, absolute_path: &Path) -> String {

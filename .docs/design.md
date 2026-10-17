@@ -2236,7 +2236,106 @@ workspace does not fetch them all: a build leaves out packages locked for other
 platforms, and dev-dependencies, which is how `wear` adds a skeleton. Running
 `cargo fetch --locked` first, or `check`, which reads with the network allowed,
 is the wearer's own responsibility. The library's `check` reads the same way
-and needs the same.
+and needs the same. Its `check_without_cargo` runs no cargo and needs no cargo
+home; see the next paragraphs for what it needs instead.
+
+**The library's `check_without_cargo` reads the manifests and `Cargo.lock` as
+files, so it needs the caller to say where the files of each locked package that
+is not a path on disk are.** A path package is found from the manifests. A
+package with a registry or git `source` in the lockfile is found in the
+directory the caller gives for its name, version and source, if that directory's
+`Cargo.toml` names the package at that version. A wearing whose package has no
+usable location is not an error: it is an `unlocated` refusal in the report,
+which names the package to supply, and every other wearing is still reported.
+The command line never prints that kind, because it reads only through cargo.
+
+**`check_without_cargo` refuses what it would have to guess, and reports through
+one stale shape.** It refuses by name a workspace that uses `[patch]`,
+`[replace]` or `package.workspace`, one package under two dependency keys, two
+path packages sharing a name and version, a wearing whose own dependency is
+declared with `registry =`, a lockfile in a format other than 3 or 4, a `git`
+URL with a query of its own, a locked git source whose query is not one
+`branch`, `tag` or `rev`, a `[workspace.dependencies]` entry that writes both
+`git` and `path`, a non-empty `paths`, a `[patch]` with an entry or any
+`include` in a cargo configuration file, and an optional dependency that asks a
+worn package for a version the lock does not name, because reproducing cargo's
+resolution of any of them is cargo's job and a refusal can never be a report
+that differs from cargo's. The `registry =` name is refused because only cargo's
+configuration says which index it stands for, so the lock entry could name
+another registry's package.
+
+The configuration refusals are the three keys that change which package or
+which files cargo reads: `paths` puts a package at another directory and gets
+past `--locked` doing it, so no lock check would see it; `[patch]` in a
+configuration file does what the manifest's does and shows up as a stale lock
+where `check` is current; `include` pulls in whatever the cargo that runs adds.
+Reading them to follow them is resolution, so they are refused. The files are
+those cargo reads when started in the directory given: `.cargo/config` or
+`config.toml` there and in each directory above, then the cargo home's. The
+home is `CARGO_HOME`, else `$HOME/.cargo`, a relative one taken from the
+directory given, as cargo started there takes it; with neither set there is
+none, where cargo asks the system's user database and this library does not.
+`--config` and the `CARGO_*` variables other than `CARGO_HOME` are not read,
+because they belong to the caller's invocation and not to the workspace, which
+is all the files can show. A `[source]` replacement is read past: it moves where
+cargo reads a package and never which package the lock names, so the report
+cannot differ. Two spellings of one git repository are one source after cargo's
+canonicalisation, which the lock holds only one spelling of; comparing the URLs
+as written would call a lock cargo just wrote stale, and so the reader ports
+that canonicalisation and does not compare text. A git URL with a query of its
+own is the one shape it does not port: cargo keeps that query in the lock's
+source and writes the reference after it (`?x=1?branch=dev`), and reproducing
+that is not worth it for a shape this rare, so a manifest URL with any query, an
+empty one included, and a lock source whose query is not exactly one `branch`,
+`tag` or `rev` are refused by name, before currency could call the lock stale.
+That refusal is for a manifest whose sources are compared with the lock's. A
+manifest whose sources never are is read past the query, as cargo reads it: a
+located package's own, whose declarations are kept only for their names, and
+those the optional-dependency walk reaches.
+
+The optional-dependency refusal covers an optional dependency of a package
+outside the workspace, or of a path package one reaches, whose requirement on a
+worn package the locked version does not meet and cargo has no way to add beside
+it. For a registry package that is a requirement a version of the same
+compatible range could meet. Once a feature enables it cargo keeps the version
+it has, finds it too old and cannot select one, and a relock does not change
+that, so it is not the stale lock whose relocked document the report equals;
+only updating the worn package helps. A path or git source holds exactly one
+version, so for a worn package from one the range plays no part: any requirement
+the locked version does not meet is refused, in whatever range it is written,
+and a relock does not get past it. It is a refusal and not a reproduction
+because the reproduction is the resolver's choice of an updated version. The
+reader does not resolve features, so it refuses whenever a feature could enable
+the dependency, and a workspace where nothing does is refused too, though cargo
+reads it. A registry package's requirement in another range is left alone, since
+cargo adds a second version beside the locked one and the lock only needs
+rewriting. The walk passes over a reached manifest it cannot read only where
+cargo cannot load it either, and only for two shapes: a manifest that is not
+there, and a dependency that writes both `git` and `path`. The same entry in a
+root's `[workspace.dependencies]` is not passed over, because cargo loads it
+until a member inherits it. Any other manifest it
+cannot read is refused, naming the file, though cargo may never load that
+package. A git URL with a query of its own does not stop the walk, because cargo
+loads that manifest: the package is read whole and its other requirements are
+judged. A requirement
+inside a registry package's manifest is out of reach, which is the limit left:
+an unlocked registry dependency that needs a newer version of a worn package is
+a lock cargo refuses until the package is updated, the update takes the newest
+compatible version, and the report shows the version the lock names, which it
+says in `WornSkeleton::version`.
+
+The reader checks the lock against the manifests as far as the files show:
+every package on disk is locked, each package's declarations are among its
+entry's dependencies, and the lock holds nothing cargo would drop, so a stale
+lock gets the abort `check` gives. It does not see a feature change on a package
+outside the workspace that enables or disables an optional dependency, because
+that is decided by cargo's resolver. `check` aborts there and asks for the lock
+to be brought up to date; `check_without_cargo`
+reads the lock as it stands, and the report is still right, because it reads the
+members, their wearing tables and the package each wearing's dependency is
+locked to, and the change touches none of them. It is the report `check` gives
+once the lock is current. A dependency outside the wearings that moved
+registries is a named limit, read as the lock has it.
 
 **`remove` edits the command line's own manifest and nothing else.** A
 dependency that member inherited from `[workspace.dependencies]` leaves the

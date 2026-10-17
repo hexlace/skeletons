@@ -23,6 +23,25 @@ pub(crate) struct Document {
     pub(crate) workspace_members: Vec<String>,
     pub(crate) packages: Vec<Package>,
     pub(crate) resolve: Resolve,
+    /// Packages the resolve graph names but whose files are not known: a
+    /// reader that does not run cargo holds a lockfile entry for them and no
+    /// manifest. Always empty from `cargo metadata`, which locates every
+    /// package it lists, so it is never read from JSON.
+    #[serde(skip)]
+    pub(crate) unlocated: Vec<UnlocatedPackage>,
+}
+
+/// One package a resolve edge points at whose manifest is not available:
+/// what `Cargo.lock` says about it, and nothing from its files.
+#[derive(Debug)]
+pub(crate) struct UnlocatedPackage {
+    /// The id resolve edges name this package by.
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) version: String,
+    /// The lockfile's `source` for it, which is always set: a package without
+    /// one is a path package, and its files are read from the manifests.
+    pub(crate) source: String,
 }
 
 /// One package in the resolved graph — a workspace member or a dependency,

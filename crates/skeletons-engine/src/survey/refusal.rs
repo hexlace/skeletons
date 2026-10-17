@@ -7,7 +7,7 @@ mod message;
 
 use crate::claim::{Overlap, UnsafePathCause};
 use crate::skeleton::RenderError;
-use crate::workspace::{OptionShapeRefusal, WearingRefusal, WornId};
+use crate::workspace::{LockedPackageId, OptionShapeRefusal, WearingRefusal, WornId};
 
 #[cfg(feature = "commands")]
 pub(crate) use message::{
@@ -74,6 +74,9 @@ pub enum RefusalKind {
     Ambiguous,
     /// The resolved package is not a skeleton.
     NotASkeleton,
+    /// The dependency resolved to a locked package whose files are not
+    /// available, so whether it is a skeleton is unknown.
+    Unlocated,
     /// What was recorded for the skeleton's options was refused: a value of
     /// the wrong shape or outside what the option allows, a value for an
     /// option the skeleton does not declare, or values whose render is too
@@ -99,6 +102,7 @@ impl RefusalKind {
             Self::Unresolved => "unresolved",
             Self::Ambiguous => "ambiguous",
             Self::NotASkeleton => "not-a-skeleton",
+            Self::Unlocated => "unlocated",
             Self::OptionRefused => "option-refused",
             Self::SkeletonInvalid => "skeleton-invalid",
             Self::Overlap => "overlap",
@@ -131,6 +135,9 @@ pub struct RefusalRecord {
     /// The claimed paths it concerns, relative to the workspace root; empty
     /// when it concerns none.
     pub paths: Vec<String>,
+    /// The locked package whose files were not available, for an `unlocated`
+    /// refusal; `None` for every other kind.
+    pub unlocated_package: Option<LockedPackageId>,
 }
 
 impl Refusal {
@@ -144,6 +151,7 @@ impl Refusal {
                 WearingRefusal::Unresolved { .. } => RefusalKind::Unresolved,
                 WearingRefusal::Ambiguous { .. } => RefusalKind::Ambiguous,
                 WearingRefusal::NotASkeleton { .. } => RefusalKind::NotASkeleton,
+                WearingRefusal::Unlocated { .. } => RefusalKind::Unlocated,
             },
             Self::OptionShape { .. } => RefusalKind::OptionRefused,
             // A render refusal about a specific file is a defect in the
@@ -215,10 +223,26 @@ impl Refusal {
                 vec![path.clone()],
             ),
         };
+        let unlocated_package = match self {
+            Self::Wearing(WearingRefusal::Unlocated { package, .. }) => Some(package.clone()),
+            Self::Wearing(
+                WearingRefusal::NotATable { .. }
+                | WearingRefusal::ReservedKey { .. }
+                | WearingRefusal::NamesNoDependency { .. }
+                | WearingRefusal::Unresolved { .. }
+                | WearingRefusal::Ambiguous { .. }
+                | WearingRefusal::NotASkeleton { .. },
+            )
+            | Self::OptionShape { .. }
+            | Self::Render { .. }
+            | Self::Overlap(_)
+            | Self::UnsafePath { .. } => None,
+        };
         RefusalRecord {
             kind: self.classify(),
             wearings,
             paths,
+            unlocated_package,
         }
     }
 
@@ -273,6 +297,11 @@ fn wearing_of(wearing: &WearingRefusal) -> RefusedWearing {
             dependency,
             package: (name, _),
         } => refused_wearing(manifest, Some(dependency), Some(name)),
+        WearingRefusal::Unlocated {
+            manifest,
+            dependency,
+            package,
+        } => refused_wearing(manifest, Some(dependency), Some(&package.name)),
     }
 }
 
@@ -294,7 +323,9 @@ mod tests {
     use crate::claim::{Claimant, Overlap, UnsafePathCause};
     use crate::skeleton::{Reason, RenderError, SkeletonIdentity};
     use crate::survey::poison::{REFUSAL_KINDS, assert_every_kind, claim, kind_index};
-    use crate::workspace::{OptionShapeRefusal, ShapeFound, WearingRefusal, WornId};
+    use crate::workspace::{
+        LockedPackageId, OptionShapeRefusal, ShapeFound, WearingRefusal, WornId,
+    };
 
     fn wearing(manifest: &str, dependency: Option<&str>, package: Option<&str>) -> RefusedWearing {
         RefusedWearing {
@@ -325,6 +356,15 @@ mod tests {
             kind,
             wearings,
             paths: paths.iter().map(|path| (*path).to_owned()).collect(),
+            unlocated_package: None,
+        }
+    }
+
+    fn unlocated_id() -> LockedPackageId {
+        LockedPackageId {
+            name: "a-crate".to_owned(),
+            version: "0.1.0".to_owned(),
+            source: "registry+https://example.test/index".to_owned(),
         }
     }
 
@@ -338,6 +378,7 @@ mod tests {
     /// Every shape of refusal there is, each with the record it must report.
     fn samples() -> Vec<Sample> {
         let mut samples = wearing_samples();
+        samples.push(unlocated_sample());
         samples.extend(survey_samples());
         samples
     }
@@ -435,6 +476,27 @@ mod tests {
                 ),
             ),
         ]
+    }
+
+    /// The refusal of a wearing whose package has no files to read, the one
+    /// whose record names the package.
+    fn unlocated_sample() -> Sample {
+        (
+            "a package with no files to read",
+            Refusal::Wearing(WearingRefusal::Unlocated {
+                manifest: "member/Cargo.toml".to_owned(),
+                dependency: "ci".to_owned(),
+                package: unlocated_id(),
+            }),
+            RefusalRecord {
+                unlocated_package: Some(unlocated_id()),
+                ..record(
+                    RefusalKind::Unlocated,
+                    on_member(Some("ci"), Some("a-crate")),
+                    &[],
+                )
+            },
+        )
     }
 
     /// The refusals made once a skeleton has been located and rendered.
@@ -549,6 +611,27 @@ mod tests {
         for (name, refusal, expected) in samples {
             assert_eq!(refusal.record(), expected, "{name}");
         }
+    }
+
+    #[test]
+    fn a_record_names_an_unlocated_package_only_for_the_unlocated_kind() {
+        // Across a sample of every shape of refusal, the record's
+        // `unlocated_package` is `Some` exactly when its kind is `Unlocated`,
+        // and then it is the package the refusal was made with.
+        for (name, refusal, expected) in samples() {
+            let record = refusal.record();
+            assert_eq!(
+                record.unlocated_package.is_some(),
+                expected.kind == RefusalKind::Unlocated,
+                "{name}"
+            );
+        }
+        let unlocated = Refusal::Wearing(WearingRefusal::Unlocated {
+            manifest: "member/Cargo.toml".to_owned(),
+            dependency: "ci".to_owned(),
+            package: unlocated_id(),
+        });
+        assert_eq!(unlocated.record().unlocated_package, Some(unlocated_id()));
     }
 
     #[test]

@@ -9,14 +9,9 @@
 
 use std::path::{Path, PathBuf};
 
+use super::crates_io_source::CRATES_IO_SOURCE;
+use super::git_query::{GitQuery, parsed_git_query};
 use crate::git::ObjectId;
-
-/// The source `cargo metadata` reports for a crates.io dependency, always
-/// exactly this string — including when `[source.crates-io] replace-with`
-/// serves it from somewhere else, and including in the offline,
-/// vendored-directory fixtures `ritual`'s tests use. Exposed for
-/// `check/json.rs`, which reports it verbatim as a registry pin's `source`.
-pub(crate) const CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
 /// How a worn skeleton is pinned to one version, and what a remote could ever
 /// say about it being newer.
@@ -140,40 +135,6 @@ impl Pin {
                 source: whole_source.to_owned(),
             },
         }
-    }
-}
-
-/// One of the three query shapes a git source's query string can decode to.
-enum GitQuery {
-    Tag(String),
-    Branch(String),
-    Rev(String),
-}
-
-/// Decodes a git source's query string (already percent-decoded key by key,
-/// since cargo percent-encodes a `/` inside a branch or tag name) into
-/// exactly one of `tag`, `branch` or `rev` — `None` for an unknown key, a
-/// duplicated one, or more than one of the three at once.
-fn parsed_git_query(query: &str) -> Option<GitQuery> {
-    let mut tag = None;
-    let mut branch = None;
-    let mut rev = None;
-
-    for (key, value) in form_urlencoded::parse(query.as_bytes()) {
-        let value = value.into_owned();
-        match key.as_ref() {
-            "tag" if tag.is_none() => tag = Some(value),
-            "branch" if branch.is_none() => branch = Some(value),
-            "rev" if rev.is_none() => rev = Some(value),
-            _ => return None,
-        }
-    }
-
-    match (tag, branch, rev) {
-        (Some(tag), None, None) => Some(GitQuery::Tag(tag)),
-        (None, Some(branch), None) => Some(GitQuery::Branch(branch)),
-        (None, None, Some(rev)) => Some(GitQuery::Rev(rev)),
-        _ => None,
     }
 }
 

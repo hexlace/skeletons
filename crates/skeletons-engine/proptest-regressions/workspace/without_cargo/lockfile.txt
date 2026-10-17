@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 86607fc4aec4159d6b0fac4810bb4a505d030eb2f6abb16aadcf8d346e380a0e # shrinks to packages = [Generated { name: "a", version: "0.1.0", spelled_source: Some("git+https://example.invalid/dep"), commit: Some("aa0000aa00aaaaaa00aaa0a0aa0000aaa0aaa00a") }, Generated { name: "a", version: "0.1.0", spelled_source: None, commit: None }], picks = [[], [(6, 2)], [], [], [], [], [], []]

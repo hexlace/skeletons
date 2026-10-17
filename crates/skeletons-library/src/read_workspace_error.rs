@@ -170,10 +170,11 @@ impl ReadWorkspaceError {
     /// file that is missing, is not TOML or not in cargo's shape, a workspace
     /// member or path dependency with no `Cargo.toml`, a lock entry that names
     /// no package, a package with no target, no manifest at or above the
-    /// directory, or a configuration file whose `paths` is not an array or
-    /// whose `patch` is not a table. [`detail`](Self::detail) names the file
-    /// and what was wrong. `check` never makes this true. The command line has
-    /// no word for it.
+    /// directory, a configuration file whose `paths` is not an array or
+    /// whose `patch` is not a table, or a `git` dependency whose URL is not
+    /// one cargo reads, such as `git@github.com:foo/bar.git`.
+    /// [`detail`](Self::detail) names the file and what was wrong. `check`
+    /// never makes this true. The command line has no word for it.
     #[must_use]
     pub fn is_manifest_or_lockfile_unreadable(&self) -> bool {
         matches!(self.kind, ErrorKind::ManifestOrLockfileUnreadable)

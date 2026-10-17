@@ -6,6 +6,7 @@
 //! only part that touches the file system, and it ends in the same document the readers of
 //! `cargo metadata`'s output share.
 
+mod canonical_git_url;
 mod cargo_configuration;
 mod currency;
 mod document;

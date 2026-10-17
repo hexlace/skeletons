@@ -2,14 +2,17 @@
 
 use crate::workspace::crates_io_source::CRATES_IO_SOURCE;
 use crate::workspace::git_query::{GitQuery, parsed_git_query};
+use crate::workspace::without_cargo::canonical_git_url::CanonicalGitUrl;
 use crate::workspace::without_cargo::package_manifest::{DeclaredSource, GitReference};
 
 /// Whether `locked`, a package's `source` in `Cargo.lock` (`None` for a path package), is what a
 /// declaration from `declared` resolves to.
 ///
 /// A path declaration is locked with no source. A git declaration is locked with its url as
-/// written and its one reference as a decoded query, so `branch=feat%2Fx` is the branch
-/// `feat/x`; a declaration naming no reference is locked with no query. A registry declaration
+/// Cargo wrote it, which is not always how the manifest spells it, so the two are compared as
+/// Cargo canonicalises them, and with its one reference as a decoded query, so
+/// `branch=feat%2Fx` is the branch `feat/x`; a declaration naming no reference is locked with no
+/// query. A registry declaration
 /// with no `registry =` name is locked from crates.io exactly, and one with a name from some
 /// registry: this reader has no Cargo configuration to say which index a name stands for.
 pub(super) fn agrees(locked: Option<&str>, declared: &DeclaredSource) -> bool {
@@ -26,8 +29,9 @@ pub(super) fn agrees(locked: Option<&str>, declared: &DeclaredSource) -> bool {
     }
 }
 
-/// Whether the git `source` `git+<url>[?<query>]#<commit>` is `url` at `reference`.
-fn git_agrees(source: &str, url: &str, reference: &GitReference) -> bool {
+/// Whether the git `source` `git+<url>[?<query>]#<commit>` is `url` at `reference`, the URLs
+/// compared as Cargo canonicalises them. A locked URL that is not one Cargo reads is not `url`.
+fn git_agrees(source: &str, url: &CanonicalGitUrl, reference: &GitReference) -> bool {
     let Some(without_kind) = source.strip_prefix("git+") else {
         return false;
     };
@@ -38,7 +42,8 @@ fn git_agrees(source: &str, url: &str, reference: &GitReference) -> bool {
         Some((locked_url, query)) => (locked_url, Some(query)),
         None => (without_commit, None),
     };
-    locked_url == url && locked_reference(query).as_ref() == Some(reference)
+    CanonicalGitUrl::parse(locked_url).as_ref() == Ok(url)
+        && locked_reference(query).as_ref() == Some(reference)
 }
 
 /// The reference a git source's `query` names: the remote's default branch when there is none,
@@ -66,13 +71,19 @@ mod tests {
     use std::path::PathBuf;
 
     use super::agrees;
+    use crate::workspace::without_cargo::canonical_git_url::CanonicalGitUrl;
     use crate::workspace::without_cargo::package_manifest::{DeclaredSource, GitReference};
 
     const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
     fn git(reference: GitReference) -> DeclaredSource {
+        git_at("https://example.test/g", reference)
+    }
+
+    /// A git declaration of the URL `url` as the manifest writes it.
+    fn git_at(url: &str, reference: GitReference) -> DeclaredSource {
         DeclaredSource::Git {
-            url: "https://example.test/g".to_owned(),
+            url: CanonicalGitUrl::parse(url).expect("a URL cargo reads"),
             reference,
         }
     }
@@ -158,6 +169,97 @@ mod tests {
         assert!(!agrees(
             Some(&source),
             &git(GitReference::Tag("v1".to_owned()))
+        ));
+    }
+
+    #[test]
+    fn a_git_url_respelled_the_way_cargo_canonicalises_it_agrees() {
+        // Cargo writes the lockfile with the first spelling it saw of a source, and reads the
+        // other spellings as the same one: the trailing slash, `.git`, GitHub's case and its
+        // protocol, a host's case and a default port.
+        let source = format!("git+https://github.com/Foo/Bar#{COMMIT}");
+
+        for spelling in [
+            "https://github.com/Foo/Bar/",
+            "https://github.com/foo/bar",
+            "https://github.com/Foo/Bar.git",
+            "https://GitHub.com/Foo/Bar",
+            "https://github.com:443/foo/bar",
+            "git://github.com/foo/bar",
+        ] {
+            assert!(
+                agrees(
+                    Some(&source),
+                    &git_at(spelling, GitReference::DefaultBranch)
+                ),
+                "{spelling}"
+            );
+        }
+        assert!(agrees(
+            Some(&format!("git+https://example.com/Foo/Bar.git/#{COMMIT}")),
+            &git_at(
+                "https://Example.COM:443/Foo/Bar",
+                GitReference::DefaultBranch
+            )
+        ));
+    }
+
+    #[test]
+    fn a_git_url_cargo_keeps_apart_disagrees() {
+        // Respellings that name another source to Cargo: the case of a path off GitHub, a
+        // `www.` host, an ssh remote with its user name, and an escape the parser keeps.
+        let github = format!("git+https://github.com/Foo/Bar#{COMMIT}");
+        for spelling in [
+            "https://www.github.com/Foo/Bar",
+            "ssh://git@github.com/foo/bar",
+        ] {
+            assert!(
+                !agrees(
+                    Some(&github),
+                    &git_at(spelling, GitReference::DefaultBranch)
+                ),
+                "{spelling}"
+            );
+        }
+        let elsewhere = format!("git+https://example.com/Foo/Bar#{COMMIT}");
+        assert!(!agrees(
+            Some(&elsewhere),
+            &git_at("https://example.com/foo/bar", GitReference::DefaultBranch)
+        ));
+        let escaped = format!("git+file:///tmp/re%70o#{COMMIT}");
+        assert!(!agrees(
+            Some(&escaped),
+            &git_at("file:///tmp/repo", GitReference::DefaultBranch)
+        ));
+    }
+
+    #[test]
+    fn a_respelled_git_url_still_has_to_name_the_same_reference() {
+        let source = format!("git+https://example.test/g?branch=main#{COMMIT}");
+
+        assert!(agrees(
+            Some(&source),
+            &git_at(
+                "https://example.test/g.git/",
+                GitReference::Branch("main".to_owned())
+            )
+        ));
+        assert!(!agrees(
+            Some(&source),
+            &git_at(
+                "https://example.test/g.git/",
+                GitReference::Branch("dev".to_owned())
+            )
+        ));
+    }
+
+    #[test]
+    fn a_locked_git_url_cargo_cannot_read_disagrees() {
+        let source = format!("git+git@github.com:foo/bar.git#{COMMIT}");
+
+        assert!(!agrees(
+            Some(&source),
+            &git_at("https://github.com/foo/bar", GitReference::DefaultBranch)
         ));
     }
 

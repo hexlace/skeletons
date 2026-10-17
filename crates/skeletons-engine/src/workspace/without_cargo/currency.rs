@@ -4,8 +4,11 @@
 //! `--locked` makes Cargo resolve the workspace again and refuse when the lockfile it would write
 //! is not the one on disk. This module reproduces that verdict for the cases a reader of the
 //! manifests can see, which is every case that involves only path packages and the declarations
-//! and lock entries of every package. What it does not decide needs Cargo's feature resolution or
-//! its configuration, and the library's readme names both.
+//! and lock entries of every package. A git source is compared by its URL after Cargo's own
+//! canonicalisation (`canonical_git_url.rs`), because the lockfile holds one spelling of it, the
+//! first Cargo met, and Cargo reads every other spelling of the same repository as the same
+//! source. What it does not decide needs Cargo's feature resolution or its configuration, and the
+//! library's readme names both.
 
 mod locked_source;
 mod reachability;

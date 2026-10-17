@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use super::super::canonical_git_url::CanonicalGitUrl;
 use super::super::text_error::TextError;
 use super::{RawDependencies, RawDependencyTables, RawManifest, WorkspaceRoot};
 
@@ -36,9 +37,10 @@ pub(crate) enum DeclaredSource {
     /// that wrote it, or of the workspace root for a dependency inherited from it, and is not
     /// normalized.
     Path { directory: PathBuf },
-    /// A `git` dependency, with the one reference it names.
+    /// A `git` dependency, with the one reference it names. The URL is held canonicalised, as
+    /// Cargo compares it, because the lockfile may spell it another way.
     Git {
-        url: String,
+        url: CanonicalGitUrl,
         reference: GitReference,
     },
     /// A registry dependency, from the named registry or from crates.io when there is none.
@@ -266,8 +268,13 @@ impl Written<'_> {
     /// Where the entry says its package comes from.
     fn source(&self) -> Result<DeclaredSource, TextError> {
         match (self.string("git")?, self.string("path")?) {
-            (Some(url), None) => Ok(DeclaredSource::Git {
-                url,
+            (Some(text), None) => Ok(DeclaredSource::Git {
+                url: CanonicalGitUrl::parse(&text).map_err(|reason| {
+                    TextError::unreadable(format!(
+                        "{} `{}`: `git = \"{text}\"` is not a URL cargo reads: {reason}",
+                        self.site.table, self.key
+                    ))
+                })?,
                 reference: self.git_reference()?,
             }),
             (Some(_), Some(_)) => Err(TextError::unsupported(format!(
@@ -311,13 +318,18 @@ mod tests {
     use proptest::prelude::*;
 
     use super::super::PackageManifest;
-    use super::{Declaration, DeclaredSource, GitReference};
+    use super::{CanonicalGitUrl, Declaration, DeclaredSource, GitReference};
     use crate::workspace::without_cargo::text_error::TextErrorKind;
 
     /// Reads `text` as the manifest in `/w/crates/a`, with no workspace above it.
     fn parsed(text: &str) -> PackageManifest {
         PackageManifest::parse(text, Path::new("/w/crates/a"), None)
             .expect("the manifest in this test is well formed")
+    }
+
+    /// The URL `text` after Cargo's canonicalisation, as a test's expected value.
+    fn git_url(text: &str) -> CanonicalGitUrl {
+        CanonicalGitUrl::parse(text).expect("a URL cargo reads")
     }
 
     /// A registry declaration of crates.io, as a test's expected value.
@@ -519,30 +531,65 @@ by_tag = { git = "https://example.invalid/g", tag = "v1" }
             .declarations()
             .iter()
             .map(|declaration| match &declaration.source {
-                DeclaredSource::Git { url, reference } => (url.as_str(), reference.clone()),
+                DeclaredSource::Git { url, reference } => (url.clone(), reference.clone()),
                 DeclaredSource::Path { .. } | DeclaredSource::Registry { .. } => {
                     panic!("`{}` should be a git dependency", declaration.key)
                 }
             })
             .collect();
+        let url = git_url("https://example.invalid/g");
         assert_eq!(
             references,
             [
-                (
-                    "https://example.invalid/g",
-                    GitReference::Branch("feat/x".to_owned())
-                ),
-                ("https://example.invalid/g", GitReference::DefaultBranch),
-                (
-                    "https://example.invalid/g",
-                    GitReference::Rev("abc123".to_owned())
-                ),
-                (
-                    "https://example.invalid/g",
-                    GitReference::Tag("v1".to_owned())
-                ),
+                (url.clone(), GitReference::Branch("feat/x".to_owned())),
+                (url.clone(), GitReference::DefaultBranch),
+                (url.clone(), GitReference::Rev("abc123".to_owned())),
+                (url, GitReference::Tag("v1".to_owned())),
             ]
         );
+    }
+
+    #[test]
+    fn a_git_url_is_held_as_cargo_canonicalises_it() {
+        let manifest = parsed(
+            "[package]\nname = \"a\"\n[dependencies]\n\
+             g = { git = \"https://GitHub.com/Foo/Bar.git/\" }\n",
+        );
+
+        let [declaration] = manifest.declarations() else {
+            panic!("one declaration");
+        };
+        let DeclaredSource::Git { url, .. } = &declaration.source else {
+            panic!("a git dependency");
+        };
+        assert_eq!(url.as_str(), "https://github.com/foo/bar");
+    }
+
+    #[test]
+    fn a_git_url_cargo_refuses_makes_the_manifest_unreadable() {
+        // An scp-style address does not parse, and a host and path with no scheme parses as a
+        // URL that cannot be a base: Cargo refuses the manifest for either, and the error
+        // names the table, the key and the URL as written.
+        for (url, reason) in [
+            ("git@github.com:foo/bar.git", "relative URL without a base"),
+            (
+                "github.com:foo/bar",
+                "cannot-be-a-base-URLs are not supported",
+            ),
+        ] {
+            let error = PackageManifest::parse(
+                &format!("[package]\nname = \"a\"\n[dependencies]\ng = {{ git = \"{url}\" }}\n"),
+                Path::new("/w"),
+                None,
+            )
+            .expect_err("a git URL cargo refuses");
+
+            assert_eq!(error.kind(), TextErrorKind::Unreadable);
+            assert_eq!(
+                error.detail(),
+                format!("[dependencies] `g`: `git = \"{url}\"` is not a URL cargo reads: {reason}")
+            );
+        }
     }
 
     #[test]
@@ -740,7 +787,7 @@ a = { git = "https://aaa.invalid/a", rev = "aaaa0aa" }
                 is_dev: false,
                 is_optional: false,
                 source: DeclaredSource::Git {
-                    url: "https://aaa.invalid/a".to_owned(),
+                    url: git_url("https://aaa.invalid/a"),
                     reference: GitReference::Rev("aaaa0aa".to_owned()),
                 },
                 version_requirement: None,
@@ -863,7 +910,7 @@ a = { git = "https://aaa.invalid/a", rev = "aaaa0aa" }
                         directory: PathBuf::from(format!("/w/crates/a/{path}")),
                     },
                     GeneratedSource::Git(url, reference) => DeclaredSource::Git {
-                        url: url.clone(),
+                        url: git_url(url),
                         reference: reference.clone(),
                     },
                     GeneratedSource::Registry(name) => {

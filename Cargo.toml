@@ -90,6 +90,18 @@ semver = { version = "1.0.28", default-features = false, features = ["std"] }
 # where it parses a source's URL, through the `url` crate, which decodes them
 # with this crate.
 form_urlencoded = "1.2.2"
+# Comparing a git dependency's URL with the one `Cargo.lock` holds
+# (`workspace/without_cargo/canonical_git_url.rs`): Cargo's own URL type, `url::Url`,
+# canonicalised the way Cargo does. The lockfile holds that type's serialisation of the first
+# spelling of a source, and Cargo calls two spellings one source when their canonical forms are
+# equal, so comparing them as Cargo does takes the parser itself: it lowercases a host, drops a
+# default port, resolves dot segments, escapes a path and maps a Unicode host to Punycode, none
+# of which a string comparison reproduces. That makes `idna` non-optional, and with it the
+# ICU4X crates it normalises through (`icu_*`, `zerovec`, `yoke` and their small helpers); all
+# are `MIT OR Apache-2.0` or `Unicode-3.0`. `std` alone is the build without `serde`. Newer
+# releases of `idna_adapter` and the `icu_*` crates need a Rust newer than `rust-version`; the
+# resolver keeps to the ones that build on it, so an update must not turn that fallback off.
+url = { version = "2.5.8", default-features = false, features = ["std"] }
 # Expanding a workspace's `members` entries into directories when a workspace is
 # read without Cargo (`workspace/without_cargo/member_patterns.rs`): Cargo's own
 # matcher, from rust-lang, with the same rules for `*`, `?`, `[…]` and `**` and for

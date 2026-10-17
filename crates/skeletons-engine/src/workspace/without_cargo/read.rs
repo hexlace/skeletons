@@ -42,8 +42,9 @@ const LOCKFILE_NAME: &str = "Cargo.lock";
 ///
 /// [`ReadWithoutCargoError::DirectoryNotFound`] when `directory` cannot be read,
 /// [`ReadWithoutCargoError::ManifestUnreadable`] when a manifest, the lockfile or a configuration
-/// file cannot be, or Cargo refuses it too (a virtual workspace with no members, and a
-/// configuration file that is not TOML, are two),
+/// file cannot be, or Cargo refuses it too (a virtual workspace with no members, a
+/// configuration file that is not TOML and a `git` dependency whose URL is not one Cargo reads,
+/// such as `git@github.com:foo/bar.git`, are three),
 /// [`ReadWithoutCargoError::Unsupported`] when the workspace uses something only Cargo reads
 /// (`[patch]`, `[replace]`, `package.workspace`, one package under two dependency keys, a lockfile
 /// format other than 3 and 4, and in a configuration file `paths`, `[patch]` or `include`), and

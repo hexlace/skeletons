@@ -71,6 +71,9 @@ semver.workspace = true
 # Decoding a git source's query string (`workspace/git_query.rs`), for `behind`'s pin
 # and for reading a workspace without Cargo.
 form_urlencoded.workspace = true
+# Reading a git dependency's URL as Cargo does, to compare it with the lockfile's
+# (`workspace/without_cargo/canonical_git_url.rs`).
+url.workspace = true
 # Expanding a workspace's `members` entries, for reading a workspace without Cargo
 # (`workspace/without_cargo/member_patterns.rs`).
 glob.workspace = true

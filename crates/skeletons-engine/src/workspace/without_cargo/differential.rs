@@ -238,6 +238,45 @@ fn a_path_dependency_of_an_outsider_is_in_the_graph_only_when_cargo_puts_it_ther
 }
 
 #[test]
+fn an_optional_dependency_of_an_outsider_enabled_by_default_and_just_locked_agrees() {
+    // `outside` enables its optional path dependency `enabled` by default, and cargo locks it
+    // with `enabled` listed under `outside`. The reader takes that listing as the sign that the
+    // feature is on, so both documents must hold `enabled`, with the same shape everywhere else.
+    let fixture = workspace_with_app(
+        "",
+        "[dependencies]\noutside = { path = \"../../outside\" }\n",
+    );
+    fixture.package(
+        "../outside",
+        "outside",
+        "[dependencies]\nenabled = { path = \"../enabled\", optional = true }\n\
+         [features]\ndefault = [\"enabled\"]\n",
+    );
+    fixture.package("../enabled", "enabled", "");
+    let toolchain = cargo_version();
+    fixture
+        .lock_with_cargo()
+        .unwrap_or_else(|stderr| panic!("{toolchain} could not lock the workspace: {stderr}"));
+
+    let own = read_document(&fixture.root, &BTreeMap::new())
+        .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the workspace: {error}"));
+    let cargo = cargo_metadata::fetch(&fixture.root, Network::Refused)
+        .unwrap_or_else(|error| panic!("{toolchain}: cargo metadata refused it: {error:?}"));
+
+    for (side, shape) in [("the reader", shape(&own)), ("cargo", shape(&cargo))] {
+        assert!(
+            shape
+                .packages
+                .iter()
+                .any(|(name, version, _)| name == "enabled" && version == "0.0.0"),
+            "{toolchain}: {side} left `enabled` out of the graph: {:?}",
+            shape.packages
+        );
+    }
+    assert_eq!(shape(&own), shape(&cargo), "on {toolchain}");
+}
+
+#[test]
 fn a_renamed_dependency_agrees() {
     let fixture = workspace_with_app(
         "",

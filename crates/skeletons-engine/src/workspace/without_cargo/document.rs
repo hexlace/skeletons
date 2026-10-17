@@ -15,6 +15,7 @@ use super::lock_entries::{path_entry_index, set_aside_entries};
 use super::lockfile::{LockEntry, Lockfile};
 use super::package_manifest::{Declaration, DeclaredSource};
 use super::path_package::PathPackage;
+use super::worn_entries::worn_entries;
 use crate::workspace::LockedPackageId;
 use crate::workspace::crate_name::underscored;
 use crate::workspace::schema::{
@@ -40,6 +41,8 @@ struct Collector<'input> {
     locations: &'input BTreeMap<LockedPackageId, PathBuf>,
     /// Entries that Cargo drops on loading the lockfile.
     set_aside: std::collections::BTreeSet<usize>,
+    /// Entries a wearing can resolve to, the only ones whose location is read.
+    worn: std::collections::BTreeSet<usize>,
     /// What each entry with a source resolved to, so a package two members depend on is read
     /// once.
     resolved: BTreeMap<usize, Resolution>,
@@ -61,11 +64,14 @@ pub(super) fn build(
     lockfile: &Lockfile,
     locations: &BTreeMap<LockedPackageId, PathBuf>,
 ) -> Result<Document, ReadWithoutCargoError> {
+    let set_aside = set_aside_entries(lockfile, &layout.packages);
+    let worn = worn_entries(layout, lockfile, &set_aside);
     let mut collector = Collector {
         layout,
         lockfile,
         locations,
-        set_aside: set_aside_entries(lockfile, &layout.packages),
+        set_aside,
+        worn,
         resolved: BTreeMap::new(),
         located: Vec::new(),
         unlocated: Vec::new(),
@@ -165,7 +171,7 @@ impl Collector<'_> {
         let entry = &lockfile.entries()[index];
         let resolution = match entry.source() {
             None => self.path_resolution(entry)?,
-            Some(source) => self.sourced_resolution(entry, source)?,
+            Some(source) => self.sourced_resolution(index, entry, source)?,
         };
         self.resolved.insert(index, resolution.clone());
         Ok(resolution)
@@ -188,10 +194,12 @@ impl Collector<'_> {
         })
     }
 
-    /// The package a lock entry with a `source` names: read from the directory the caller gave,
-    /// or unlocated.
+    /// The package the lock entry at `index`, which has a `source`, names: read from the
+    /// directory the caller gave when a wearing can resolve to it, or unlocated. A directory for
+    /// a package no wearing resolves to is not read, so it cannot fail the read.
     fn sourced_resolution(
         &mut self,
+        index: usize,
         entry: &LockEntry,
         source: &str,
     ) -> Result<Resolution, ReadWithoutCargoError> {
@@ -201,7 +209,12 @@ impl Collector<'_> {
             source: source.to_owned(),
         };
         let id = sourced_id(&identity);
-        let Some(package) = located::read(self.locations, &identity)? else {
+        let located = if self.worn.contains(&index) {
+            located::read(self.locations, &identity)?
+        } else {
+            None
+        };
+        let Some(package) = located else {
             self.unlocated.push(UnlocatedPackage {
                 id: id.clone(),
                 name: identity.name,

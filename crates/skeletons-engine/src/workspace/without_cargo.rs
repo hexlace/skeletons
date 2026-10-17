@@ -22,6 +22,7 @@ mod targets;
 pub(super) mod text_error;
 mod unsupported;
 mod workspace_search;
+mod worn_entries;
 
 #[cfg(test)]
 mod currency_differential;

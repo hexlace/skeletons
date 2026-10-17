@@ -358,7 +358,8 @@ mod tests {
         );
         let two_packages = refusal_with(
             "",
-            "[dependencies]\nd = \"1\"\n[dev-dependencies]\nd = { package = \"e\", version = \"1\" }\n",
+            "[dependencies]\nd = \"1\"\n[dev-dependencies]\n\
+             d = { package = \"e\", version = \"1\" }\n",
         );
 
         assert!(matches!(

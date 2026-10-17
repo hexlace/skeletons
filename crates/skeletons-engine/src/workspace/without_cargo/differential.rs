@@ -188,7 +188,8 @@ fn an_excluded_directory_and_an_excluded_path_dependency_agree() {
 fn an_in_root_path_dependency_becomes_a_member_and_an_out_of_root_one_does_not() {
     let fixture = workspace_with_app(
         "",
-        "[dependencies]\ninside = { path = \"../inside\" }\noutside = { path = \"../../outside\" }\n",
+        "[dependencies]\ninside = { path = \"../inside\" }\n\
+         outside = { path = \"../../outside\" }\n",
     );
     fixture.package("inside", "inside", "");
     fixture.package("../outside", "outside", "");
@@ -317,7 +318,8 @@ fn a_package_with_no_library_gets_no_edge_on_either_side() {
     fixture.write("bin-only/src/main.rs", "fn main() {}\n");
     fixture.write(
         "autolib-off/Cargo.toml",
-        "[package]\nname = \"autolib-off\"\nautolib = false\n[[bin]]\nname = \"x\"\npath = \"src/x.rs\"\n",
+        "[package]\nname = \"autolib-off\"\nautolib = false\n\
+         [[bin]]\nname = \"x\"\npath = \"src/x.rs\"\n",
     );
     fixture.write("autolib-off/src/lib.rs", "");
     fixture.write("autolib-off/src/x.rs", "fn main() {}\n");
@@ -394,7 +396,8 @@ fn a_dependency_key_with_two_source_paths_is_refused_by_cargo_and_by_the_reader(
     let toolchain = cargo_version();
     let fixture = workspace_with_app(
         "",
-        "[dependencies]\ndep = { path = \"../../d1\" }\n[dev-dependencies]\ndep = { path = \"../../d2\" }\n",
+        "[dependencies]\ndep = { path = \"../../d1\" }\n\
+         [dev-dependencies]\ndep = { path = \"../../d2\" }\n",
     );
     fixture.package("../d1", "dep", "version = \"1.0.0\"\n");
     fixture.package("../d2", "dep", "version = \"2.0.0\"\n");
@@ -421,7 +424,8 @@ fn one_package_under_two_keys_is_read_by_cargo_and_refused_as_unsupported_by_the
     let toolchain = cargo_version();
     let fixture = workspace_with_app(
         "",
-        "[dependencies]\ndep = { path = \"../../d1\" }\nolder = { path = \"../../d2\", package = \"dep\" }\n",
+        "[dependencies]\ndep = { path = \"../../d1\" }\n\
+         older = { path = \"../../d2\", package = \"dep\" }\n",
     );
     fixture.package("../d1", "dep", "version = \"1.0.0\"\n");
     fixture.package("../d2", "dep", "version = \"2.0.0\"\n");
@@ -508,8 +512,7 @@ fn a_member_above_the_root_is_refused_by_cargo_and_by_the_reader_with_the_same_s
 }
 
 #[test]
-fn a_member_above_the_root_that_names_the_root_is_read_by_cargo_and_refused_as_unsupported_by_the_reader()
- {
+fn a_member_above_the_root_that_names_the_root_is_read_by_cargo_and_refused_by_the_reader() {
     // With `package.workspace` pointing back at the root, Cargo accepts the member above it. The
     // reader does not follow that key, so it refuses by name.
     let toolchain = cargo_version();

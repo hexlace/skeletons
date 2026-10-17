@@ -134,6 +134,7 @@ mod tests {
     use std::path::Path;
 
     use super::{declares_workspace, excludes, nearest_above, parse_inheriting};
+    use crate::workspace::without_cargo::error::ReadWithoutCargoError;
     use crate::workspace::without_cargo::package_manifest::{PackageManifest, WorkspaceRoot};
 
     fn workspace(members: &[&str], exclude: &[&str]) -> WorkspaceRoot {
@@ -269,10 +270,7 @@ mod tests {
         .expect_err("nothing gives the version");
 
         assert!(
-            matches!(
-                error,
-                crate::workspace::without_cargo::error::ReadWithoutCargoError::ManifestUnreadable { .. }
-            ),
+            matches!(error, ReadWithoutCargoError::ManifestUnreadable { .. }),
             "{error:?}"
         );
     }

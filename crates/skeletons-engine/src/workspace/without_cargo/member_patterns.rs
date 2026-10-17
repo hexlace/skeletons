@@ -62,6 +62,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::expand;
+    use crate::workspace::without_cargo::error::ReadWithoutCargoError;
 
     /// A real root holding the directories `crates/a`, `crates/.hidden` and `crates/b`, and the
     /// file `crates/file`.
@@ -139,10 +140,7 @@ mod tests {
         let error = expand(&root, &["crates/[".to_owned()]).expect_err("an open bracket");
 
         assert!(
-            matches!(
-                error,
-                crate::workspace::without_cargo::error::ReadWithoutCargoError::ManifestUnreadable { .. }
-            ),
+            matches!(error, ReadWithoutCargoError::ManifestUnreadable { .. }),
             "{error:?}"
         );
     }

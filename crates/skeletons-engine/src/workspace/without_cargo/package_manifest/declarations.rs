@@ -211,7 +211,8 @@ fn inherited_declaration(
         .and_then(|root| root.dependencies.get(key))
         .ok_or_else(|| {
             TextError::unreadable(format!(
-                "{} `{key}` is `workspace = true`, but no [workspace.dependencies] declares `{key}`",
+                "{} `{key}` is `workspace = true`, but no [workspace.dependencies] declares \
+                 `{key}`",
                 site.table
             ))
         })?;
@@ -467,7 +468,8 @@ same = { package = "same", version = "2" }
     #[test]
     fn an_optional_dependency_is_marked_optional() {
         let manifest = parsed(
-            "[package]\nname = \"a\"\n[dependencies]\nextra = { version = \"1\", optional = true }\n",
+            "[package]\nname = \"a\"\n[dependencies]\n\
+             extra = { version = \"1\", optional = true }\n",
         );
 
         let declarations = manifest.declarations();

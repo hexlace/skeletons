@@ -700,7 +700,9 @@ serde = "1"
             for workspace in [None, Some(&root)] {
                 match PackageManifest::parse(&text, Path::new("/w/crates/a"), workspace) {
                     Ok(manifest) => {
-                        prop_assert!(manifest.package().is_some() || manifest.workspace().is_some());
+                        prop_assert!(
+                            manifest.package().is_some() || manifest.workspace().is_some()
+                        );
                     }
                     Err(error) => prop_assert!(!error.detail().is_empty()),
                 }

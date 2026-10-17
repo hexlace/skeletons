@@ -380,7 +380,9 @@ mod tests {
         tree.package(
             "crates/a",
             "a",
-            "[dependencies]\ntool = { path = \"../../tools/tool\" }\nhelper = { path = \"../../helpers/helper\" }\nfar = { path = \"../../../far\" }\n",
+            "[dependencies]\ntool = { path = \"../../tools/tool\" }\n\
+             helper = { path = \"../../helpers/helper\" }\n\
+             far = { path = \"../../../far\" }\n",
         );
         tree.package("crates/old", "old", "");
         tree.package("tools/tool", "tool", "");
@@ -388,8 +390,9 @@ mod tests {
         tree.package("../far", "far", "");
         tree.write("crates/file", "");
 
-        // `old` matches the glob and is excluded; `tool` is a path dependency and is excluded; `helper`
-        // is a path dependency under the root and becomes a member; `far` is outside the root.
+        // `old` matches the glob and is excluded; `tool` is a path dependency and is excluded;
+        // `helper` is a path dependency under the root and becomes a member; `far` is outside the
+        // root.
         let found = tree.discover("").expect("a workspace");
         assert_eq!(
             found

@@ -336,7 +336,7 @@ name = "a"
 version = "0.1.0"
 dependencies = [
  "dep 0.1.0 (git+https://example.invalid/dep)",
- "dep 0.1.0 (git+https://example.invalid/dep?rev=3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39)",
+ "dep 0.1.0 (git+https://example.invalid/dep?rev=3f2a9c1)",
  "dep 0.1.0 (git+https://example.invalid/dep?branch=feat%2Fx)",
  "dep 0.1.0 (git+https://example.invalid/dep?tag=v1)",
 ]
@@ -349,7 +349,7 @@ source = "git+https://example.invalid/dep#11111111111111111111111111111111111111
 [[package]]
 name = "dep"
 version = "0.1.0"
-source = "git+https://example.invalid/dep?rev=3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39#3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39"
+source = "git+https://example.invalid/dep?rev=3f2a9c1#3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39"
 
 [[package]]
 name = "dep"

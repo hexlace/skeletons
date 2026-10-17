@@ -124,8 +124,7 @@ fn a_git_wearing_is_read_with_no_cargo_no_cargo_home_and_no_path() -> TestOutcom
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_path_wearing_gives_the_report_check_gives_asked_from_the_root_and_from_a_member() -> TestOutcome
-{
+fn a_path_wearing_gives_the_report_check_gives_from_the_root_and_from_a_member() -> TestOutcome {
     // Given a path wearing with one file as rendered and one changed, no
     // location is needed: a path dependency is located by its manifest. Asked
     // from the workspace root and from the member's own directory, the report

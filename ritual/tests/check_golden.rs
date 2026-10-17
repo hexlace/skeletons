@@ -96,7 +96,8 @@ const EXPECTED_HUMAN_STDERR: &str = "ritual: 1 of 1 bone has drifted, and there 
 
 /// What `check --json` prints on stdout, with `<skeleton>` standing for the
 /// skeleton's location.
-const EXPECTED_JSON_STDOUT: &str = r#"{
+const EXPECTED_JSON_STDOUT: &str = concat!(
+    r#"{
   "format_version": 1,
   "filters": [],
   "summary": {
@@ -154,12 +155,15 @@ const EXPECTED_JSON_STDOUT: &str = r#"{
       "kind": "names-no-dependency",
       "manifest": "Cargo.toml",
       "dependency": "ghost",
-      "message": "[package.metadata.skeletons.ghost] in Cargo.toml names no dependency of Cargo.toml; add the dependency, or rename the table to the key the dependency is declared under"
+      "message": "[package.metadata.skeletons.ghost] in Cargo.toml names no dependency of "#,
+    r#"Cargo.toml; add the dependency, or rename the table to the key the dependency is "#,
+    r#"declared under"
     }
   ],
   "aborted": null
 }
-"#;
+"#
+);
 
 /// What `check --json` prints on stderr.
 const EXPECTED_JSON_STDERR: &str = "ritual: 1 of 1 bone has drifted, and there is 1 refusal\n";
@@ -271,7 +275,8 @@ const WIDER_HUMAN_STDERR: &str = "ritual: there are 3 refusals\n";
 
 /// What `check --json` prints on stdout for the wider workspace, with
 /// `<skeleton>` standing for the skeleton's location.
-const WIDER_JSON_STDOUT: &str = r#"{
+const WIDER_JSON_STDOUT: &str = concat!(
+    r#"{
   "format_version": 1,
   "filters": [],
   "summary": {
@@ -332,24 +337,30 @@ const WIDER_JSON_STDOUT: &str = r#"{
         "name": "plain-library",
         "version": "0.1.0"
       },
-      "message": "plain-library in Cargo.toml is plain-library 0.1.0, which is not a skeleton: its manifest has no [package.metadata.skeletons] table; drop [package.metadata.skeletons.plain-library], or depend on a skeleton"
+      "message": "plain-library in Cargo.toml is plain-library 0.1.0, "#,
+    r#"which is not a skeleton: its manifest has no [package.metadata.skeletons] table; "#,
+    r#"drop [package.metadata.skeletons.plain-library], or depend on a skeleton"
     },
     {
       "kind": "not-a-table",
       "manifest": "Cargo.toml",
       "dependency": "oddity",
-      "message": "[package.metadata.skeletons.oddity] in Cargo.toml is not a table; it reads [package.metadata.skeletons.oddity] on a line of its own, with the skeleton's options, if any, under it"
+      "message": "[package.metadata.skeletons.oddity] in Cargo.toml is not a table; "#,
+    r#"it reads [package.metadata.skeletons.oddity] on a line of its own, "#,
+    r#"with the skeleton's options, if any, under it"
     },
     {
       "kind": "unresolved",
       "manifest": "Cargo.toml",
       "dependency": "binary-only",
-      "message": "binary-only in Cargo.toml is declared, but cargo resolved no package for it, so there is no locked skeleton to compare against"
+      "message": "binary-only in Cargo.toml is declared, but cargo resolved no package "#,
+    r#"for it, so there is no locked skeleton to compare against"
     }
   ],
   "aborted": null
 }
-"#;
+"#
+);
 
 /// What `check --json` prints on stderr for the wider workspace.
 const WIDER_JSON_STDERR: &str = "ritual: there are 3 refusals\n";

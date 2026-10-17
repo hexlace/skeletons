@@ -257,7 +257,8 @@ mod tests {
     fn an_entry_with_no_package_on_disk_is_set_aside_with_the_dependencies_naming_it() {
         // `gone` has no manifest, so Cargo drops its entry and the dependency on it.
         let lock = "version = 4\n\n[[package]]\nname = \"app\"\nversion = \"0.0.0\"\n\
-                    dependencies = [\"gone\"]\n\n[[package]]\nname = \"gone\"\nversion = \"1.0.0\"\n";
+                    dependencies = [\"gone\"]\n\n[[package]]\nname = \"gone\"\n\
+                    version = \"1.0.0\"\n";
         let fixture = workspace("", lock);
 
         assert!(is_current(&fixture));

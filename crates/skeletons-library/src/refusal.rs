@@ -274,8 +274,8 @@ impl Refusal {
     /// other kind.
     ///
     /// It is the name, version and source `Cargo.lock` writes for the package,
-    /// which is what [`PackageLocations::insert`](crate::PackageLocations::insert) takes, so a caller that can
-    /// find the package's files hands this straight back and checks again.
+    /// which is what [`PackageLocations::insert`](crate::PackageLocations::insert) takes, so a
+    /// caller that can find the package's files hands this straight back and checks again.
     ///
     /// # Examples
     ///

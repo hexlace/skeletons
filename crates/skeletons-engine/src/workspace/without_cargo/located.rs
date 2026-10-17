@@ -71,6 +71,7 @@ mod tests {
 
     use super::read;
     use crate::workspace::LockedPackageId;
+    use crate::workspace::without_cargo::error::ReadWithoutCargoError;
 
     const SOURCE: &str = "git+https://example.test/skeleton";
 
@@ -168,7 +169,7 @@ mod tests {
         assert!(
             matches!(
                 located,
-                Err(crate::workspace::without_cargo::error::ReadWithoutCargoError::ManifestUnreadable { .. })
+                Err(ReadWithoutCargoError::ManifestUnreadable { .. })
             ),
             "{located:?}"
         );

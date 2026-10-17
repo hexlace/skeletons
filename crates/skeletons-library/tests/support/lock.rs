@@ -5,6 +5,18 @@
 //! A test reads the lockfile's text, never the library's view of it, so the
 //! identity it expects of a locked package is what cargo wrote.
 
+// Each test binary that includes this file uses only the helpers its own tests
+// need, as `support` does, and `allow`, not `expect`, for the same reason.
+#![allow(
+    dead_code,
+    reason = "helpers shared across separately compiled test binaries"
+)]
+// The module is private to each test binary, as `support` is.
+#![expect(
+    clippy::redundant_pub_crate,
+    reason = "pub(crate) is the true visibility in a private module with no external consumer"
+)]
+
 use std::error::Error;
 use std::ffi::OsStr;
 use std::fs;

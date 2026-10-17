@@ -32,7 +32,7 @@ pub(super) struct LocatedPackage {
 /// # Errors
 ///
 /// Unreadable when the manifest names the package and Cargo would refuse the package for its
-/// targets: it has none, or its library's file is missing.
+/// targets: it has none, its library's name or path is refused, or one of its target tables is.
 pub(super) fn read(
     locations: &BTreeMap<LockedPackageId, PathBuf>,
     identity: &LockedPackageId,

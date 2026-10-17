@@ -1,10 +1,13 @@
-//! The targets a manifest writes: its `[lib]` table, which arrays of targets it has, and which
-//! kinds it leaves Cargo to discover from the files beside it.
+//! The targets a manifest writes: its `[lib]` table, each `[[bin]]`, `[[example]]`, `[[test]]`
+//! and `[[bench]]` table, which kinds it leaves Cargo to discover from the files beside it, and
+//! the edition those paths are read under.
 //!
 //! This is the manifest's text and nothing else. What the package's files make of it is decided
 //! in `targets`, which reads the file system.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::Deserialize;
 
 use super::RawManifest;
 
@@ -27,52 +30,116 @@ pub(crate) struct LibTarget {
     pub(crate) path: Option<String>,
 }
 
+/// One `[[bin]]`, `[[example]]`, `[[test]]` or `[[bench]]` table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeclaredTarget {
+    /// The kind of the array the table is in.
+    pub(crate) kind: TargetKind,
+    /// `name`, when written.
+    pub(crate) name: Option<String>,
+    /// `path`, when written, as written.
+    pub(crate) path: Option<String>,
+}
+
+/// The edition of a package, as far as the places Cargo looks for its targets depend on it.
+///
+/// Which editions exist depends on the toolchain, and this reader takes no position on that: it
+/// keeps only whether the package is in the one edition Cargo gives the old fallbacks to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Edition {
+    /// `2015`, which a package that writes no edition is in.
+    Edition2015,
+    /// Any other edition.
+    Edition2018OrLater,
+}
+
+impl Edition {
+    /// The edition Cargo reads from the text `written`.
+    #[must_use]
+    pub(crate) fn named(written: &str) -> Self {
+        if written == "2015" {
+            Self::Edition2015
+        } else {
+            Self::Edition2018OrLater
+        }
+    }
+}
+
 /// The targets a manifest writes, and which kinds it leaves Cargo to discover from the files
 /// beside it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Targets {
     /// The `[lib]` table, when there is one.
     pub(crate) library: Option<LibTarget>,
-    declared: BTreeSet<TargetKind>,
-    undiscovered: BTreeSet<TargetKind>,
+    /// Every table of `[[bin]]`, `[[example]]`, `[[test]]` and `[[bench]]`, in manifest order.
+    declared: Vec<DeclaredTarget>,
+    /// The kinds whose array key the manifest writes, even as an empty array.
+    written: BTreeSet<TargetKind>,
+    /// The `autolib`, `autobins`, `autoexamples`, `autotests` and `autobenches` keys written.
+    automatic: BTreeMap<TargetKind, bool>,
+    edition: Edition,
 }
 
 impl Targets {
-    /// Whether the manifest writes a table for a target of `kind`: `[lib]`, or at least one
-    /// `[[bin]]`, `[[example]]`, `[[test]]` or `[[bench]]`.
+    /// The tables the manifest writes for `kind`, in manifest order. `Library` has none here: its
+    /// table is [`Targets::library`].
+    pub(crate) fn declared(&self, kind: TargetKind) -> impl Iterator<Item = &DeclaredTarget> {
+        self.declared
+            .iter()
+            .filter(move |target| target.kind == kind)
+    }
+
+    /// Whether Cargo adds the targets of `kind` it finds in the files to the ones written.
+    ///
+    /// A kind's `auto` key decides it when written. Otherwise a kind with no table is discovered,
+    /// and a kind with a table (an empty array included) is discovered in every edition but 2015.
     #[must_use]
-    pub(crate) fn has_declared(&self, kind: TargetKind) -> bool {
-        match kind {
-            TargetKind::Library => self.library.is_some(),
-            TargetKind::Binary | TargetKind::Example | TargetKind::Test | TargetKind::Benchmark => {
-                self.declared.contains(&kind)
-            }
+    pub(crate) fn discovers(&self, kind: TargetKind) -> bool {
+        match (self.automatic.get(&kind), self.written.contains(&kind)) {
+            (Some(flag), _) => *flag,
+            (None, false) => true,
+            (None, true) => self.edition == Edition::Edition2018OrLater,
         }
     }
 
-    /// Whether Cargo discovers targets of `kind` from the files, which every kind does unless its
-    /// `autolib`, `autobins`, `autoexamples`, `autotests` or `autobenches` key is `false`.
+    /// The edition the package's targets are looked for under.
     #[must_use]
-    pub(crate) fn discovers(&self, kind: TargetKind) -> bool {
-        !self.undiscovered.contains(&kind)
+    pub(crate) const fn edition(&self) -> Edition {
+        self.edition
     }
 }
 
-/// The targets a manifest writes.
-pub(super) fn targets_of(raw: &RawManifest) -> Targets {
-    let written =
-        |tables: &Option<Vec<toml::Value>>| tables.as_ref().is_some_and(|t| !t.is_empty());
-    let declared = [
-        (TargetKind::Binary, written(&raw.bin)),
-        (TargetKind::Example, written(&raw.example)),
-        (TargetKind::Test, written(&raw.test)),
-        (TargetKind::Benchmark, written(&raw.bench)),
-    ]
-    .into_iter()
-    .filter_map(|(kind, present)| present.then_some(kind))
-    .collect();
+/// A `[[bin]]`, `[[example]]`, `[[test]]` or `[[bench]]` table as written.
+#[derive(Deserialize)]
+pub(super) struct RawTarget {
+    name: Option<String>,
+    path: Option<String>,
+}
 
-    let undiscovered = raw
+/// The targets a manifest writes, under `edition`.
+pub(super) fn targets_of(raw: &RawManifest, edition: Edition) -> Targets {
+    let arrays = [
+        (TargetKind::Binary, &raw.bin),
+        (TargetKind::Example, &raw.example),
+        (TargetKind::Test, &raw.test),
+        (TargetKind::Benchmark, &raw.bench),
+    ];
+    let written = arrays
+        .iter()
+        .filter_map(|(kind, tables)| tables.as_ref().map(|_| *kind))
+        .collect();
+    let declared = arrays
+        .iter()
+        .flat_map(|(kind, tables)| {
+            tables.iter().flatten().map(|table| DeclaredTarget {
+                kind: *kind,
+                name: table.name.clone(),
+                path: table.path.clone(),
+            })
+        })
+        .collect();
+
+    let automatic = raw
         .package
         .as_ref()
         .map(|package| {
@@ -84,7 +151,7 @@ pub(super) fn targets_of(raw: &RawManifest) -> Targets {
                 (TargetKind::Benchmark, package.autobenches),
             ]
             .into_iter()
-            .filter_map(|(kind, flag)| (flag == Some(false)).then_some(kind))
+            .filter_map(|(kind, flag)| flag.map(|flag| (kind, flag)))
             .collect()
         })
         .unwrap_or_default();
@@ -95,7 +162,9 @@ pub(super) fn targets_of(raw: &RawManifest) -> Targets {
             path: lib.path.clone(),
         }),
         declared,
-        undiscovered,
+        written,
+        automatic,
+        edition,
     }
 }
 
@@ -124,7 +193,6 @@ mod tests {
                 path: Some("src/zed.rs".to_owned()),
             })
         );
-        assert!(manifest.targets().has_declared(TargetKind::Library));
     }
 
     #[test]
@@ -152,8 +220,9 @@ mod tests {
             TargetKind::Test,
             TargetKind::Benchmark,
         ] {
-            assert!(
-                !manifest.targets().has_declared(kind),
+            assert_eq!(
+                manifest.targets().declared(kind).count(),
+                0,
                 "{kind:?} is not declared"
             );
             assert!(manifest.targets().discovers(kind), "{kind:?} is discovered");
@@ -176,18 +245,83 @@ name = "speed"
         );
 
         let targets = manifest.targets();
-        assert!(targets.has_declared(TargetKind::Binary));
-        assert!(targets.has_declared(TargetKind::Benchmark));
-        assert!(!targets.has_declared(TargetKind::Example));
-        assert!(!targets.has_declared(TargetKind::Test));
-        assert!(!targets.has_declared(TargetKind::Library));
+        let declared = |kind| {
+            targets
+                .declared(kind)
+                .map(|target| (target.name.clone(), target.path.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            declared(TargetKind::Binary),
+            [(Some("tool".to_owned()), None)]
+        );
+        assert_eq!(
+            declared(TargetKind::Benchmark),
+            [(Some("speed".to_owned()), None)]
+        );
+        assert_eq!(declared(TargetKind::Example), []);
+        assert_eq!(declared(TargetKind::Test), []);
     }
 
     #[test]
-    fn an_empty_array_of_targets_declares_none() {
-        let manifest = parsed("[package]\nname = \"a\"\nexample = []\n");
+    fn tables_are_kept_in_manifest_order_with_their_names_and_paths() {
+        let manifest = parsed(
+            r#"
+[package]
+name = "a"
 
-        assert!(!manifest.targets().has_declared(TargetKind::Example));
+[[bin]]
+name = "second"
+path = "b.rs"
+
+[[bin]]
+path = "nameless.rs"
+
+[[bin]]
+name = "first"
+"#,
+        );
+
+        let tables: Vec<_> = manifest
+            .targets()
+            .declared(TargetKind::Binary)
+            .map(|target| (target.name.as_deref(), target.path.as_deref()))
+            .collect();
+        assert_eq!(
+            tables,
+            [
+                (Some("second"), Some("b.rs")),
+                (None, Some("nameless.rs")),
+                (Some("first"), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_empty_array_of_targets_declares_none_but_still_counts_as_written() {
+        // Cargo reads `example = []` as a written array: in 2015 it stops discovering examples,
+        // and in any later edition it does not.
+        let old = parsed("example = []\n[package]\nname = \"a\"\n");
+        let newer = parsed("example = []\n[package]\nname = \"a\"\nedition = \"2021\"\n");
+
+        assert_eq!(old.targets().declared(TargetKind::Example).count(), 0);
+        assert!(!old.targets().discovers(TargetKind::Example));
+        assert!(old.targets().discovers(TargetKind::Test));
+        assert!(newer.targets().discovers(TargetKind::Example));
+    }
+
+    #[test]
+    fn a_written_table_stops_discovery_in_2015_unless_the_auto_key_says_otherwise() {
+        let none = "[package]\nname = \"a\"\n[[test]]\nname = \"x\"\n";
+        let on = "[package]\nname = \"a\"\nautotests = true\n[[test]]\nname = \"x\"\n";
+        let newer = "[package]\nname = \"a\"\nedition = \"2018\"\n[[test]]\nname = \"x\"\n";
+        let off = "[package]\nname = \"a\"\nedition = \"2018\"\nautotests = false\n\
+                   [[test]]\nname = \"x\"\n";
+
+        assert!(!parsed(none).targets().discovers(TargetKind::Test));
+        assert!(parsed(on).targets().discovers(TargetKind::Test));
+        assert!(parsed(newer).targets().discovers(TargetKind::Test));
+        assert!(!parsed(off).targets().discovers(TargetKind::Test));
     }
 
     #[test]

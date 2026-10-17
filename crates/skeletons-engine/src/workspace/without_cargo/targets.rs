@@ -3,25 +3,12 @@
 
 use std::path::Path;
 
-use super::file_system::holds_a_target_source;
-use super::package_manifest::{TargetKind, Targets};
+use super::package_manifest::Targets;
 use super::text_error::TextError;
-use crate::workspace::crate_name::underscored;
 
-/// Where Cargo looks for a library when `[lib]` writes no `path`.
-const DEFAULT_LIBRARY_PATH: &str = "src/lib.rs";
-
-/// Where Cargo looks for the one binary named for the package.
-const DEFAULT_BINARY_PATH: &str = "src/main.rs";
-
-/// The directories Cargo discovers targets in, with the kind each holds. `src/bin` is separate
-/// from `src/main.rs`: a package may have either or both.
-const DISCOVERED_DIRECTORIES: [(TargetKind, &str); 4] = [
-    (TargetKind::Binary, "src/bin"),
-    (TargetKind::Test, "tests"),
-    (TargetKind::Example, "examples"),
-    (TargetKind::Benchmark, "benches"),
-];
+mod inferred;
+mod library;
+mod written;
 
 /// The name of the library a package has, or `None` when it has no library.
 ///
@@ -30,74 +17,38 @@ const DISCOVERED_DIRECTORIES: [(TargetKind, &str); 4] = [
 ///
 /// # Errors
 ///
-/// Unreadable when the package has no target at all, or when its library's file is missing: the
-/// two ways Cargo refuses a package for its targets. `directory` is where the package's manifest
-/// is.
+/// Unreadable for every manifest Cargo refuses for its targets: a library name that is empty or
+/// holds a hyphen, a `[lib]` table that finds no file, a binary, example, test or bench table that
+/// is nameless, empty-named, duplicated or (for a binary) fileless, and a package with no target
+/// at all. `directory` is where the package's manifest is.
 pub(super) fn library_name(
     directory: &Path,
     package_name: &str,
     targets: &Targets,
 ) -> Result<Option<String>, TextError> {
-    let has_library = has_library(directory, targets)?;
-    if !has_library && !has_any_other_target(directory, targets) {
+    let library = library::resolve(directory, package_name, targets)?;
+    let others = written::count(directory, package_name, targets, library.is_some())?;
+    if library.is_none() && others == 0 {
         return Err(TextError::unreadable(
             "the package has no target: it needs a [lib], a [[bin]], or a source file Cargo \
              discovers as a target",
         ));
     }
-    if !has_library {
-        return Ok(None);
+    if let Some(name) = &library {
+        assert!(
+            !name.contains('-'),
+            "a library name never holds a hyphen: {name}"
+        );
+        assert!(
+            !name.trim().is_empty(),
+            "a library name is never blank: it was checked before its path"
+        );
     }
-    let name = targets
-        .library
-        .as_ref()
-        .and_then(|library| library.name.clone())
-        .unwrap_or_else(|| underscored(package_name));
-    assert!(
-        !name.contains('-'),
-        "a library name never holds a hyphen: {name}"
-    );
-    Ok(Some(name))
+    Ok(library)
 }
 
-/// Whether the package has a library: a `[lib]` table, or a `src/lib.rs` that Cargo discovers.
-fn has_library(directory: &Path, targets: &Targets) -> Result<bool, TextError> {
-    let Some(library) = &targets.library else {
-        return Ok(targets.discovers(TargetKind::Library)
-            && directory.join(DEFAULT_LIBRARY_PATH).is_file());
-    };
-    let path = library.path.as_deref().unwrap_or(DEFAULT_LIBRARY_PATH);
-    if directory.join(path).is_file() {
-        Ok(true)
-    } else {
-        Err(TextError::unreadable(format!(
-            "the library's file `{path}` does not exist"
-        )))
-    }
-}
-
-/// Whether the package has a target that is not its library: one its manifest writes a table for,
-/// or one Cargo discovers from the files and the manifest has not turned off.
-fn has_any_other_target(directory: &Path, targets: &Targets) -> bool {
-    let written = [
-        TargetKind::Binary,
-        TargetKind::Example,
-        TargetKind::Test,
-        TargetKind::Benchmark,
-    ]
-    .into_iter()
-    .any(|kind| targets.has_declared(kind));
-    if written {
-        return true;
-    }
-
-    let main_binary =
-        targets.discovers(TargetKind::Binary) && directory.join(DEFAULT_BINARY_PATH).is_file();
-    main_binary
-        || DISCOVERED_DIRECTORIES.iter().any(|(kind, relative)| {
-            targets.discovers(*kind) && holds_a_target_source(&directory.join(relative))
-        })
-}
+#[cfg(test)]
+pub(super) mod matrix;
 
 #[cfg(test)]
 mod tests {
@@ -106,7 +57,7 @@ mod tests {
 
     /// Writes `files` (path, text) under a new directory, then reads the library of the package
     /// that `manifest` describes there. `Ok(None)` is a package with no library.
-    fn read(manifest: &str, files: &[&str]) -> Result<Option<String>, String> {
+    pub(super) fn read(manifest: &str, files: &[&str]) -> Result<Option<String>, String> {
         let directory = tempfile::tempdir().expect("a temporary directory");
         for file in files {
             let path = directory.path().join(file);
@@ -217,7 +168,10 @@ mod tests {
 
         assert_eq!(
             read(manifest, &["src/main.rs"]),
-            Err("the library's file `src/lib.rs` does not exist".to_owned())
+            Err(
+                "can't find library `zz`, rename file to `src/lib.rs` or specify lib.path"
+                    .to_owned()
+            )
         );
     }
 

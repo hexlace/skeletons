@@ -15,10 +15,10 @@ mod declarations;
 mod manifest_targets;
 
 pub(crate) use declarations::{Declaration, DeclaredSource, GitReference};
-pub(crate) use manifest_targets::{TargetKind, Targets};
+pub(crate) use manifest_targets::{Edition, TargetKind, Targets};
 
 use declarations::{declarations_of, workspace_declarations};
-use manifest_targets::targets_of;
+use manifest_targets::{RawTarget, targets_of};
 
 use super::text_error::TextError;
 
@@ -68,6 +68,8 @@ pub(crate) struct WorkspaceRoot {
     pub(crate) dependencies: BTreeMap<String, Declaration>,
     /// `workspace.package.version`, when written.
     pub(crate) package_version: Option<String>,
+    /// `workspace.package.edition`, when written.
+    pub(crate) package_edition: Option<Edition>,
 }
 
 /// The manifest as written, which `manifest_targets` and `declarations` each read their part of.
@@ -75,10 +77,10 @@ pub(crate) struct WorkspaceRoot {
 struct RawManifest {
     package: Option<RawPackage>,
     lib: Option<RawLib>,
-    bin: Option<Vec<toml::Value>>,
-    example: Option<Vec<toml::Value>>,
-    test: Option<Vec<toml::Value>>,
-    bench: Option<Vec<toml::Value>>,
+    bin: Option<Vec<RawTarget>>,
+    example: Option<Vec<RawTarget>>,
+    test: Option<Vec<RawTarget>>,
+    bench: Option<Vec<RawTarget>>,
     #[serde(flatten)]
     tables: RawDependencyTables,
     target: Option<BTreeMap<String, RawDependencyTables>>,
@@ -91,6 +93,7 @@ struct RawManifest {
 struct RawPackage {
     name: String,
     version: Option<toml::Value>,
+    edition: Option<toml::Value>,
     workspace: Option<toml::Value>,
     metadata: Option<toml::Value>,
     autolib: Option<bool>,
@@ -135,6 +138,7 @@ struct RawWorkspace {
 #[derive(Deserialize)]
 struct RawWorkspacePackage {
     version: Option<String>,
+    edition: Option<String>,
 }
 
 impl PackageManifest {
@@ -176,7 +180,13 @@ impl PackageManifest {
             .map(|section| package_section(section, inherited))
             .transpose()?;
         let declarations = declarations_of(&raw, directory, inherited)?;
-        let targets = targets_of(&raw);
+        let edition = raw
+            .package
+            .as_ref()
+            .map(|section| package_edition(section.edition.as_ref(), inherited))
+            .transpose()?
+            .unwrap_or(Edition::Edition2015);
+        let targets = targets_of(&raw, edition);
 
         Ok(Self {
             package,
@@ -237,11 +247,18 @@ fn workspace_root(section: &RawWorkspace, directory: &Path) -> Result<WorkspaceR
         .map(|version| checked_version(version, "workspace.package.version"))
         .transpose()?;
 
+    let package_edition = section
+        .package
+        .as_ref()
+        .and_then(|package| package.edition.as_deref())
+        .map(Edition::named);
+
     Ok(WorkspaceRoot {
         members: section.members.clone(),
         exclude: section.exclude.clone(),
         dependencies,
         package_version,
+        package_edition,
     })
 }
 
@@ -307,6 +324,49 @@ fn package_version(
     }
 }
 
+/// A package's edition: the one written, the workspace's for `edition.workspace = true`, or 2015,
+/// which is what Cargo gives a package that writes none.
+fn package_edition(
+    written: Option<&toml::Value>,
+    workspace: Option<&WorkspaceRoot>,
+) -> Result<Edition, TextError> {
+    match written {
+        None => Ok(Edition::Edition2015),
+        Some(toml::Value::String(edition)) => Ok(Edition::named(edition)),
+        Some(toml::Value::Table(table)) => match table.get("workspace") {
+            Some(toml::Value::Boolean(true)) => workspace
+                .and_then(|root| root.package_edition)
+                .ok_or_else(|| {
+                    TextError::unreadable(
+                        "package.edition is `workspace = true`, but no workspace gives a \
+                         [workspace.package] edition",
+                    )
+                }),
+            Some(
+                toml::Value::String(_)
+                | toml::Value::Integer(_)
+                | toml::Value::Float(_)
+                | toml::Value::Boolean(false)
+                | toml::Value::Datetime(_)
+                | toml::Value::Array(_)
+                | toml::Value::Table(_),
+            )
+            | None => Err(TextError::unreadable(
+                "package.edition is a table that is not `workspace = true`",
+            )),
+        },
+        Some(
+            toml::Value::Integer(_)
+            | toml::Value::Float(_)
+            | toml::Value::Boolean(_)
+            | toml::Value::Datetime(_)
+            | toml::Value::Array(_),
+        ) => Err(TextError::unreadable(
+            "package.edition is neither a string nor `workspace = true`",
+        )),
+    }
+}
+
 /// `version`, when it is a semantic version as Cargo reads one.
 fn checked_version(version: &str, key: &str) -> Result<String, TextError> {
     Version::parse(version)
@@ -325,7 +385,7 @@ mod tests {
     use serde_json::json;
 
     use super::super::text_error::TextErrorKind;
-    use super::{Declaration, DeclaredSource, PackageManifest, WorkspaceRoot};
+    use super::{Declaration, DeclaredSource, Edition, PackageManifest, WorkspaceRoot};
 
     /// Reads `text` as the manifest in `/w/crates/a`, with no workspace above it.
     fn parsed(text: &str) -> PackageManifest {
@@ -516,8 +576,95 @@ serde = "1"
                 exclude: vec!["crates/old".to_owned()],
                 dependencies: [("serde".to_owned(), registry("serde", "1", false))].into(),
                 package_version: Some("1.0.0".to_owned()),
+                package_edition: None,
             })
         );
+    }
+
+    #[test]
+    fn a_package_with_no_edition_is_in_2015_and_a_written_edition_is_read() {
+        let none = parsed("[package]\nname = \"a\"\n");
+        let old = parsed("[package]\nname = \"a\"\nedition = \"2015\"\n");
+        let newer = parsed("[package]\nname = \"a\"\nedition = \"2021\"\n");
+
+        assert_eq!(none.targets().edition(), Edition::Edition2015);
+        assert_eq!(old.targets().edition(), Edition::Edition2015);
+        assert_eq!(newer.targets().edition(), Edition::Edition2018OrLater);
+    }
+
+    #[test]
+    fn an_inherited_edition_is_taken_from_the_workspace_package() {
+        let root = parsed("[workspace]\n[workspace.package]\nedition = \"2021\"\n");
+        let root = root.workspace().expect("a workspace");
+
+        let member = PackageManifest::parse(
+            "[package]\nname = \"m\"\nedition.workspace = true\n",
+            Path::new("/w/crates/m"),
+            Some(root),
+        )
+        .expect("a member that inherits its edition");
+
+        assert_eq!(member.targets().edition(), Edition::Edition2018OrLater);
+    }
+
+    #[test]
+    fn a_root_package_inherits_its_edition_from_its_own_workspace() {
+        let manifest = PackageManifest::parse(
+            "[package]\nname = \"r\"\nedition.workspace = true\n\
+             [workspace.package]\nedition = \"2015\"\n",
+            Path::new("/w"),
+            None,
+        )
+        .expect("a root that inherits from itself");
+
+        assert_eq!(manifest.targets().edition(), Edition::Edition2015);
+    }
+
+    #[test]
+    fn an_inherited_edition_that_no_workspace_gives_is_unreadable() {
+        let manifest = "[package]\nname = \"m\"\nedition.workspace = true\n";
+        let root = parsed("[workspace]\n[workspace.package]\nversion = \"1.0.0\"\n");
+
+        for workspace in [None, root.workspace()] {
+            let error = PackageManifest::parse(manifest, Path::new("/w/crates/m"), workspace)
+                .expect_err("no workspace gives an edition");
+
+            assert_eq!(error.kind(), TextErrorKind::Unreadable);
+        }
+    }
+
+    #[test]
+    fn an_edition_that_is_not_a_string_or_workspace_true_is_unreadable() {
+        for edition in [
+            "edition = 2021",
+            "edition = { workspace = false }",
+            "edition = []",
+        ] {
+            let error = PackageManifest::parse(
+                &format!("[package]\nname = \"a\"\n{edition}\n"),
+                Path::new("/w"),
+                None,
+            )
+            .expect_err(edition);
+
+            assert_eq!(error.kind(), TextErrorKind::Unreadable, "{edition}");
+        }
+    }
+
+    #[test]
+    fn a_target_table_that_is_not_a_table_is_unreadable() {
+        // Cargo refuses `bin = [1]` and `name = 3`, so a target table is read as a table whose
+        // `name` and `path` are strings.
+        for text in [
+            "bin = [1]\n[package]\nname = \"a\"\n",
+            "test = 3\n[package]\nname = \"a\"\n",
+            "[package]\nname = \"a\"\n[[bin]]\nname = 3\n",
+            "[package]\nname = \"a\"\n[[example]]\nname = \"x\"\npath = 3\n",
+        ] {
+            let error = PackageManifest::parse(text, Path::new("/w"), None).expect_err(text);
+
+            assert_eq!(error.kind(), TextErrorKind::Unreadable, "{text}");
+        }
     }
 
     #[test]
@@ -556,6 +703,7 @@ serde = "1"
         assert!(root.exclude.is_empty());
         assert!(root.dependencies.is_empty());
         assert_eq!(root.package_version, None);
+        assert_eq!(root.package_edition, None);
     }
 
     /// Text standing for a part of a rendered TOML value: written as it is, or still a value to
@@ -695,6 +843,7 @@ serde = "1"
                 exclude: Vec::new(),
                 dependencies: BTreeMap::new(),
                 package_version: Some("1.0.0".to_owned()),
+                package_edition: None,
             };
 
             for workspace in [None, Some(&root)] {

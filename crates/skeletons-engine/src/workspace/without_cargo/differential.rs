@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use super::error::ReadWithoutCargoError;
 use super::fixture::{Fixture, cargo_version, lock_with_cargo_in};
 use super::read::read_document;
+use super::targets::matrix;
 use crate::workspace::schema::Document;
 use crate::workspace::{Network, cargo_metadata};
 
@@ -562,6 +563,143 @@ fn a_dependency_left_with_only_a_build_script_is_refused_by_cargo_and_by_the_rea
     let read = read_document(&fixture.root, &BTreeMap::new());
 
     assert!(cargo.is_err(), "{toolchain} read a package with no target");
+    assert!(
+        matches!(read, Err(ReadWithoutCargoError::ManifestUnreadable { .. })),
+        "{toolchain}: the reader gave {:?}",
+        read.map(|_| ())
+    );
+}
+
+#[test]
+fn a_library_name_cargo_accepts_is_the_name_of_the_edge_on_both_sides() {
+    // Cargo accepts a library name that is no Rust identifier, `1abc`, and names the edge to a
+    // dependency after it. The reader takes the name as written, so the documents agree.
+    let fixture = workspace_with_app("", "[dependencies]\nodd = { path = \"../odd\" }\n");
+    fixture.package("odd", "odd", "[lib]\nname = \"1abc\"\n");
+
+    assert_agree_at_root(&fixture);
+}
+
+#[test]
+fn a_dependency_with_a_hyphen_in_its_library_name_is_refused_by_cargo_and_by_the_reader() {
+    let toolchain = cargo_version();
+    let fixture = workspace_with_app("", "[dependencies]\nodd = { path = \"../odd\" }\n");
+    fixture.package("odd", "odd", "[lib]\nname = \"bad-name\"\n");
+
+    let locked = fixture.lock_with_cargo();
+    let read = read_document(&fixture.root, &BTreeMap::new());
+
+    let stderr = locked.expect_err(&format!("{toolchain} locked a hyphenated library name"));
+    assert!(
+        stderr.contains("library target names cannot contain hyphens: bad-name"),
+        "{toolchain} refused it for another reason: {stderr}"
+    );
+    match read {
+        Err(ReadWithoutCargoError::ManifestUnreadable { detail }) => assert!(
+            detail.ends_with("library target names cannot contain hyphens: bad-name"),
+            "{toolchain}: the reader said {detail}"
+        ),
+        other => panic!("{toolchain}: the reader gave {:?}", other.map(|_| ())),
+    }
+}
+
+/// Writes the package `row` describes as a workspace root, has Cargo lock it, and requires the
+/// reader to say what Cargo said: the same documents when Cargo locks it, and a refusal that holds
+/// Cargo's sentence when it does not.
+fn assert_cargo_decides(row: &matrix::Row) {
+    let toolchain = cargo_version();
+    let fixture = Fixture::new();
+    fixture.write("Cargo.toml", &row.manifest);
+    for file in row.files {
+        fixture.write(file, "");
+    }
+
+    let locked = fixture.lock_with_cargo();
+    let read = read_document(&fixture.root, &BTreeMap::new());
+
+    match (row.expected, locked) {
+        (Ok(_), Ok(())) => assert_reads_agree(&fixture.root),
+        (Ok(_), Err(stderr)) => {
+            panic!(
+                "{toolchain} refused `{}`, which the matrix says it reads: {stderr}",
+                row.name
+            );
+        }
+        (Err(sentence), Err(stderr)) => {
+            let cargo = matrix::cargo_sentence(sentence);
+            assert!(
+                stderr.contains(cargo),
+                "{toolchain} refused `{}` another way than `{cargo}`: {stderr}",
+                row.name
+            );
+            match read {
+                Err(ReadWithoutCargoError::ManifestUnreadable { detail }) => assert!(
+                    detail.contains(sentence),
+                    "{toolchain}: for `{}` the reader said {detail}, not `{sentence}`",
+                    row.name
+                ),
+                other => panic!(
+                    "{toolchain}: for `{}` the reader gave {:?}",
+                    row.name,
+                    other.map(|_| ())
+                ),
+            }
+        }
+        (Err(sentence), Ok(())) => {
+            panic!(
+                "{toolchain} locked `{}`, which the matrix says it refuses with `{sentence}`",
+                row.name
+            );
+        }
+    }
+}
+
+#[test]
+fn cargo_decides_every_library_binary_and_other_target_shape() {
+    // Each row of the target matrix is written as a package and given to Cargo, which locks it or
+    // refuses it with a sentence. The reader must do the same on every row, so the matrix's
+    // expected values are Cargo's and not the reader's own.
+    for row in matrix::rows() {
+        assert_cargo_decides(&row);
+    }
+}
+
+/// A workspace whose one member `app` takes its edition from `[workspace.package]`, where
+/// `edition` is written, and declares a `[[bin]]` named `x` with no path beside only a
+/// `src/main.rs`.
+fn member_inheriting_edition(edition: &str) -> Fixture {
+    let fixture = Fixture::new();
+    fixture.write(
+        "Cargo.toml",
+        &format!(
+            "[workspace]\nmembers = [\"app\"]\n[workspace.package]\nedition = \"{edition}\"\n"
+        ),
+    );
+    fixture.write(
+        "app/Cargo.toml",
+        "[package]\nname = \"app\"\nedition.workspace = true\n[[bin]]\nname = \"x\"\n",
+    );
+    fixture.write("app/src/main.rs", "");
+    fixture
+}
+
+#[test]
+fn an_edition_inherited_from_the_workspace_decides_where_a_binary_is_found() {
+    // In 2015 a `[[bin]]` with no path falls back to `src/main.rs`; in 2021 it does not. A member
+    // that writes `edition.workspace = true` gets the root's, so the reader must follow it.
+    let toolchain = cargo_version();
+
+    let old = member_inheriting_edition("2015");
+    assert_documents_agree(&old, &old.root);
+
+    let newer = member_inheriting_edition("2021");
+    let locked = newer.lock_with_cargo();
+    let read = read_document(&newer.root, &BTreeMap::new());
+    let stderr = locked.expect_err(&format!("{toolchain} locked a binary with no file"));
+    assert!(
+        stderr.contains("can't find `x` bin at `src/bin/x.rs`"),
+        "{toolchain} refused it for another reason: {stderr}"
+    );
     assert!(
         matches!(read, Err(ReadWithoutCargoError::ManifestUnreadable { .. })),
         "{toolchain}: the reader gave {:?}",

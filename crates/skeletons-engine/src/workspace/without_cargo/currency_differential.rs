@@ -16,6 +16,7 @@
 
 use std::collections::BTreeMap;
 
+use super::differential::shape;
 use super::error::ReadWithoutCargoError;
 use super::fixture::{CargoHome, Fixture, GitRepository, cargo_version};
 use super::read::read_document;
@@ -301,11 +302,42 @@ fn an_optional_dependency_of_an_outsider_that_no_feature_enables_is_current() {
     assert_both_say(&fixture, Verdict::Current);
 }
 
+/// Requires that a workspace whose lock a feature change on a package outside it has made stale
+/// gets, from the reader, the document `cargo metadata --locked` gives once the lock is
+/// regenerated.
+///
+/// Cargo aborts on the stale lock, and deciding that takes feature resolution, which the reader
+/// does not do, so it reads the lock as it stands. The document it gives is the one it reads
+/// from members, their wearing tables and the packages their dependencies are locked to, and
+/// the feature change touches none of those. The lock is regenerated in place, after the
+/// reader has read the stale one, so that the paths in the two documents are the same.
+fn assert_stale_report_is_the_relocked_one(fixture: &Fixture) {
+    let toolchain = cargo_version();
+    assert_eq!(
+        cargo_verdict(fixture),
+        Verdict::Aborted,
+        "cargo, before the lock is regenerated, on {toolchain}"
+    );
+    let stale = read_document(&fixture.root, &BTreeMap::new())
+        .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the stale lock: {error}"));
+
+    lock(fixture);
+    let relocked = cargo_metadata::fetch(&fixture.root, Network::Refused)
+        .unwrap_or_else(|error| panic!("{toolchain}: cargo refused the relocked lock: {error:?}"));
+
+    // The whole graph is not compared: the lock the reader read lists `z` where the regenerated
+    // one does not, or the other way round, and no member's edge reaches it.
+    assert_eq!(
+        shape(&stale).reached_by_members(),
+        shape(&relocked).reached_by_members(),
+        "on {toolchain}"
+    );
+}
+
 #[test]
-fn an_outsiders_optional_dependency_enabled_afterwards_is_a_gap_the_reader_cannot_see() {
-    // Case H8, the known gap: enabling `z` through a feature of `app` makes Cargo want it
-    // locked, which it is not, so Cargo aborts. Deciding that takes feature resolution, which
-    // this reader does not do, so it gives a document where Cargo aborts.
+fn an_outsiders_optional_dependency_enabled_afterwards_is_reported_as_after_a_relock() {
+    // Case H8: enabling `z` through a feature of `app` makes Cargo want it locked, which it is
+    // not, so Cargo aborts.
     let fixture =
         app_depending_on_outsider("[dependencies]\nz = { path = \"../z\", optional = true }\n");
     fixture.package("../z", "z", "");
@@ -315,17 +347,7 @@ fn an_outsiders_optional_dependency_enabled_afterwards_is_a_gap_the_reader_canno
         "[dependencies]\ny = { path = \"../../y\" }\n[features]\nf = [\"y/z\"]\n",
     );
 
-    let toolchain = cargo_version();
-    assert_eq!(
-        cargo_verdict(&fixture),
-        Verdict::Aborted,
-        "cargo, on {toolchain}"
-    );
-    assert_eq!(
-        reader_verdict(&fixture),
-        Verdict::Current,
-        "the reader, on {toolchain}"
-    );
+    assert_stale_report_is_the_relocked_one(&fixture);
 }
 
 #[test]
@@ -452,25 +474,13 @@ fn an_optional_dependency_of_an_outsider_that_is_not_enabled_and_was_bumped_is_c
 }
 
 #[test]
-fn an_optional_dependency_of_an_outsider_that_stops_being_enabled_is_a_gap_the_reader_cannot_see() {
-    // Case G2d, the mirror of the known gap: `y` drops its `default`, so `z` is no longer
-    // enabled, but the lock still lists it, which Cargo calls out of date. Deciding that takes
-    // feature resolution, which this reader does not do, so it gives a document where Cargo
-    // aborts.
+fn an_optional_dependency_of_an_outsider_that_stops_being_enabled_is_reported_as_after_a_relock() {
+    // Case G2d, the mirror of H8: `y` drops its `default`, so `z` is no longer enabled, but the
+    // lock still lists it, which Cargo calls out of date.
     let fixture = locked_with_z_enabled_by_default();
     fixture.package("../y", "y", Y_OPTIONAL_Z);
 
-    let toolchain = cargo_version();
-    assert_eq!(
-        cargo_verdict(&fixture),
-        Verdict::Aborted,
-        "cargo, on {toolchain}"
-    );
-    assert_eq!(
-        reader_verdict(&fixture),
-        Verdict::Current,
-        "the reader, on {toolchain}"
-    );
+    assert_stale_report_is_the_relocked_one(&fixture);
 }
 
 /// Two git repositories, `g` and `h`, in a Cargo home that has already fetched every reference

@@ -39,15 +39,31 @@ struct MemberShape {
 
 /// What the readers of a workspace take from a document.
 #[derive(Debug, PartialEq, Eq)]
-struct Shape {
+pub(super) struct Shape {
     root: PathBuf,
     /// Every package in the graph as `(name, version, manifest path)`.
     packages: BTreeSet<(String, String, PathBuf)>,
     members: BTreeMap<Identity, MemberShape>,
 }
 
+impl Shape {
+    /// This shape with its packages cut down to the members and the packages their resolve edges
+    /// reach: what a report reads, as against the whole graph.
+    pub(super) fn reached_by_members(mut self) -> Self {
+        let mut reached: BTreeSet<Identity> = self.members.keys().cloned().collect();
+        for member in self.members.values() {
+            for (_, name, version) in &member.edges {
+                reached.insert((name.clone(), version.clone()));
+            }
+        }
+        self.packages
+            .retain(|(name, version, _)| reached.contains(&(name.clone(), version.clone())));
+        self
+    }
+}
+
 /// The shape of `document`.
-fn shape(document: &Document) -> Shape {
+pub(super) fn shape(document: &Document) -> Shape {
     let identity_of = |id: &str| -> Identity {
         let located = document
             .packages

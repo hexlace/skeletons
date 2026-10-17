@@ -5,11 +5,20 @@
 //! refuse is refused here too, and a manifest that uses something this reader does not follow is
 //! refused as unsupported, never read differently.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::collections::BTreeMap;
+use std::path::Path;
 
 use semver::Version;
 use serde::Deserialize;
+
+mod declarations;
+mod manifest_targets;
+
+pub(crate) use declarations::{Declaration, DeclaredSource, GitReference};
+pub(crate) use manifest_targets::{TargetKind, Targets};
+
+use declarations::{declarations_of, workspace_declarations};
+use manifest_targets::targets_of;
 
 use super::text_error::TextError;
 
@@ -48,101 +57,6 @@ pub(crate) struct PackageSection {
     pub(crate) metadata: serde_json::Value,
 }
 
-/// A kind of target a package can have.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum TargetKind {
-    Library,
-    Binary,
-    Example,
-    Test,
-    Benchmark,
-}
-
-/// The `[lib]` table of a manifest.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LibTarget {
-    /// `lib.name`, when written.
-    pub(crate) name: Option<String>,
-    /// `lib.path`, when written, as written.
-    pub(crate) path: Option<String>,
-}
-
-/// The targets a manifest writes, and which kinds it leaves Cargo to discover from the files
-/// beside it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Targets {
-    /// The `[lib]` table, when there is one.
-    pub(crate) library: Option<LibTarget>,
-    declared: BTreeSet<TargetKind>,
-    undiscovered: BTreeSet<TargetKind>,
-}
-
-impl Targets {
-    /// Whether the manifest writes a table for a target of `kind`: `[lib]`, or at least one
-    /// `[[bin]]`, `[[example]]`, `[[test]]` or `[[bench]]`.
-    #[must_use]
-    pub(crate) fn has_declared(&self, kind: TargetKind) -> bool {
-        match kind {
-            TargetKind::Library => self.library.is_some(),
-            TargetKind::Binary | TargetKind::Example | TargetKind::Test | TargetKind::Benchmark => {
-                self.declared.contains(&kind)
-            }
-        }
-    }
-
-    /// Whether Cargo discovers targets of `kind` from the files, which every kind does unless its
-    /// `autolib`, `autobins`, `autoexamples`, `autotests` or `autobenches` key is `false`.
-    #[must_use]
-    pub(crate) fn discovers(&self, kind: TargetKind) -> bool {
-        !self.undiscovered.contains(&kind)
-    }
-}
-
-/// One dependency a manifest declares, in any of its dependency tables.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Declaration {
-    /// The key it is written under.
-    pub(crate) key: String,
-    /// The package it names: `package = "…"` when written, the key otherwise.
-    pub(crate) package: String,
-    /// `Some(key)` whenever `package =` is written, as `cargo metadata` reports a rename.
-    pub(crate) rename: Option<String>,
-    /// Whether it is in a `dev-dependencies` table.
-    pub(crate) is_dev: bool,
-    /// Whether it is written `optional = true`.
-    pub(crate) is_optional: bool,
-    /// Where the package comes from.
-    pub(crate) source: DeclaredSource,
-    /// The `version` requirement as written, when there is one.
-    pub(crate) version_requirement: Option<String>,
-}
-
-/// Where a declaration says its package comes from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DeclaredSource {
-    /// A `path` dependency. The directory is the path joined onto the directory of the manifest
-    /// that wrote it, or of the workspace root for a dependency inherited from it, and is not
-    /// normalized.
-    Path { directory: PathBuf },
-    /// A `git` dependency, with the one reference it names.
-    Git {
-        url: String,
-        reference: GitReference,
-    },
-    /// A registry dependency, from the named registry or from crates.io when there is none.
-    Registry { name: Option<String> },
-}
-
-/// The one reference a git dependency names.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum GitReference {
-    /// None of `branch`, `tag` and `rev`: the remote's default branch.
-    DefaultBranch,
-    Branch(String),
-    Tag(String),
-    Rev(String),
-}
-
 /// What a manifest with a `[workspace]` table says about its workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkspaceRoot {
@@ -156,6 +70,7 @@ pub(crate) struct WorkspaceRoot {
     pub(crate) package_version: Option<String>,
 }
 
+/// The manifest as written, which `manifest_targets` and `declarations` each read their part of.
 #[derive(Deserialize)]
 struct RawManifest {
     package: Option<RawPackage>,
@@ -220,24 +135,6 @@ struct RawWorkspace {
 #[derive(Deserialize)]
 struct RawWorkspacePackage {
     version: Option<String>,
-}
-
-/// Where a table of dependencies sits, which every declaration in it needs to be read.
-struct Site<'site> {
-    /// The table as a reader of the manifest names it, such as `[dependencies]`.
-    table: &'site str,
-    is_dev: bool,
-    /// The directory of the manifest the table is in.
-    directory: &'site Path,
-    /// The workspace a `workspace = true` declaration takes its value from.
-    workspace: Option<&'site WorkspaceRoot>,
-}
-
-/// One declaration's table, with the key it is written under, read by key name.
-struct Written<'written> {
-    table: &'written toml::Table,
-    key: &'written str,
-    site: &'written Site<'written>,
 }
 
 impl PackageManifest {
@@ -331,16 +228,7 @@ impl PackageManifest {
 
 /// The `[workspace]` table of the manifest in `directory`.
 fn workspace_root(section: &RawWorkspace, directory: &Path) -> Result<WorkspaceRoot, TextError> {
-    let site = Site {
-        table: "[workspace.dependencies]",
-        is_dev: false,
-        directory,
-        workspace: None,
-    };
-    let mut dependencies = BTreeMap::new();
-    for (key, value) in section.dependencies.iter().flatten() {
-        dependencies.insert(key.clone(), declaration(key, value, &site)?);
-    }
+    let dependencies = workspace_declarations(section.dependencies.as_ref(), directory)?;
 
     let package_version = section
         .package
@@ -428,268 +316,14 @@ fn checked_version(version: &str, key: &str) -> Result<String, TextError> {
         })
 }
 
-/// The targets a manifest writes.
-fn targets_of(raw: &RawManifest) -> Targets {
-    let written =
-        |tables: &Option<Vec<toml::Value>>| tables.as_ref().is_some_and(|t| !t.is_empty());
-    let declared = [
-        (TargetKind::Binary, written(&raw.bin)),
-        (TargetKind::Example, written(&raw.example)),
-        (TargetKind::Test, written(&raw.test)),
-        (TargetKind::Benchmark, written(&raw.bench)),
-    ]
-    .into_iter()
-    .filter_map(|(kind, present)| present.then_some(kind))
-    .collect();
-
-    let undiscovered = raw
-        .package
-        .as_ref()
-        .map(|package| {
-            [
-                (TargetKind::Library, package.autolib),
-                (TargetKind::Binary, package.autobins),
-                (TargetKind::Example, package.autoexamples),
-                (TargetKind::Test, package.autotests),
-                (TargetKind::Benchmark, package.autobenches),
-            ]
-            .into_iter()
-            .filter_map(|(kind, flag)| (flag == Some(false)).then_some(kind))
-            .collect()
-        })
-        .unwrap_or_default();
-
-    Targets {
-        library: raw.lib.as_ref().map(|lib| LibTarget {
-            name: lib.name.clone(),
-            path: lib.path.clone(),
-        }),
-        declared,
-        undiscovered,
-    }
-}
-
-/// Every declaration of a manifest: its own tables, then those of each `[target.<cfg>]`.
-fn declarations_of(
-    raw: &RawManifest,
-    directory: &Path,
-    workspace: Option<&WorkspaceRoot>,
-) -> Result<Vec<Declaration>, TextError> {
-    let mut declarations = Vec::new();
-    collect_declarations(&raw.tables, "", directory, workspace, &mut declarations)?;
-    for (cfg, tables) in raw.target.iter().flatten() {
-        let prefix = format!("target.{cfg}.");
-        collect_declarations(tables, &prefix, directory, workspace, &mut declarations)?;
-    }
-    Ok(declarations)
-}
-
-/// Appends the declarations of `tables` to `declarations`. `prefix` is what a reader names the
-/// tables by in front of `dependencies`, such as `target.cfg(unix).`.
-fn collect_declarations(
-    tables: &RawDependencyTables,
-    prefix: &str,
-    directory: &Path,
-    workspace: Option<&WorkspaceRoot>,
-    declarations: &mut Vec<Declaration>,
-) -> Result<(), TextError> {
-    let kinds = [
-        ("dependencies", false, tables.dependencies.as_ref()),
-        (
-            "dev-dependencies",
-            true,
-            tables
-                .dev_hyphenated
-                .as_ref()
-                .or(tables.dev_underscored.as_ref()),
-        ),
-        (
-            "build-dependencies",
-            false,
-            tables
-                .build_hyphenated
-                .as_ref()
-                .or(tables.build_underscored.as_ref()),
-        ),
-    ];
-    for (name, is_dev, table) in kinds {
-        let label = format!("[{prefix}{name}]");
-        let site = Site {
-            table: &label,
-            is_dev,
-            directory,
-            workspace,
-        };
-        for (key, value) in table.into_iter().flatten() {
-            declarations.push(declaration(key, value, &site)?);
-        }
-    }
-    Ok(())
-}
-
-/// One entry of a dependency table.
-fn declaration(key: &str, value: &toml::Value, site: &Site<'_>) -> Result<Declaration, TextError> {
-    match value {
-        toml::Value::String(requirement) => Ok(Declaration {
-            key: key.to_owned(),
-            package: key.to_owned(),
-            rename: None,
-            is_dev: site.is_dev,
-            is_optional: false,
-            source: DeclaredSource::Registry { name: None },
-            version_requirement: Some(requirement.clone()),
-        }),
-        toml::Value::Table(table) => detailed_declaration(&Written { table, key, site }),
-        toml::Value::Integer(_)
-        | toml::Value::Float(_)
-        | toml::Value::Boolean(_)
-        | toml::Value::Datetime(_)
-        | toml::Value::Array(_) => Err(TextError::unreadable(format!(
-            "{} `{key}` is neither a version nor a table",
-            site.table
-        ))),
-    }
-}
-
-/// An entry that is a table: inherited from the workspace, or written out.
-fn detailed_declaration(written: &Written<'_>) -> Result<Declaration, TextError> {
-    let is_optional = written.flag("optional")?.unwrap_or(false);
-    if written.table.contains_key("workspace") {
-        return inherited_declaration(written, is_optional);
-    }
-
-    let package = written.string("package")?;
-    Ok(Declaration {
-        key: written.key.to_owned(),
-        package: package.clone().unwrap_or_else(|| written.key.to_owned()),
-        rename: package.map(|_| written.key.to_owned()),
-        is_dev: written.site.is_dev,
-        is_optional,
-        source: written.source()?,
-        version_requirement: written.string("version")?,
-    })
-}
-
-/// An entry written `workspace = true`: the workspace's declaration of the same key, in this
-/// table's kind and with this entry's `optional`.
-fn inherited_declaration(
-    written: &Written<'_>,
-    is_optional: bool,
-) -> Result<Declaration, TextError> {
-    let (site, key) = (written.site, written.key);
-    if written.table.get("workspace") != Some(&toml::Value::Boolean(true)) {
-        return Err(TextError::unreadable(format!(
-            "{} `{key}`: `workspace` must be `true`",
-            site.table
-        )));
-    }
-    let inherited = site
-        .workspace
-        .and_then(|root| root.dependencies.get(key))
-        .ok_or_else(|| {
-            TextError::unreadable(format!(
-                "{} `{key}` is `workspace = true`, but no [workspace.dependencies] declares `{key}`",
-                site.table
-            ))
-        })?;
-    Ok(Declaration {
-        is_dev: site.is_dev,
-        is_optional,
-        ..inherited.clone()
-    })
-}
-
-impl Written<'_> {
-    /// The string written under `name`, when one is.
-    fn string(&self, name: &str) -> Result<Option<String>, TextError> {
-        match self.table.get(name) {
-            None => Ok(None),
-            Some(toml::Value::String(text)) => Ok(Some(text.clone())),
-            Some(
-                toml::Value::Integer(_)
-                | toml::Value::Float(_)
-                | toml::Value::Boolean(_)
-                | toml::Value::Datetime(_)
-                | toml::Value::Array(_)
-                | toml::Value::Table(_),
-            ) => Err(self.not_a(name, "a string")),
-        }
-    }
-
-    /// The boolean written under `name`, when one is.
-    fn flag(&self, name: &str) -> Result<Option<bool>, TextError> {
-        match self.table.get(name) {
-            None => Ok(None),
-            Some(toml::Value::Boolean(flag)) => Ok(Some(*flag)),
-            Some(
-                toml::Value::String(_)
-                | toml::Value::Integer(_)
-                | toml::Value::Float(_)
-                | toml::Value::Datetime(_)
-                | toml::Value::Array(_)
-                | toml::Value::Table(_),
-            ) => Err(self.not_a(name, "a boolean")),
-        }
-    }
-
-    fn not_a(&self, name: &str, what: &str) -> TextError {
-        TextError::unreadable(format!(
-            "{} `{}`: `{name}` must be {what}",
-            self.site.table, self.key
-        ))
-    }
-
-    /// Where the entry says its package comes from.
-    fn source(&self) -> Result<DeclaredSource, TextError> {
-        match (self.string("git")?, self.string("path")?) {
-            (Some(url), None) => Ok(DeclaredSource::Git {
-                url,
-                reference: self.git_reference()?,
-            }),
-            (Some(_), Some(_)) => Err(TextError::unsupported(format!(
-                "{} `{}` writes both `git` and `path`, which Cargo only warns about",
-                self.site.table, self.key
-            ))),
-            (None, Some(path)) => Ok(DeclaredSource::Path {
-                directory: self.site.directory.join(path),
-            }),
-            (None, None) => Ok(DeclaredSource::Registry {
-                name: self.string("registry")?,
-            }),
-        }
-    }
-
-    /// The one of `branch`, `tag` and `rev` the entry writes.
-    fn git_reference(&self) -> Result<GitReference, TextError> {
-        match (
-            self.string("branch")?,
-            self.string("tag")?,
-            self.string("rev")?,
-        ) {
-            (None, None, None) => Ok(GitReference::DefaultBranch),
-            (Some(branch), None, None) => Ok(GitReference::Branch(branch)),
-            (None, Some(tag), None) => Ok(GitReference::Tag(tag)),
-            (None, None, Some(rev)) => Ok(GitReference::Rev(rev)),
-            (Some(_), Some(_), _) | (Some(_), _, Some(_)) | (_, Some(_), Some(_)) => {
-                Err(TextError::unreadable(format!(
-                    "{} `{}` writes more than one of `branch`, `tag` and `rev`",
-                    self.site.table, self.key
-                )))
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
     use serde_json::json;
 
-    use super::{
-        Declaration, DeclaredSource, GitReference, LibTarget, PackageManifest, TargetKind,
-        WorkspaceRoot,
-    };
+    use super::super::text_error::TextErrorKind;
+    use super::{Declaration, DeclaredSource, PackageManifest, WorkspaceRoot};
 
     /// Reads `text` as the manifest in `/w/crates/a`, with no workspace above it.
     fn parsed(text: &str) -> PackageManifest {
@@ -738,7 +372,7 @@ mod tests {
         )
         .expect_err("`one` is no version");
 
-        assert!(error.is_unreadable());
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
         assert!(
             error
                 .detail()
@@ -770,7 +404,7 @@ mod tests {
         )
         .expect_err("no workspace gives a version");
 
-        assert!(error.is_unreadable());
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
     }
 
     #[test]
@@ -798,7 +432,7 @@ mod tests {
         let error = PackageManifest::parse("[dependencies]\n", Path::new("/w"), None)
             .expect_err("nothing to read");
 
-        assert!(error.is_unreadable());
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
     }
 
     #[test]
@@ -806,7 +440,7 @@ mod tests {
         let error =
             PackageManifest::parse("[package", Path::new("/w"), None).expect_err("not TOML");
 
-        assert!(error.is_unreadable());
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
     }
 
     #[test]
@@ -851,503 +485,6 @@ at = 1979-05-27T07:32:00Z
                 "at": {"$__toml_private_datetime": "1979-05-27T07:32:00Z"},
             })
         );
-    }
-
-    #[test]
-    fn a_lib_table_reports_its_name_and_path() {
-        let manifest =
-            parsed("[package]\nname = \"a\"\n[lib]\nname = \"zed\"\npath = \"src/zed.rs\"\n");
-
-        assert_eq!(
-            manifest.targets().library,
-            Some(LibTarget {
-                name: Some("zed".to_owned()),
-                path: Some("src/zed.rs".to_owned()),
-            })
-        );
-        assert!(manifest.targets().has_declared(TargetKind::Library));
-    }
-
-    #[test]
-    fn a_lib_table_with_only_a_path_has_no_name() {
-        let manifest = parsed("[package]\nname = \"a\"\n[lib]\npath = \"x.rs\"\n");
-
-        assert_eq!(
-            manifest.targets().library,
-            Some(LibTarget {
-                name: None,
-                path: Some("x.rs".to_owned()),
-            })
-        );
-    }
-
-    #[test]
-    fn a_manifest_with_no_target_tables_declares_none_and_discovers_all() {
-        let manifest = parsed("[package]\nname = \"a\"\n");
-
-        assert_eq!(manifest.targets().library, None);
-        for kind in [
-            TargetKind::Library,
-            TargetKind::Binary,
-            TargetKind::Example,
-            TargetKind::Test,
-            TargetKind::Benchmark,
-        ] {
-            assert!(
-                !manifest.targets().has_declared(kind),
-                "{kind:?} is not declared"
-            );
-            assert!(manifest.targets().discovers(kind), "{kind:?} is discovered");
-        }
-    }
-
-    #[test]
-    fn each_array_of_targets_is_noticed_on_its_own() {
-        let manifest = parsed(
-            r#"
-[package]
-name = "a"
-
-[[bin]]
-name = "tool"
-
-[[bench]]
-name = "speed"
-"#,
-        );
-
-        let targets = manifest.targets();
-        assert!(targets.has_declared(TargetKind::Binary));
-        assert!(targets.has_declared(TargetKind::Benchmark));
-        assert!(!targets.has_declared(TargetKind::Example));
-        assert!(!targets.has_declared(TargetKind::Test));
-        assert!(!targets.has_declared(TargetKind::Library));
-    }
-
-    #[test]
-    fn an_empty_array_of_targets_declares_none() {
-        let manifest = parsed("[package]\nname = \"a\"\nexample = []\n");
-
-        assert!(!manifest.targets().has_declared(TargetKind::Example));
-    }
-
-    #[test]
-    fn each_auto_key_set_to_false_turns_off_its_own_discovery() {
-        let manifest = parsed(
-            r#"
-[package]
-name = "a"
-autolib = false
-autobins = false
-autoexamples = false
-autotests = false
-autobenches = false
-"#,
-        );
-
-        for kind in [
-            TargetKind::Library,
-            TargetKind::Binary,
-            TargetKind::Example,
-            TargetKind::Test,
-            TargetKind::Benchmark,
-        ] {
-            assert!(
-                !manifest.targets().discovers(kind),
-                "{kind:?} is not discovered"
-            );
-        }
-    }
-
-    #[test]
-    fn an_auto_key_set_to_true_or_left_out_keeps_discovery_on() {
-        let manifest = parsed("[package]\nname = \"a\"\nautobins = false\nautotests = true\n");
-
-        let targets = manifest.targets();
-        assert!(!targets.discovers(TargetKind::Binary));
-        assert!(targets.discovers(TargetKind::Test));
-        assert!(targets.discovers(TargetKind::Library));
-        assert!(targets.discovers(TargetKind::Example));
-        assert!(targets.discovers(TargetKind::Benchmark));
-    }
-
-    #[test]
-    fn every_dependency_table_and_its_underscore_spelling_is_read() {
-        let manifest = parsed(
-            r#"
-[package]
-name = "a"
-
-[dependencies]
-normal = "1"
-
-[dev-dependencies]
-hyphen_dev = "2"
-
-[build-dependencies]
-hyphen_build = "3"
-
-[dev_dependencies]
-underscore_dev = "4"
-
-[build_dependencies]
-underscore_build = "5"
-"#,
-        );
-
-        // The hyphenated spelling wins when both are written, as it does for Cargo, so the
-        // underscore dev and build tables here are the ones Cargo ignores.
-        assert_eq!(
-            manifest.declarations(),
-            &[
-                registry("normal", "1", false),
-                registry("hyphen_dev", "2", true),
-                registry("hyphen_build", "3", false),
-            ]
-        );
-    }
-
-    #[test]
-    fn the_underscore_spellings_are_read_when_they_are_the_only_ones() {
-        let manifest = parsed(
-            r#"
-[package]
-name = "a"
-
-[dev_dependencies]
-tool = "2"
-
-[build_dependencies]
-generator = "3"
-"#,
-        );
-
-        assert_eq!(
-            manifest.declarations(),
-            &[
-                registry("tool", "2", true),
-                registry("generator", "3", false)
-            ]
-        );
-    }
-
-    #[test]
-    fn target_tables_are_read_under_every_cfg() {
-        let manifest = parsed(
-            r#"
-[package]
-name = "a"
-
-[target.'cfg(unix)'.dependencies]
-unix_only = "1"
-
-[target.'cfg(unix)'.dev-dependencies]
-unix_dev = "2"
-
-[target.x86_64-pc-windows-msvc.build-dependencies]
-triple_build = "3"
-
-[target.'cfg(target_os = "macos")'.dev_dependencies]
-mac_dev = "4"
-"#,
-        );
-
-        // Targets come in the order of their `cfg` text: `cfg(target_os = "macos")`,
-        // `cfg(unix)`, then the triple.
-        assert_eq!(
-            manifest.declarations(),
-            &[
-                registry("mac_dev", "4", true),
-                registry("unix_only", "1", false),
-                registry("unix_dev", "2", true),
-                registry("triple_build", "3", false),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_package_rename_records_the_key_as_the_rename() {
-        let manifest = parsed(
-            r#"
-[package]
-name = "a"
-
-[dependencies]
-serde_alias = { package = "serde", version = "1" }
-same = { package = "same", version = "2" }
-"#,
-        );
-
-        assert_eq!(
-            manifest.declarations(),
-            &[
-                Declaration {
-                    key: "same".to_owned(),
-                    package: "same".to_owned(),
-                    rename: Some("same".to_owned()),
-                    is_dev: false,
-                    is_optional: false,
-                    source: DeclaredSource::Registry { name: None },
-                    version_requirement: Some("2".to_owned()),
-                },
-                Declaration {
-                    key: "serde_alias".to_owned(),
-                    package: "serde".to_owned(),
-                    rename: Some("serde_alias".to_owned()),
-                    is_dev: false,
-                    is_optional: false,
-                    source: DeclaredSource::Registry { name: None },
-                    version_requirement: Some("1".to_owned()),
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn an_optional_dependency_is_marked_optional() {
-        let manifest = parsed(
-            "[package]\nname = \"a\"\n[dependencies]\nextra = { version = \"1\", optional = true }\n",
-        );
-
-        let declarations = manifest.declarations();
-        assert_eq!(declarations.len(), 1);
-        assert!(declarations[0].is_optional);
-        assert!(!declarations[0].is_dev);
-    }
-
-    #[test]
-    fn a_path_dependency_is_relative_to_its_manifest() {
-        let manifest = parsed(
-            "[package]\nname = \"a\"\n[dependencies]\nb = { path = \"../b\", version = \"0.1\" }\n",
-        );
-
-        assert_eq!(
-            manifest.declarations(),
-            &[Declaration {
-                key: "b".to_owned(),
-                package: "b".to_owned(),
-                rename: None,
-                is_dev: false,
-                is_optional: false,
-                source: DeclaredSource::Path {
-                    directory: "/w/crates/a/../b".into()
-                },
-                version_requirement: Some("0.1".to_owned()),
-            }]
-        );
-    }
-
-    #[test]
-    fn a_git_dependency_names_at_most_one_reference() {
-        let manifest = parsed(
-            r#"
-[package]
-name = "a"
-
-[dependencies]
-by_branch = { git = "https://example.invalid/g", branch = "feat/x" }
-by_default = { git = "https://example.invalid/g" }
-by_rev = { git = "https://example.invalid/g", rev = "abc123" }
-by_tag = { git = "https://example.invalid/g", tag = "v1" }
-"#,
-        );
-
-        let references: Vec<_> = manifest
-            .declarations()
-            .iter()
-            .map(|declaration| match &declaration.source {
-                DeclaredSource::Git { url, reference } => (url.as_str(), reference.clone()),
-                DeclaredSource::Path { .. } | DeclaredSource::Registry { .. } => {
-                    panic!("`{}` should be a git dependency", declaration.key)
-                }
-            })
-            .collect();
-        assert_eq!(
-            references,
-            [
-                (
-                    "https://example.invalid/g",
-                    GitReference::Branch("feat/x".to_owned())
-                ),
-                ("https://example.invalid/g", GitReference::DefaultBranch),
-                (
-                    "https://example.invalid/g",
-                    GitReference::Rev("abc123".to_owned())
-                ),
-                (
-                    "https://example.invalid/g",
-                    GitReference::Tag("v1".to_owned())
-                ),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_git_dependency_with_two_references_is_unreadable() {
-        let error = PackageManifest::parse(
-            "[package]\nname = \"a\"\n[dependencies]\n\
-             g = { git = \"https://example.invalid/g\", branch = \"x\", tag = \"y\" }\n",
-            Path::new("/w"),
-            None,
-        )
-        .expect_err("a branch and a tag at once");
-
-        assert!(error.is_unreadable());
-        assert_eq!(
-            error.detail(),
-            "[dependencies] `g` writes more than one of `branch`, `tag` and `rev`"
-        );
-    }
-
-    #[test]
-    fn a_dependency_with_both_git_and_path_is_unsupported() {
-        let error = PackageManifest::parse(
-            "[package]\nname = \"a\"\n[dependencies]\n\
-             g = { git = \"https://example.invalid/g\", path = \"../g\" }\n",
-            Path::new("/w"),
-            None,
-        )
-        .expect_err("git and path at once");
-
-        assert!(error.is_unsupported());
-    }
-
-    #[test]
-    fn a_registry_dependency_keeps_the_registry_name_it_writes() {
-        let manifest = parsed(
-            "[package]\nname = \"a\"\n[dependencies]\n\
-             private = { version = \"1\", registry = \"corp\" }\n",
-        );
-
-        assert_eq!(
-            manifest.declarations()[0].source,
-            DeclaredSource::Registry {
-                name: Some("corp".to_owned())
-            }
-        );
-    }
-
-    #[test]
-    fn a_dependency_with_no_source_and_no_version_is_a_registry_dependency_with_no_requirement() {
-        let manifest = parsed("[package]\nname = \"a\"\n[dependencies]\nbare = {}\n");
-
-        assert_eq!(
-            manifest.declarations()[0].source,
-            DeclaredSource::Registry { name: None }
-        );
-        assert_eq!(manifest.declarations()[0].version_requirement, None);
-    }
-
-    #[test]
-    fn a_dependency_key_of_the_wrong_type_is_unreadable() {
-        for body in [
-            "d = { optional = \"yes\" }",
-            "d = { package = 3 }",
-            "d = { version = 1 }",
-            "d = { path = true }",
-            "d = 7",
-        ] {
-            let text = format!("[package]\nname = \"a\"\n[dependencies]\n{body}\n");
-            let error = PackageManifest::parse(&text, Path::new("/w"), None)
-                .expect_err("a value of the wrong type");
-            assert!(error.is_unreadable(), "`{body}` is unreadable");
-        }
-    }
-
-    #[test]
-    fn a_workspace_dependency_is_merged_with_its_path_relative_to_the_root() {
-        // The root is `/w`, so the shared path dependency is `/w/crates/shared`, not relative to
-        // the member at `/w/crates/a`. The member adds `optional`.
-        let root = PackageManifest::parse(
-            r#"
-[workspace]
-members = ["crates/*"]
-
-[workspace.dependencies]
-shared = { path = "crates/shared", version = "0.2.0" }
-serde = "1"
-renamed = { package = "real", version = "3" }
-"#,
-            Path::new("/w"),
-            None,
-        )
-        .expect("a root");
-        let root = root.workspace().expect("a workspace");
-
-        let member = PackageManifest::parse(
-            r#"
-[package]
-name = "a"
-
-[dependencies]
-shared = { workspace = true, optional = true }
-renamed.workspace = true
-
-[dev-dependencies]
-serde.workspace = true
-"#,
-            Path::new("/w/crates/a"),
-            Some(root),
-        )
-        .expect("a member");
-
-        assert_eq!(
-            member.declarations(),
-            &[
-                Declaration {
-                    key: "renamed".to_owned(),
-                    package: "real".to_owned(),
-                    rename: Some("renamed".to_owned()),
-                    is_dev: false,
-                    is_optional: false,
-                    source: DeclaredSource::Registry { name: None },
-                    version_requirement: Some("3".to_owned()),
-                },
-                Declaration {
-                    key: "shared".to_owned(),
-                    package: "shared".to_owned(),
-                    rename: None,
-                    is_dev: false,
-                    is_optional: true,
-                    source: DeclaredSource::Path {
-                        directory: "/w/crates/shared".into()
-                    },
-                    version_requirement: Some("0.2.0".to_owned()),
-                },
-                registry("serde", "1", true),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_workspace_dependency_the_root_does_not_declare_is_unreadable() {
-        let root = PackageManifest::parse("[workspace]\n", Path::new("/w"), None).expect("a root");
-
-        let error = PackageManifest::parse(
-            "[package]\nname = \"a\"\n[dependencies]\nmissing.workspace = true\n",
-            Path::new("/w/a"),
-            root.workspace(),
-        )
-        .expect_err("the root declares nothing");
-
-        assert!(error.is_unreadable());
-        assert_eq!(
-            error.detail(),
-            "[dependencies] `missing` is `workspace = true`, but no [workspace.dependencies] \
-             declares `missing`"
-        );
-    }
-
-    #[test]
-    fn a_workspace_dependency_with_no_workspace_is_unreadable() {
-        let error = PackageManifest::parse(
-            "[package]\nname = \"a\"\n[dependencies]\nx.workspace = true\n",
-            Path::new("/w"),
-            None,
-        )
-        .expect_err("no workspace");
-
-        assert!(error.is_unreadable());
     }
 
     #[test]

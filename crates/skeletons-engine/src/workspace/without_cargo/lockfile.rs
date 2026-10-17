@@ -226,6 +226,7 @@ fn spelled_entry(entry: &str) -> Option<DependencyEntry<'_>> {
 #[cfg(test)]
 mod tests {
     use super::Lockfile;
+    use crate::workspace::without_cargo::text_error::TextErrorKind;
 
     const CRATES_IO: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
@@ -384,7 +385,7 @@ source = "git+https://example.invalid/b#3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39
         )
         .expect_err("the line spells a commit");
 
-        assert!(error.is_unreadable());
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
         assert_eq!(
             error.detail(),
             "Cargo.lock: package `a` 0.1.0 lists a dependency `b 1.0.0 \
@@ -419,7 +420,7 @@ source = "git+https://example.invalid/b#2222222222222222222222222222222222222222
         )
         .expect_err("two commits of one reference");
 
-        assert!(error.is_unreadable());
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
         assert_eq!(
             error.detail(),
             "Cargo.lock: package `a` 0.1.0 lists a dependency `b 1.0.0 \
@@ -441,7 +442,7 @@ dependencies = ["missing"]
         )
         .expect_err("`missing` is locked nowhere");
 
-        assert!(error.is_unreadable());
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
         assert_eq!(
             error.detail(),
             "Cargo.lock: package `a` 0.1.0 lists a dependency `missing`, which names no package"
@@ -466,7 +467,7 @@ version = "1.0.0"
         )
         .expect_err("`b` is locked at 1.0.0 only");
 
-        assert!(error.is_unreadable());
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
     }
 
     #[test]
@@ -491,7 +492,7 @@ version = "2.0.0"
         )
         .expect_err("`b` is locked twice, and the bare name does not say which");
 
-        assert!(error.is_unreadable());
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
         assert_eq!(
             error.detail(),
             "Cargo.lock: package `a` 0.1.0 lists a dependency `b`, which names more than one \
@@ -517,7 +518,7 @@ version = "1.0.0"
         )
         .expect_err("a source must be written in parentheses");
 
-        assert!(error.is_unreadable());
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
     }
 
     #[test]
@@ -532,7 +533,7 @@ version = "1.0.0"
     fn format_version_two_is_unsupported() {
         let error = Lockfile::parse("version = 2\n").expect_err("format 2 is not read");
 
-        assert!(error.is_unsupported());
+        assert_eq!(error.kind(), TextErrorKind::Unsupported);
         assert_eq!(
             error.detail(),
             "Cargo.lock has format version 2, and only versions 3 and 4 are read"
@@ -543,7 +544,7 @@ version = "1.0.0"
     fn a_format_version_newer_than_four_is_unsupported() {
         let error = Lockfile::parse("version = 5\n").expect_err("format 5 is not read");
 
-        assert!(error.is_unsupported());
+        assert_eq!(error.kind(), TextErrorKind::Unsupported);
     }
 
     #[test]
@@ -557,14 +558,14 @@ version = "0.1.0"
         )
         .expect_err("a lockfile with no version is an older format");
 
-        assert!(error.is_unsupported());
+        assert_eq!(error.kind(), TextErrorKind::Unsupported);
     }
 
     #[test]
     fn text_that_is_not_toml_is_unreadable() {
         let error = Lockfile::parse("version = [").expect_err("this is not TOML");
 
-        assert!(error.is_unreadable());
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
     }
 
     #[test]
@@ -579,7 +580,7 @@ name = "a"
         )
         .expect_err("a package needs a version");
 
-        assert!(error.is_unreadable());
+        assert_eq!(error.kind(), TextErrorKind::Unreadable);
     }
 
     #[test]

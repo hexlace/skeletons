@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::Path;
 
-use super::text_error::TextError;
+use super::text_error::{TextError, TextErrorKind};
 
 /// Why a workspace could not be read from its manifests and lockfile.
 ///
@@ -54,12 +54,9 @@ impl ReadWithoutCargoError {
     /// The error for a file whose text was refused, with the file named in front.
     pub(super) fn text(path: &Path, error: &TextError) -> Self {
         let detail = format!("{}: {}", path.display(), error.detail());
-        match (error.is_unreadable(), error.is_unsupported()) {
-            (true, false) => Self::unreadable(detail),
-            (false, true) => Self::unsupported(detail),
-            (true, true) | (false, false) => {
-                unreachable!("a text error is exactly one of unreadable and unsupported")
-            }
+        match error.kind() {
+            TextErrorKind::Unreadable => Self::unreadable(detail),
+            TextErrorKind::Unsupported => Self::unsupported(detail),
         }
     }
 }

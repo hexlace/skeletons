@@ -109,18 +109,18 @@ impl Collector<'_> {
             return Err(ReadWithoutCargoError::Lockfile);
         };
 
-        let mut deps = Vec::new();
+        let mut dependencies = Vec::new();
         for &dependency_index in lockfile.entries()[entry_index].dependency_indexes() {
             if self.set_aside.contains(&dependency_index) {
                 continue;
             }
             if let Some(edge) = self.edge(member, dependency_index)? {
-                deps.push(edge);
+                dependencies.push(edge);
             }
         }
         Ok(Node {
             id: path_id(member),
-            deps,
+            deps: dependencies,
         })
     }
 

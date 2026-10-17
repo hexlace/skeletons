@@ -68,9 +68,9 @@ serde_json.workspace = true
 # Parsing a locked package's version and comparing against it the versions a
 # crates.io index entry or a git remote's release tags name.
 semver.workspace = true
-# The commands': decoding a git source's query string in `workspace/pin.rs`.
-# Optional, turned on by the `commands` feature.
-form_urlencoded = { workspace = true, optional = true }
+# Decoding a git source's query string (`workspace/git_query.rs`), for `behind`'s pin
+# and for reading a workspace without Cargo.
+form_urlencoded.workspace = true
 # The commands': asking crates.io's sparse index whether a registry-pinned
 # skeleton is behind (`behind/crates_io.rs`). See the comment on this dependency
 # in the repository's root `Cargo.toml` for why `ureq`, and why `rustls` alone.
@@ -87,7 +87,7 @@ tempfile.workspace = true
 # The commands `check`, `sync`, `wear` and `remove`, the work-tree checks and the
 # `behind` query they share, and `task()`, which groups them, together with
 # every dependency only they use: the command-line framework, the network
-# client, the manifest editor and the query-string decoder. Off by default, so
+# client and the manifest editor. Off by default, so
 # a project that only reads a workspace and surveys it compiles none of those.
 # `skeletons` turns it on for the bundle it hands on, and nothing else needs to.
 commands = [
@@ -95,7 +95,6 @@ commands = [
     "dep:rituals-compose",
     "dep:toml_edit",
     "dep:ureq",
-    "dep:form_urlencoded",
 ]
 # Compiles in the seams that let a test observe or redirect what would
 # otherwise be a real network request or a real wait: `behind::CratesIoIndex`'s

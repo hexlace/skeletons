@@ -69,8 +69,8 @@ fn split_git_source(source: &str) -> Option<(&str, Option<&str>)> {
 }
 
 /// The reference a git source's `query` names: the remote's default branch when there is none,
-/// and nothing when the query is not exactly one of `tag`, `branch` and `rev`, which is a query
-/// [`has_unread_query`] says so of.
+/// and nothing when the query is not exactly one of `tag`, `branch` and `rev`, which is the
+/// query [`has_unread_query`] reports.
 fn locked_reference(query: Option<&str>) -> Option<GitReference> {
     query.map_or(Some(GitReference::DefaultBranch), |query| {
         parsed_git_query(query).map(|decoded| match decoded {

@@ -161,6 +161,12 @@ fn query_refusal(fixture: &Fixture, url: &str) -> String {
     )
 }
 
+/// The cases over a repository whose directory is named `repo?x=1`: the query reaches git as
+/// part of a `file://` path, so a URL with that query names it.
+fn cases_with_a_query_in_the_url() -> GitCases {
+    GitCases::with_repository(GitRepository::in_directory_named("g", "repo?x=1"))
+}
+
 #[test]
 fn a_git_dependency_just_locked_is_current_however_its_reference_is_spelled() {
     // Every spelling of a git reference, locked and left alone: the default branch, a branch, a
@@ -316,12 +322,6 @@ fn a_file_url_naming_localhost_is_current_once_locked() {
         .expect("the fixture's URL is a file URL");
 
     cases.assert_current(&dependency_at(&format!("file://localhost{path}")));
-}
-
-/// The cases over a repository whose directory is named `repo?x=1`: the query reaches git as
-/// part of a `file://` path, so a URL with that query names it.
-fn cases_with_a_query_in_the_url() -> GitCases {
-    GitCases::with_repository(GitRepository::in_directory_named("g", "repo?x=1"))
 }
 
 #[test]

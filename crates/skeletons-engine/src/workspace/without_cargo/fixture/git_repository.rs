@@ -1,6 +1,6 @@
 //! A git repository holding one package, for a test to depend on through a `file://` source.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use tempfile::TempDir;
@@ -26,8 +26,10 @@ const REMOVED_VARIABLES: [&str; 6] = [
 pub(in crate::workspace::without_cargo) struct GitRepository {
     /// The temporary directory that holds the repository, removed with it.
     holder: TempDir,
-    /// The repository's own directory: the holder itself, or a directory named inside it.
-    directory: PathBuf,
+    /// The name of the repository's directory inside the holder, or nothing when the holder is
+    /// the repository's directory itself. The path is derived from it in `path`, so the
+    /// repository cannot lie outside the holder that removes it.
+    subdirectory: Option<String>,
     /// A `HOME` that holds no configuration.
     home: TempDir,
 }
@@ -48,8 +50,7 @@ impl GitRepository {
             .suffix(suffix)
             .tempdir()
             .expect("a temporary directory");
-        let directory = holder.path().to_path_buf();
-        Self::built(package, holder, directory)
+        Self::built(package, holder, None)
     }
 
     /// A repository of the package `package` in a directory named exactly `name`, inside a
@@ -59,16 +60,16 @@ impl GitRepository {
         name: &str,
     ) -> Self {
         let holder = tempfile::tempdir().expect("a temporary directory");
-        let directory = holder.path().join(name);
-        std::fs::create_dir(&directory).expect("the repository's directory");
-        Self::built(package, holder, directory)
+        std::fs::create_dir(holder.path().join(name)).expect("the repository's directory");
+        Self::built(package, holder, Some(name.to_owned()))
     }
 
-    /// The repository of `package` made in `directory`, which `holder` removes.
-    fn built(package: &str, holder: TempDir, directory: PathBuf) -> Self {
+    /// The repository of `package` made in `holder`, or in the directory `subdirectory` names
+    /// inside it, which `holder` removes.
+    fn built(package: &str, holder: TempDir, subdirectory: Option<String>) -> Self {
         let repository = Self {
             holder,
-            directory,
+            subdirectory,
             home: tempfile::tempdir().expect("a temporary directory"),
         };
         repository.git(&["init", "--quiet", "--initial-branch=main"]);
@@ -96,12 +97,11 @@ impl GitRepository {
         self.git(&["rev-parse", reference]).trim().to_owned()
     }
 
-    fn path(&self) -> &Path {
-        assert!(
-            self.directory.starts_with(self.holder.path()),
-            "the repository's directory is the holder or inside it, so the holder removes it"
-        );
-        &self.directory
+    fn path(&self) -> PathBuf {
+        self.subdirectory.as_ref().map_or_else(
+            || self.holder.path().to_path_buf(),
+            |name| self.holder.path().join(name),
+        )
     }
 
     fn write(&self, relative: &str, text: &str) {

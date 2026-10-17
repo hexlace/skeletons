@@ -106,24 +106,6 @@ fn house_rules_at(home: &CargoHome) -> BTreeMap<LockedPackageId, PathBuf> {
     )])
 }
 
-#[test]
-fn an_optional_dependency_enabled_after_the_lock_that_needs_a_newer_worn_version_is_refused() {
-    // The direct shape: `app` locks `house-rules` at 4.5.6 through `^4`. `z` asks for `^4.6`,
-    // which is in the range 4.5.6 is in, and 4.6.0 is in the registry once the lock is made.
-    // Once `y` enables `z`, Cargo keeps the one 4.x it has, finds it too old, and fails to
-    // select a version, and a relock does not help. The reader cannot read that from the lock,
-    // and says so, naming `z`'s manifest.
-    let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"4.6\"\n");
-    enable_z(&fixture);
-    home.vendor("house-rules", "4.6.0");
-
-    assert_cargo_cannot_resolve_and_reader_refuses(
-        &fixture,
-        &home,
-        &refusal_of(&manifest_of(&fixture, "z"), "4.6"),
-    );
-}
-
 /// What the reader says when `requirement` of `house-rules` in `manifest` is one that the worn
 /// 1.0.0 does not meet, and its `source` kind (`path` or `git`) holds no other version.
 fn refusal_of_the_only_version(manifest: &Path, requirement: &str, source: &str) -> String {
@@ -154,6 +136,31 @@ fn workspace_of_one_worn_version(app_dependency: &str, z_dependency: &str) -> Fi
         &format!("[dependencies]\nhouse-rules = {z_dependency}\n"),
     );
     fixture
+}
+
+/// Locks `fixture` in `home`, which Cargo may not fetch into.
+fn lock_offline(fixture: &Fixture, home: &CargoHome) {
+    let toolchain = cargo_version();
+    home.lock(&fixture.root, Network::Refused)
+        .unwrap_or_else(|stderr| panic!("{toolchain} could not lock the workspace: {stderr}"));
+}
+
+#[test]
+fn an_optional_dependency_enabled_after_the_lock_that_needs_a_newer_worn_version_is_refused() {
+    // The direct shape: `app` locks `house-rules` at 4.5.6 through `^4`. `z` asks for `^4.6`,
+    // which is in the range 4.5.6 is in, and 4.6.0 is in the registry once the lock is made.
+    // Once `y` enables `z`, Cargo keeps the one 4.x it has, finds it too old, and fails to
+    // select a version, and a relock does not help. The reader cannot read that from the lock,
+    // and says so, naming `z`'s manifest.
+    let (fixture, home) = locked_with_optional_z("[dependencies]\nhouse-rules = \"4.6\"\n");
+    enable_z(&fixture);
+    home.vendor("house-rules", "4.6.0");
+
+    assert_cargo_cannot_resolve_and_reader_refuses(
+        &fixture,
+        &home,
+        &refusal_of(&manifest_of(&fixture, "z"), "4.6"),
+    );
 }
 
 #[test]
@@ -202,13 +209,6 @@ fn a_worn_git_package_asked_for_outside_its_compatible_range_is_refused() {
         &home,
         &refusal_of_the_only_version(&manifest_of(&fixture, "z"), "2", "git"),
     );
-}
-
-/// Locks `fixture` in `home`, which Cargo may not fetch into.
-fn lock_offline(fixture: &Fixture, home: &CargoHome) {
-    let toolchain = cargo_version();
-    home.lock(&fixture.root, Network::Refused)
-        .unwrap_or_else(|stderr| panic!("{toolchain} could not lock the workspace: {stderr}"));
 }
 
 #[test]

@@ -59,7 +59,8 @@ mod tests {
     use semver::{Version, VersionReq};
 
     use super::SourceKind;
-    use crate::workspace::without_cargo::package_manifest::DeclaredSource;
+    use crate::workspace::without_cargo::canonical_git_url::CanonicalGitUrl;
+    use crate::workspace::without_cargo::package_manifest::{DeclaredSource, GitReference};
 
     fn why(kind: SourceKind, locked: &str, requirement: &str) -> Option<&'static str> {
         kind.why_unmet(
@@ -106,9 +107,6 @@ mod tests {
 
     #[test]
     fn the_kind_follows_the_declared_source() {
-        use crate::workspace::without_cargo::canonical_git_url::CanonicalGitUrl;
-        use crate::workspace::without_cargo::package_manifest::GitReference;
-
         assert_eq!(
             SourceKind::of(&DeclaredSource::Registry { name: None }),
             SourceKind::Registry

@@ -21,8 +21,10 @@ use crate::worn_skeleton::WornSkeleton;
 /// command line's `check` would pass it only when `refusals()` is empty and
 /// every file of every skeleton is [`Matches`](crate::FileState::Matches).
 ///
-/// The two functions give one report for one workspace and its files, so
-/// everything here reads the same whichever produced it, except that only
+/// Where `check_without_cargo` gives a report, it is the report `check` gives
+/// on the same files, or, in the one stale shape its documentation describes,
+/// the one `check` gives once the lock is regenerated. So everything here
+/// reads the same whichever produced it, except that only
 /// `check_without_cargo` can report an
 /// [`Unlocated`](crate::RefusalKind::Unlocated) refusal.
 ///

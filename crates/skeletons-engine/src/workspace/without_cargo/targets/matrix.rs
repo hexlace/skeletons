@@ -4,7 +4,7 @@
 //! A row is a manifest, the files beside it, and either the library name the package ends up
 //! with (`Ok(None)` for a package with no library) or the sentence Cargo refuses it with. The
 //! rows are data so that a shape missed is one row to add; the differential tests in
-//! `differential.rs` run a selection of them through Cargo itself.
+//! `differential.rs` run every one of them through Cargo itself.
 
 use super::tests::read;
 

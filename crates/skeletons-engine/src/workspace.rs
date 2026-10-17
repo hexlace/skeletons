@@ -5,9 +5,10 @@
 //! reads the manifests and `Cargo.lock` as files, and takes from its caller the
 //! directory of each locked package that is not a path on disk. Both build one
 //! document in the shape `cargo metadata` prints, and everything after it is
-//! shared, so the two give the same workspace for the same files. The one
-//! thing only the second can say is a wearing whose package has no location,
-//! which is [`WearingRefusal::Unlocated`].
+//! shared, so the two give the same workspace for the same files, or, in the
+//! one stale shape the lockfile can be in, the workspace the first gives once
+//! the lock is regenerated. The one thing only the second can say is a wearing
+//! whose package has no location, which is [`WearingRefusal::Unlocated`].
 
 mod cargo_metadata;
 mod crate_name;

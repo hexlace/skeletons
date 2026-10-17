@@ -46,8 +46,9 @@ impl Root {
 /// # Errors
 ///
 /// Unreadable when no manifest is at or above `start`, when a manifest cannot be read, when the
-/// package at or above `start` believes it is in a workspace it is not a member of, and for each
-/// other way Cargo refuses a manifest that this reader notices.
+/// package at or above `start` believes it is in a workspace it is not a member of, when the root
+/// is a virtual manifest and the workspace has no members, and for each other way Cargo refuses a
+/// manifest that this reader notices.
 pub(super) fn discover(start: &Path) -> Result<Layout, ReadWithoutCargoError> {
     let package_directory = nearest_manifest_directory(start)?;
     let root = find_root(&package_directory)?;
@@ -60,6 +61,12 @@ pub(super) fn discover(start: &Path) -> Result<Layout, ReadWithoutCargoError> {
         return Err(ReadWithoutCargoError::unreadable(format!(
             "{} believes it is in the workspace of {}, which does not list it as a member",
             package_directory.join(MANIFEST_FILE_NAME).display(),
+            root.directory.join(MANIFEST_FILE_NAME).display()
+        )));
+    }
+    if root.manifest.package().is_none() && packages.iter().all(|package| !package.is_member) {
+        return Err(ReadWithoutCargoError::unreadable(format!(
+            "{} is a virtual manifest, and the workspace has no members",
             root.directory.join(MANIFEST_FILE_NAME).display()
         )));
     }

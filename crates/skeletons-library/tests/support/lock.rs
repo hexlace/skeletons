@@ -37,9 +37,9 @@ pub(crate) struct LockEntry {
     pub(crate) source: String,
 }
 
-/// The `[[package]]` entry named `name` in the project's `Cargo.lock`, read
-/// from the file's text, or an error saying what the file held instead.
-pub(crate) fn lock_entry(project: &Path, name: &str) -> Result<LockEntry, Box<dyn Error>> {
+/// Every `[[package]]` entry named `name` that has a `source`, in the project's
+/// `Cargo.lock`, read from the file's text and in the order the file lists them.
+pub(crate) fn lock_entries(project: &Path, name: &str) -> Result<Vec<LockEntry>, Box<dyn Error>> {
     let text = fs::read_to_string(project.join("Cargo.lock"))?;
     let mut entries: Vec<[Option<String>; 3]> = Vec::new();
     for line in text.lines() {
@@ -57,18 +57,29 @@ pub(crate) fn lock_entry(project: &Path, name: &str) -> Result<LockEntry, Box<dy
             }
         }
     }
-    let matching: Vec<_> = entries
+    Ok(entries
         .into_iter()
-        .filter(|entry| entry[0].as_deref() == Some(name))
-        .collect();
-    match matching.as_slice() {
-        [[Some(name), Some(version), Some(source)]] => Ok(LockEntry {
-            name: name.clone(),
-            version: version.clone(),
-            source: source.clone(),
-        }),
-        other => Err(
-            format!("expected one sourced entry for {name} in Cargo.lock, got {other:?}").into(),
+        .filter_map(|entry| match entry {
+            [Some(entry_name), Some(version), Some(source)] if entry_name == name => {
+                Some(LockEntry {
+                    name: entry_name,
+                    version,
+                    source,
+                })
+            }
+            _ => None,
+        })
+        .collect())
+}
+
+/// The one `[[package]]` entry named `name` that has a `source`, in the
+/// project's `Cargo.lock`, or an error saying what the file held instead.
+pub(crate) fn lock_entry(project: &Path, name: &str) -> Result<LockEntry, Box<dyn Error>> {
+    let mut entries = lock_entries(project, name)?;
+    match entries.len() {
+        1 => Ok(entries.remove(0)),
+        _ => Err(
+            format!("expected one sourced entry for {name} in Cargo.lock, got {entries:?}").into(),
         ),
     }
 }

@@ -33,10 +33,12 @@ const LOCKFILE_NAME: &str = "Cargo.lock";
 ///
 /// [`ReadWithoutCargoError::DirectoryNotFound`] when `directory` cannot be read,
 /// [`ReadWithoutCargoError::ManifestUnreadable`] when a manifest or the lockfile cannot be, or
-/// Cargo refuses it too, [`ReadWithoutCargoError::Unsupported`] when the workspace uses
-/// something only Cargo reads (`[patch]`, `[replace]`, `package.workspace`, one package under
-/// two dependency keys, a lockfile format other than 3 and 4), and
-/// [`ReadWithoutCargoError::Lockfile`] when `Cargo.lock` is missing or out of date.
+/// Cargo refuses it too (a virtual workspace with no members is one),
+/// [`ReadWithoutCargoError::Unsupported`] when the workspace uses something only Cargo reads
+/// (`[patch]`, `[replace]`, `package.workspace`, one package under two dependency keys, a lockfile
+/// format other than 3 and 4), and [`ReadWithoutCargoError::Lockfile`] when `Cargo.lock` is
+/// missing or out of date. A missing `Cargo.lock` is that last error even when the workspace also
+/// uses something only Cargo reads.
 pub fn read_without_cargo(
     directory: &Path,
     locations: &BTreeMap<LockedPackageId, PathBuf>,
@@ -52,8 +54,10 @@ pub(super) fn read_document(
 ) -> Result<Document, ReadWithoutCargoError> {
     let start = canonical_directory(directory)?;
     let layout = layout::discover(&start)?;
+    let (lockfile_path, lockfile_text) = lockfile_text(&layout.root_directory)?;
     unsupported::check(&layout)?;
-    let lockfile = read_lockfile(&layout.root_directory)?;
+    let lockfile = Lockfile::parse(&lockfile_text)
+        .map_err(|error| ReadWithoutCargoError::text(&lockfile_path, &error))?;
     verify_lockfile_is_current(&lockfile, &layout.packages)?;
     document::build(&layout, &lockfile, locations)
 }
@@ -74,17 +78,16 @@ fn canonical_directory(directory: &Path) -> Result<PathBuf, ReadWithoutCargoErro
     }
 }
 
-/// The lockfile in `root_directory`.
-fn read_lockfile(root_directory: &Path) -> Result<Lockfile, ReadWithoutCargoError> {
+/// The path and text of the lockfile in `root_directory`. A missing lockfile is read before the
+/// workspace is checked for shapes only Cargo reads, because Cargo's `--locked` aborts on a missing
+/// lockfile before it reads anything else.
+fn lockfile_text(root_directory: &Path) -> Result<(PathBuf, String), ReadWithoutCargoError> {
     let path = root_directory.join(LOCKFILE_NAME);
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == ErrorKind::NotFound => {
-            return Err(ReadWithoutCargoError::Lockfile);
-        }
-        Err(error) => return Err(ReadWithoutCargoError::file(&path, &error)),
-    };
-    Lockfile::parse(&text).map_err(|error| ReadWithoutCargoError::text(&path, &error))
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Ok((path, text)),
+        Err(error) if error.kind() == ErrorKind::NotFound => Err(ReadWithoutCargoError::Lockfile),
+        Err(error) => Err(ReadWithoutCargoError::file(&path, &error)),
+    }
 }
 
 #[cfg(test)]
@@ -312,7 +315,8 @@ mod tests {
 
     /// The error of reading a workspace whose root holds `root_extra` after
     /// `[workspace] members = ["app"]` and whose member `app` has `app_extra` in its package.
-    /// No lockfile is written: an unsupported shape is refused before the lockfile is read.
+    /// The lockfile is present and stale, because an unsupported shape is refused before the
+    /// lockfile is checked for currency, though not before it is found missing.
     fn refusal_with(root_extra: &str, app_extra: &str) -> ReadWithoutCargoError {
         let fixture = Fixture::new();
         fixture.write(
@@ -320,6 +324,7 @@ mod tests {
             &format!("[workspace]\nmembers = [\"app\"]\n{root_extra}"),
         );
         fixture.package("app", "app", app_extra);
+        fixture.write("Cargo.lock", "version = 4\n");
         read(&fixture).err().expect("an unsupported workspace")
     }
 
@@ -376,11 +381,32 @@ mod tests {
         fixture.write("Cargo.toml", "[workspace]\nmembers = [\"one\", \"two\"]\n");
         fixture.package("one", "twin", "version = \"1.0.0\"\n");
         fixture.package("two", "twin", "version = \"1.0.0\"\n");
+        fixture.write("Cargo.lock", "version = 4\n");
 
         let error = read(&fixture).err().expect("two twins");
 
         assert!(matches!(error, ReadWithoutCargoError::Unsupported { .. }));
         assert!(detail_of(error).contains("are both the package `twin` 1.0.0"));
+    }
+
+    #[test]
+    fn a_missing_lockfile_wins_over_an_unsupported_shape() {
+        // One member declares the same package under two keys, which only Cargo reads, and no
+        // lockfile exists. Cargo's `--locked` aborts on the lockfile first, so the error is the
+        // lockfile's.
+        let fixture = Fixture::new();
+        fixture.write("Cargo.toml", "[workspace]\nmembers = [\"app\"]\n");
+        fixture.package(
+            "app",
+            "app",
+            "[dependencies]\ndep = { path = \"../dep\" }\n\
+             alias = { package = \"dep\", path = \"../dep\" }\n",
+        );
+        fixture.package("dep", "dep", "");
+
+        let error = read(&fixture).err().expect("no lockfile");
+
+        assert_eq!(error, ReadWithoutCargoError::Lockfile);
     }
 
     #[test]

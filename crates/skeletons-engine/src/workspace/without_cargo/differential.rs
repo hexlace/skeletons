@@ -441,6 +441,64 @@ fn one_package_under_two_keys_is_read_by_cargo_and_refused_as_unsupported_by_the
 }
 
 #[test]
+fn a_virtual_workspace_with_no_members_is_refused_by_cargo_and_by_the_reader() {
+    // Three roots with no `[package]` and no member: an empty `members`, no `members` at all, and
+    // a glob whose only match is excluded. Cargo locks each, then refuses to read it, and so must
+    // the reader, whether or not a lockfile exists.
+    let toolchain = cargo_version();
+    let roots = [
+        ("members = []", "[workspace]\nmembers = []\n"),
+        ("no members key", "[workspace]\n"),
+        (
+            "an excluded glob",
+            "[workspace]\nmembers = [\"crates/*\"]\nexclude = [\"crates/a\"]\n",
+        ),
+    ];
+    for (shape, manifest) in roots {
+        let fixture = Fixture::new();
+        fixture.write("Cargo.toml", manifest);
+        fixture.package("crates/a", "a", "");
+        fixture
+            .lock_with_cargo()
+            .unwrap_or_else(|stderr| panic!("{toolchain} could not lock {shape}: {stderr}"));
+
+        let cargo = cargo_metadata::fetch(&fixture.root, Network::Refused);
+        let read = read_document(&fixture.root, &BTreeMap::new());
+
+        match cargo {
+            Err(cargo_metadata::ReadWorkspaceError::CargoMetadataFailed { stderr }) => assert!(
+                stderr.contains("the workspace has no members"),
+                "{toolchain} refused {shape} for another reason: {stderr}"
+            ),
+            other => panic!("{toolchain} on {shape}: expected a refusal, got {other:?}"),
+        }
+        match read {
+            Err(ReadWithoutCargoError::ManifestUnreadable { detail }) => assert!(
+                detail.contains("has no members"),
+                "{toolchain}: the reader refused {shape} as `{detail}`"
+            ),
+            other => panic!(
+                "{toolchain}: the reader on {shape} gave {:?}",
+                other.map(|_| ())
+            ),
+        }
+    }
+}
+
+#[test]
+fn a_root_package_with_empty_members_agrees() {
+    // The root is a package, so it is its own member and the empty `members` refuses nothing.
+    let fixture = Fixture::new();
+    fixture.write(
+        "Cargo.toml",
+        "[package]\nname = \"solo\"\n[workspace]\nmembers = []\n",
+    );
+    fixture.write("src/lib.rs", "");
+
+    assert_agree_at_root(&fixture);
+}
+
+#[test]
 fn a_dependency_left_with_only_a_build_script_is_refused_by_cargo_and_by_the_reader() {
     let toolchain = cargo_version();
     let fixture = workspace_with_app("", "[dependencies]\ndep = { path = \"../dep\" }\n");

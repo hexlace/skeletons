@@ -44,7 +44,7 @@ struct RawPackage {
 }
 
 /// One dependency entry, split into the parts it spells: `name`, `name version` or
-/// `name version (source)`.
+/// `name version (source)`. The source is the package's `source` without its locked commit.
 struct DependencyEntry<'text> {
     name: &'text str,
     version: Option<&'text str>,
@@ -149,6 +149,10 @@ fn resolved_entry(package: &RawPackage, packages: &[RawPackage]) -> Result<LockE
 }
 
 /// The position in `packages` of the one package the dependency `entry` of `dependent` names.
+///
+/// A spelled source is compared with each package's `source` cut at its `#<commit>`, because Cargo
+/// writes it that way. A line that spells the commit names no package, and two packages that differ
+/// only in their commit are both named by one line.
 fn resolved_dependency(
     dependent: &RawPackage,
     entry: &str,
@@ -167,9 +171,9 @@ fn resolved_dependency(
             && spelled
                 .version
                 .is_none_or(|version| candidate.version == version)
-            && spelled
-                .source
-                .is_none_or(|source| candidate.source.as_deref() == Some(source))
+            && spelled.source.is_none_or(|source| {
+                candidate.source.as_deref().map(source_without_commit) == Some(source)
+            })
     });
     match (matches.next(), matches.next()) {
         (Some((index, _)), None) => Ok(index),
@@ -183,6 +187,15 @@ fn resolved_dependency(
             dependent.name, dependent.version
         ))),
     }
+}
+
+/// `source` without the `#<commit>` a git package is locked to, which is how a dependency entry
+/// spells it. The reference's query (`?rev=`, `?branch=`, `?tag=`) stays, and tells apart the
+/// references to one repository.
+fn source_without_commit(source: &str) -> &str {
+    source
+        .split_once('#')
+        .map_or(source, |(without_commit, _)| without_commit)
 }
 
 /// Splits a dependency entry into the parts it spells, or `None` when it is none of Cargo's three
@@ -281,6 +294,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
     #[test]
     fn a_dependency_spelled_with_a_source_picks_that_source_among_two() {
         // One version of `b` is locked from two sources, so only the full spelling names one.
+        // Cargo writes the source in the line without the commit the package is locked to.
         let lockfile = parsed(
             r#"
 version = 3
@@ -288,7 +302,7 @@ version = 3
 [[package]]
 name = "a"
 version = "0.1.0"
-dependencies = ["b 1.0.0 (git+https://example.invalid/b#3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39)"]
+dependencies = ["b 1.0.0 (git+https://example.invalid/b)"]
 
 [[package]]
 name = "b"
@@ -303,6 +317,114 @@ source = "git+https://example.invalid/b#3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39
         );
 
         assert_eq!(lockfile.entries()[0].dependency_indexes(), &[2]);
+    }
+
+    #[test]
+    fn a_dependency_spelled_with_each_kind_of_git_reference_picks_that_reference() {
+        // One `dep` 0.1.0 is locked from the default branch, a `rev`, a `branch` and a `tag` of one
+        // repository. Cargo keeps the reference's query in the line and drops the commit, so the
+        // four lines differ only in their query and each names one entry.
+        let lockfile = parsed(
+            r#"
+version = 4
+
+[[package]]
+name = "a"
+version = "0.1.0"
+dependencies = [
+ "dep 0.1.0 (git+https://example.invalid/dep)",
+ "dep 0.1.0 (git+https://example.invalid/dep?rev=3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39)",
+ "dep 0.1.0 (git+https://example.invalid/dep?branch=feat%2Fx)",
+ "dep 0.1.0 (git+https://example.invalid/dep?tag=v1)",
+]
+
+[[package]]
+name = "dep"
+version = "0.1.0"
+source = "git+https://example.invalid/dep#1111111111111111111111111111111111111111"
+
+[[package]]
+name = "dep"
+version = "0.1.0"
+source = "git+https://example.invalid/dep?rev=3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39#3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39"
+
+[[package]]
+name = "dep"
+version = "0.1.0"
+source = "git+https://example.invalid/dep?branch=feat%2Fx#2222222222222222222222222222222222222222"
+
+[[package]]
+name = "dep"
+version = "0.1.0"
+source = "git+https://example.invalid/dep?tag=v1#3333333333333333333333333333333333333333"
+"#,
+        );
+
+        assert_eq!(lockfile.entries()[0].dependency_indexes(), &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_dependency_spelling_the_commit_names_no_package() {
+        // Cargo never writes `#<commit>` in a dependency line, so a line that does is not one it
+        // wrote, and it is not read as if it were.
+        let error = Lockfile::parse(
+            r#"
+version = 4
+
+[[package]]
+name = "a"
+version = "0.1.0"
+dependencies = ["b 1.0.0 (git+https://example.invalid/b#3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39)"]
+
+[[package]]
+name = "b"
+version = "1.0.0"
+source = "git+https://example.invalid/b#3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39"
+"#,
+        )
+        .expect_err("the line spells a commit");
+
+        assert!(error.is_unreadable());
+        assert_eq!(
+            error.detail(),
+            "Cargo.lock: package `a` 0.1.0 lists a dependency `b 1.0.0 \
+             (git+https://example.invalid/b#3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39)`, which \
+             names no package"
+        );
+    }
+
+    #[test]
+    fn two_entries_differing_only_in_commit_are_named_by_one_dependency() {
+        // One reference locks to one commit, so Cargo writes no such pair. Were it present, the
+        // line could not say which of the two it means.
+        let error = Lockfile::parse(
+            r#"
+version = 4
+
+[[package]]
+name = "a"
+version = "0.1.0"
+dependencies = ["b 1.0.0 (git+https://example.invalid/b)"]
+
+[[package]]
+name = "b"
+version = "1.0.0"
+source = "git+https://example.invalid/b#1111111111111111111111111111111111111111"
+
+[[package]]
+name = "b"
+version = "1.0.0"
+source = "git+https://example.invalid/b#2222222222222222222222222222222222222222"
+"#,
+        )
+        .expect_err("two commits of one reference");
+
+        assert!(error.is_unreadable());
+        assert_eq!(
+            error.detail(),
+            "Cargo.lock: package `a` 0.1.0 lists a dependency `b 1.0.0 \
+             (git+https://example.invalid/b)`, which names more than one package"
+        );
     }
 
     #[test]

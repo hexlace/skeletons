@@ -9,9 +9,11 @@
 //! metadata` prints, and everything after it is shared, so they give the same
 //! workspace for the same files, or, in the one stale shape the lockfile can be
 //! in, the workspace the first gives once Cargo brings the lock up to date. The
-//! exception is a Cargo configuration file that asks for `paths`, `[patch]` or
-//! `include`: the first follows it, the second refuses it, and the third gives
-//! the workspace of the files with no such file. The one thing only the last
+//! exception is a Cargo configuration file. One that asks for `paths`, `[patch]`
+//! or `include`, the first follows, the second refuses and the third gives the
+//! workspace of the files with no such file. One that cannot be read, because it
+//! is not TOML or not a file, fails the first two and leaves the third giving
+//! the workspace of the files, since it opens none. The one thing only the last
 //! two can say is a wearing whose package has no
 //! location, which is [`WearingRefusal::Unlocated`].
 

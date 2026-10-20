@@ -378,13 +378,13 @@ The three reads, by what each is for and what each reads:
   directory, nor the cargo home's, and it does not look at `CARGO_HOME` or
   `HOME`.
 
-Everything in "Without Cargo" holds for it, except the paragraph on
-configuration files and the three refusals that come from them: it never refuses
-a `paths`, a `[patch]` with an entry or an `include` in a configuration file, and
-never finds a configuration file unreadable, because it opens none. Its errors
-are the ones listed there for a manifest or the lockfile, and no configuration
-file appears in any. A `[patch]` in a `Cargo.toml` and a wearing declared with
-`registry =` are still refused.
+Everything in "Without Cargo" holds for it, except what that section says about
+Cargo's configuration files, wherever it says it, and about who
+`check_without_cargo` is for. So it never refuses a `paths`, a `[patch]` with an
+entry or an `include` in a configuration file, and never finds a configuration
+file unreadable, because it opens none. Its errors are the ones listed there for
+a manifest or the lockfile, and no configuration file appears in any. A `[patch]`
+in a `Cargo.toml` and a wearing declared with `registry =` are still refused.
 
 A configuration file that `check_without_cargo` refuses changes nothing here:
 the result is the one the workspace has with no such file. Where a Cargo

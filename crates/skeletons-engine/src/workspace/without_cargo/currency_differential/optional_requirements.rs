@@ -20,7 +20,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::super::cargo_configuration::HomeVariables;
+use super::super::cargo_configuration::{ConfigurationRead, HomeVariables};
 use super::super::error::ReadWithoutCargoError;
 use super::super::fixture::{CargoHome, Fixture, GitRepository, cargo_version};
 use super::super::read::read_document;
@@ -479,7 +479,7 @@ fn a_requirement_of_a_registry_package_is_not_read_and_the_report_is_the_locked_
     let document = read_document(
         &fixture.root,
         &BTreeMap::new(),
-        &HomeVariables::cargo_home(home.path()),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::cargo_home(home.path())),
     )
     .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the workspace: {error}"));
     let unlocated: Vec<(&str, &str)> = document
@@ -598,7 +598,7 @@ fn an_optional_package_whose_manifest_cargo_refuses_in_another_way_is_refused_na
     let Err(ReadWithoutCargoError::ManifestUnreadable { detail }) = read_document(
         &fixture.root,
         &BTreeMap::new(),
-        &HomeVariables::cargo_home(home.path()),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::cargo_home(home.path())),
     ) else {
         panic!("the reader, on {toolchain}: expected an unreadable manifest");
     };

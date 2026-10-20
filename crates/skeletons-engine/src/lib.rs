@@ -8,7 +8,9 @@
 //! reads the same from the manifests and `Cargo.lock` as files, running no
 //! cargo: it is told where each locked package that is not a path on disk is
 //! ([`LockedPackageId`]), and a wearing whose package has no location is a
-//! [`RefusalKind::Unlocated`] refusal. [`survey()`] renders
+//! [`RefusalKind::Unlocated`] refusal. [`read_without_cargo_configuration`] is
+//! that read with no Cargo configuration file read, so that the same files give
+//! the same workspace on any machine. [`survey()`] renders
 //! every worn skeleton and compares what it renders with the files on disk,
 //! and writes nothing. The items they take and return carry the answer: each
 //! worn skeleton, each claimed file that could be compared, with its state,
@@ -73,7 +75,7 @@ pub use claim::{ClaimPath, Claimant, Drift, DriftReason};
 pub use survey::{RefusalKind, RefusalRecord, RefusedWearing, Row, Survey, survey};
 pub use workspace::{
     LockedPackageId, Network, ReadWithoutCargoError, ReadWorkspaceError, Workspace, WornDependency,
-    read, read_without_cargo,
+    read, read_without_cargo, read_without_cargo_configuration,
 };
 
 // Tests for `skeleton::render`, read from real skeleton crates under

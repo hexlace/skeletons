@@ -30,7 +30,7 @@ mod registry;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use super::cargo_configuration::HomeVariables;
+use super::cargo_configuration::{ConfigurationRead, HomeVariables};
 use super::differential::shape;
 use super::error::ReadWithoutCargoError;
 use super::fixture::{CargoHome, Fixture, cargo_version};
@@ -83,7 +83,8 @@ fn cargo_verdict_of<Output>(result: Result<Output, ReadWorkspaceError>) -> Verdi
 /// What this reader says of the workspace at `fixture`'s root, finding the Cargo home from
 /// `variables`.
 fn reader_verdict(fixture: &Fixture, variables: &HomeVariables) -> Verdict {
-    match read_document(&fixture.root, &BTreeMap::new(), variables) {
+    let configuration = ConfigurationRead::AsCargoReadsIt(variables.clone());
+    match read_document(&fixture.root, &BTreeMap::new(), &configuration) {
         Ok(_) => Verdict::Current,
         Err(ReadWithoutCargoError::Lockfile) => Verdict::Aborted,
         Err(ReadWithoutCargoError::ManifestUnreadable { .. }) => Verdict::Refused,
@@ -131,9 +132,11 @@ fn assert_reader_refuses(fixture: &Fixture, variables: &HomeVariables, detail: &
         Verdict::Unsupported,
         "the reader, on {toolchain}"
     );
-    let Err(ReadWithoutCargoError::Unsupported { detail: given }) =
-        read_document(&fixture.root, &BTreeMap::new(), variables)
-    else {
+    let Err(ReadWithoutCargoError::Unsupported { detail: given }) = read_document(
+        &fixture.root,
+        &BTreeMap::new(),
+        &ConfigurationRead::AsCargoReadsIt(variables.clone()),
+    ) else {
         panic!("the reader, on {toolchain}: expected a refusal");
     };
     assert_eq!(given, detail, "the reader's words, on {toolchain}");
@@ -359,8 +362,12 @@ fn assert_stale_report_is_the_relocked_one(fixture: &Fixture) {
         Verdict::Aborted,
         "cargo, before the lock is brought up to date, on {toolchain}"
     );
-    let stale = read_document(&fixture.root, &BTreeMap::new(), &HomeVariables::unset())
-        .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the stale lock: {error}"));
+    let stale = read_document(
+        &fixture.root,
+        &BTreeMap::new(),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+    )
+    .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the stale lock: {error}"));
 
     lock(fixture);
     let relocked = cargo_metadata::fetch(&fixture.root, Network::Refused)
@@ -396,7 +403,7 @@ fn assert_stale_report_is_the_relocked_one_in_home(
     let stale = read_document(
         &fixture.root,
         locations,
-        &HomeVariables::cargo_home(home.path()),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::cargo_home(home.path())),
     )
     .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the stale lock: {error}"));
 

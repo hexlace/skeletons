@@ -16,7 +16,22 @@ use std::path::{Path, PathBuf};
 use super::error::ReadWithoutCargoError;
 use super::text_error::TextError;
 
-pub(super) use cargo_home::{HomeVariables, cargo_home_directory};
+pub(super) use cargo_home::HomeVariables;
+use cargo_home::cargo_home_directory;
+
+/// Whether Cargo's configuration files are read, and if so how Cargo finds its home.
+///
+/// A read that skips them is the same read with no file listed, so that nothing else in the path
+/// differs between the two.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ConfigurationRead {
+    /// Read the files as Cargo does: in the start directory and each one above it, and then the
+    /// Cargo home these variables name.
+    AsCargoReadsIt(HomeVariables),
+    /// Read no file, and look at neither the file system nor the environment for one, so that
+    /// the same manifests and lockfile give the same result on any machine.
+    Skipped,
+}
 
 /// Every configuration file Cargo reads for a directory, parsed, nearest first.
 #[derive(Debug)]
@@ -31,20 +46,25 @@ struct ConfigurationFile {
     table: toml::Table,
 }
 
-/// Reads the configuration files Cargo reads when it starts in `start`, with the Cargo home
-/// `cargo_home`.
+/// Reads the configuration files Cargo reads when it starts in `start`, or none when the read is
+/// [`ConfigurationRead::Skipped`], which lists nothing, opens nothing and works out no Cargo home.
 ///
 /// `start` is a real directory, as `std::fs::canonicalize` gives one.
 ///
 /// # Errors
 ///
 /// Unreadable, naming the file, for a file that cannot be read or is not TOML, which Cargo
-/// refuses too.
+/// refuses too. Never for a skipped read.
 pub(super) fn read(
     start: &Path,
-    cargo_home: Option<&Path>,
+    configuration_read: &ConfigurationRead,
 ) -> Result<CargoConfiguration, ReadWithoutCargoError> {
-    let listed = files::configuration_files(start, cargo_home);
+    let listed = match configuration_read {
+        ConfigurationRead::AsCargoReadsIt(variables) => {
+            files::configuration_files(start, cargo_home_directory(variables, start).as_deref())
+        }
+        ConfigurationRead::Skipped => Vec::new(),
+    };
     let files = listed
         .iter()
         .map(|path| read_file(path))
@@ -157,14 +177,16 @@ mod tests {
 
     use proptest::prelude::*;
 
-    use super::{ConfigurationFile, read};
+    use super::{ConfigurationFile, ConfigurationRead, HomeVariables, read};
     use crate::workspace::without_cargo::error::ReadWithoutCargoError;
     use crate::workspace::without_cargo::fixture::Fixture;
 
     /// What reading the configuration from the fixture's root, and refusing what only Cargo
-    /// follows, says.
+    /// follows, says. `cargo_home` is the home `CARGO_HOME` names, and none when it is `None`.
     fn verdict(fixture: &Fixture, cargo_home: Option<&Path>) -> Result<(), ReadWithoutCargoError> {
-        read(&fixture.root, cargo_home)?.refuse_what_only_cargo_follows()
+        let variables = cargo_home.map_or_else(HomeVariables::unset, HomeVariables::cargo_home);
+        read(&fixture.root, &ConfigurationRead::AsCargoReadsIt(variables))?
+            .refuse_what_only_cargo_follows()
     }
 
     /// The verdict on a single file `.cargo/config.toml` in the root holding `text`, and the
@@ -295,6 +317,33 @@ mod tests {
 
         let Err(ReadWithoutCargoError::ManifestUnreadable { detail }) = verdict else {
             panic!("expected an unreadable file, got {verdict:?}");
+        };
+        assert!(
+            detail.starts_with(&format!("{} could not be read", config.display())),
+            "{detail}"
+        );
+    }
+
+    #[test]
+    fn a_skipped_read_opens_no_file() {
+        // `.cargo/config` is a directory, which Cargo takes as the file and fails to read. The
+        // skipped read lists and opens nothing, so it finds no file to fail on and nothing to
+        // refuse; the same fixture read as Cargo reads it is the unreadable error naming that
+        // path.
+        let fixture = Fixture::new();
+        let config = fixture.directory(".cargo/config");
+
+        let skipped = read(&fixture.root, &ConfigurationRead::Skipped)
+            .and_then(|configuration| configuration.refuse_what_only_cargo_follows());
+        let as_cargo_reads_it = read(
+            &fixture.root,
+            &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+        )
+        .map(|_| ());
+
+        assert_eq!(skipped, Ok(()));
+        let Err(ReadWithoutCargoError::ManifestUnreadable { detail }) = as_cargo_reads_it else {
+            panic!("expected an unreadable file, got {as_cargo_reads_it:?}");
         };
         assert!(
             detail.starts_with(&format!("{} could not be read", config.display())),

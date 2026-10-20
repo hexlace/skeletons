@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use super::cargo_configuration::HomeVariables;
+use super::cargo_configuration::{ConfigurationRead, HomeVariables};
 use super::error::ReadWithoutCargoError;
 use super::fixture::{Fixture, cargo_version, lock_with_cargo_in};
 use super::read::read_document;
@@ -148,8 +148,12 @@ fn assert_documents_agree(fixture: &Fixture, start: &Path) {
 /// Reads the locked workspace from `start` both ways and requires the same shape.
 fn assert_reads_agree(start: &Path) {
     let toolchain = cargo_version();
-    let own = read_document(start, &BTreeMap::new(), &HomeVariables::unset())
-        .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the workspace: {error}"));
+    let own = read_document(
+        start,
+        &BTreeMap::new(),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+    )
+    .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the workspace: {error}"));
     let cargo = cargo_metadata::fetch(start, Network::Refused)
         .unwrap_or_else(|error| panic!("{toolchain}: cargo metadata refused it: {error:?}"));
 
@@ -259,8 +263,12 @@ fn an_optional_dependency_of_an_outsider_enabled_by_default_and_just_locked_agre
         .lock_with_cargo()
         .unwrap_or_else(|stderr| panic!("{toolchain} could not lock the workspace: {stderr}"));
 
-    let own = read_document(&fixture.root, &BTreeMap::new(), &HomeVariables::unset())
-        .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the workspace: {error}"));
+    let own = read_document(
+        &fixture.root,
+        &BTreeMap::new(),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+    )
+    .unwrap_or_else(|error| panic!("{toolchain}: the reader refused the workspace: {error}"));
     let cargo = cargo_metadata::fetch(&fixture.root, Network::Refused)
         .unwrap_or_else(|error| panic!("{toolchain}: cargo metadata refused it: {error:?}"));
 
@@ -460,7 +468,11 @@ fn a_dependency_key_with_two_source_paths_is_refused_by_cargo_and_by_the_reader(
     fixture.package("../d2", "dep", "version = \"2.0.0\"\n");
 
     let locked = fixture.lock_with_cargo();
-    let read = read_document(&fixture.root, &BTreeMap::new(), &HomeVariables::unset());
+    let read = read_document(
+        &fixture.root,
+        &BTreeMap::new(),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+    );
 
     let stderr = locked.expect_err(&format!("{toolchain} locked a key with two paths"));
     assert!(
@@ -492,7 +504,11 @@ fn one_package_under_two_keys_is_read_by_cargo_and_refused_as_unsupported_by_the
         .unwrap_or_else(|stderr| panic!("{toolchain} could not lock it: {stderr}"));
     cargo_metadata::fetch(&fixture.root, Network::Refused)
         .unwrap_or_else(|error| panic!("{toolchain} refused it: {error:?}"));
-    let read = read_document(&fixture.root, &BTreeMap::new(), &HomeVariables::unset());
+    let read = read_document(
+        &fixture.root,
+        &BTreeMap::new(),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+    );
 
     assert!(
         matches!(read, Err(ReadWithoutCargoError::Unsupported { .. })),
@@ -524,7 +540,11 @@ fn a_virtual_workspace_with_no_members_is_refused_by_cargo_and_by_the_reader() {
             .unwrap_or_else(|stderr| panic!("{toolchain} could not lock {shape}: {stderr}"));
 
         let cargo = cargo_metadata::fetch(&fixture.root, Network::Refused);
-        let read = read_document(&fixture.root, &BTreeMap::new(), &HomeVariables::unset());
+        let read = read_document(
+            &fixture.root,
+            &BTreeMap::new(),
+            &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+        );
 
         match cargo {
             Err(cargo_metadata::ReadWorkspaceError::CargoMetadataFailed { stderr }) => assert!(
@@ -556,7 +576,11 @@ fn a_member_above_the_root_is_refused_by_cargo_and_by_the_reader_with_the_same_s
     fixture.package("../far", "far", "");
 
     let locked = fixture.lock_with_cargo();
-    let read = read_document(&fixture.root, &BTreeMap::new(), &HomeVariables::unset());
+    let read = read_document(
+        &fixture.root,
+        &BTreeMap::new(),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+    );
 
     let stderr = locked.expect_err(&format!("{toolchain} locked a member above the root"));
     let Err(ReadWithoutCargoError::ManifestUnreadable { detail }) = read else {
@@ -582,7 +606,11 @@ fn a_member_above_the_root_that_names_the_root_is_read_by_cargo_and_refused_by_t
         .unwrap_or_else(|stderr| panic!("{toolchain} could not lock it: {stderr}"));
     cargo_metadata::fetch(&fixture.root, Network::Refused)
         .unwrap_or_else(|error| panic!("{toolchain} refused it: {error:?}"));
-    let read = read_document(&fixture.root, &BTreeMap::new(), &HomeVariables::unset());
+    let read = read_document(
+        &fixture.root,
+        &BTreeMap::new(),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+    );
 
     assert!(
         matches!(read, Err(ReadWithoutCargoError::Unsupported { .. })),
@@ -616,7 +644,11 @@ fn a_dependency_left_with_only_a_build_script_is_refused_by_cargo_and_by_the_rea
     fixture.write("dep/build.rs", "fn main() {}\n");
 
     let cargo = cargo_metadata::fetch(&fixture.root, Network::Refused);
-    let read = read_document(&fixture.root, &BTreeMap::new(), &HomeVariables::unset());
+    let read = read_document(
+        &fixture.root,
+        &BTreeMap::new(),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+    );
 
     assert!(cargo.is_err(), "{toolchain} read a package with no target");
     assert!(
@@ -643,7 +675,11 @@ fn a_dependency_with_a_hyphen_in_its_library_name_is_refused_by_cargo_and_by_the
     fixture.package("odd", "odd", "[lib]\nname = \"bad-name\"\n");
 
     let locked = fixture.lock_with_cargo();
-    let read = read_document(&fixture.root, &BTreeMap::new(), &HomeVariables::unset());
+    let read = read_document(
+        &fixture.root,
+        &BTreeMap::new(),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+    );
 
     let stderr = locked.expect_err(&format!("{toolchain} locked a hyphenated library name"));
     assert!(
@@ -671,7 +707,11 @@ fn assert_cargo_decides(row: &matrix::Row) {
     }
 
     let locked = fixture.lock_with_cargo();
-    let read = read_document(&fixture.root, &BTreeMap::new(), &HomeVariables::unset());
+    let read = read_document(
+        &fixture.root,
+        &BTreeMap::new(),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+    );
 
     match (row.expected, locked) {
         (Ok(_), Ok(())) => assert_reads_agree(&fixture.root),
@@ -750,7 +790,11 @@ fn an_edition_inherited_from_the_workspace_decides_where_a_binary_is_found() {
 
     let newer = member_inheriting_edition("2021");
     let locked = newer.lock_with_cargo();
-    let read = read_document(&newer.root, &BTreeMap::new(), &HomeVariables::unset());
+    let read = read_document(
+        &newer.root,
+        &BTreeMap::new(),
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+    );
     let stderr = locked.expect_err(&format!("{toolchain} locked a binary with no file"));
     assert!(
         stderr.contains("can't find `x` bin at `src/bin/x.rs`"),

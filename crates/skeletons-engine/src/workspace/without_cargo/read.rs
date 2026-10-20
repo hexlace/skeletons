@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use super::cargo_configuration::{self, HomeVariables, cargo_home_directory};
+use super::cargo_configuration::{self, ConfigurationRead, HomeVariables};
 use super::currency::verify_lockfile_is_current;
 use super::document;
 use super::error::ReadWithoutCargoError;
@@ -59,35 +59,69 @@ pub fn read_without_cargo(
     directory: &Path,
     locations: &BTreeMap<LockedPackageId, PathBuf>,
 ) -> Result<Workspace, ReadWithoutCargoError> {
-    read_workspace(directory, locations, &HomeVariables::from_process())
+    read_workspace(
+        directory,
+        locations,
+        &ConfigurationRead::AsCargoReadsIt(HomeVariables::from_process()),
+    )
 }
 
-/// [`read_without_cargo`] with the variables that find the Cargo home given, so that a test reads
-/// a home of its own and not the one of whoever runs it.
+/// Reads `directory`'s workspace as [`read_without_cargo`] does, with no Cargo configuration
+/// read.
+///
+/// It reads each `Cargo.toml`, `Cargo.lock`, the files `locations` names and the files a worn
+/// package claims, and nothing else. It does not read a `.cargo/config` or `.cargo/config.toml`
+/// in `directory` or in any directory above it, nor the Cargo home's `config` or `config.toml`,
+/// and it does not look at `CARGO_HOME` or `HOME`. The same files therefore give the same
+/// result on any machine, and a configuration file that [`read_without_cargo`] refuses, because
+/// it is not TOML or asks for `paths`, `[patch]` or `include`, changes nothing here: the result
+/// is the one the workspace has with no such file.
+///
+/// Everything else is as [`read_without_cargo`] documents it, `directory`, `locations`, the
+/// lockfile and the workspace shapes it refuses included, and the steps run in the same order.
+///
+/// # Errors
+///
+/// The errors of [`read_without_cargo`], except that no configuration file is ever the source of
+/// one: [`ReadWithoutCargoError::ManifestUnreadable`] is never about a configuration file, and
+/// [`ReadWithoutCargoError::Unsupported`] is never about `paths`, `[patch]` or `include` in one.
+pub fn read_without_cargo_configuration(
+    directory: &Path,
+    locations: &BTreeMap<LockedPackageId, PathBuf>,
+) -> Result<Workspace, ReadWithoutCargoError> {
+    read_workspace(directory, locations, &ConfigurationRead::Skipped)
+}
+
+/// [`read_without_cargo`] with the way Cargo's configuration is read given, so that a test reads
+/// a home of its own and not the one of whoever runs it, and so that
+/// [`read_without_cargo_configuration`] reads none.
 pub(super) fn read_workspace(
     directory: &Path,
     locations: &BTreeMap<LockedPackageId, PathBuf>,
-    variables: &HomeVariables,
+    configuration_read: &ConfigurationRead,
 ) -> Result<Workspace, ReadWithoutCargoError> {
     Ok(from_document(&read_document(
-        directory, locations, variables,
+        directory,
+        locations,
+        configuration_read,
     )?))
 }
 
 /// The document [`read_without_cargo`] builds its workspace from, which stands in for the one
 /// `cargo metadata` prints for the same files, or, in the one stale shape the lockfile can be in,
-/// for the one it prints once Cargo brings the lock up to date.
+/// for the one it prints once Cargo brings the lock up to date. With `configuration_read` skipped
+/// it is the document of the same files with no Cargo configuration.
 pub(super) fn read_document(
     directory: &Path,
     locations: &BTreeMap<LockedPackageId, PathBuf>,
-    variables: &HomeVariables,
+    configuration_read: &ConfigurationRead,
 ) -> Result<Document, ReadWithoutCargoError> {
     let start = canonical_directory(directory)?;
     // Cargo fails on a configuration file it cannot read before it looks at anything else, so
     // the files are read first. What they ask of Cargo that this reader does not follow is
     // refused only after the lockfile is found and parsed, as with every other refusal.
-    let cargo_home = cargo_home_directory(variables, &start);
-    let configuration = cargo_configuration::read(&start, cargo_home.as_deref())?;
+    let configuration = cargo_configuration::read(&start, configuration_read)?;
+    // Skipped, the configuration holds no file, so the refusal below runs over nothing.
     let layout = layout::discover(&start)?;
     let (lockfile_path, lockfile_text) = lockfile_text(&layout.root_directory)?;
     let lockfile = Lockfile::parse(&lockfile_text)
@@ -136,8 +170,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
-    use super::read_workspace;
-    use crate::workspace::without_cargo::cargo_configuration::HomeVariables;
+    use super::{read_without_cargo_configuration, read_workspace};
+    use crate::workspace::without_cargo::cargo_configuration::{ConfigurationRead, HomeVariables};
     use crate::workspace::without_cargo::error::ReadWithoutCargoError;
     use crate::workspace::without_cargo::fixture::Fixture;
     use crate::workspace::{LockedPackageId, Wearing, WearingRefusal, Workspace};
@@ -183,7 +217,11 @@ mod tests {
     }
 
     fn read(fixture: &Fixture) -> Result<Workspace, ReadWithoutCargoError> {
-        read_workspace(&fixture.root, &BTreeMap::new(), &HomeVariables::unset())
+        read_workspace(
+            &fixture.root,
+            &BTreeMap::new(),
+            &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+        )
     }
 
     /// The worn dependencies of `workspace` as `manifest key package version`, and its refusals.
@@ -271,8 +309,12 @@ mod tests {
             fixture.root.join("../checkout"),
         )]);
 
-        let workspace = read_workspace(&fixture.root, &locations, &HomeVariables::unset())
-            .expect("a workspace");
+        let workspace = read_workspace(
+            &fixture.root,
+            &locations,
+            &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+        )
+        .expect("a workspace");
 
         assert_eq!(
             outcomes(&workspace),
@@ -317,7 +359,7 @@ mod tests {
         let error = read_workspace(
             &fixture.root.join("absent"),
             &BTreeMap::new(),
-            &HomeVariables::unset(),
+            &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
         )
         .err()
         .expect("nothing is there");
@@ -336,7 +378,7 @@ mod tests {
         let error = read_workspace(
             &fixture.root.join("Cargo.toml"),
             &BTreeMap::new(),
-            &HomeVariables::unset(),
+            &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
         )
         .err()
         .expect("a file");
@@ -649,14 +691,14 @@ mod tests {
         let through_cargo_home = read_workspace(
             &fixture.root,
             &BTreeMap::new(),
-            &HomeVariables::cargo_home(&cargo_home),
+            &ConfigurationRead::AsCargoReadsIt(HomeVariables::cargo_home(&cargo_home)),
         )
         .err()
         .expect("a paths override in the Cargo home");
         let through_home = read_workspace(
             &fixture.root,
             &BTreeMap::new(),
-            &HomeVariables::home(&fixture.root.join("../user")),
+            &ConfigurationRead::AsCargoReadsIt(HomeVariables::home(&fixture.root.join("../user"))),
         )
         .err()
         .expect("a paths override in HOME/.cargo");
@@ -678,6 +720,54 @@ mod tests {
     }
 
     #[test]
+    fn a_read_without_the_configuration_gives_what_the_workspace_has_with_none() {
+        // Each repository configuration below is one the read as Cargo reads it refuses: `paths`
+        // and `include` as unsupported, a `[patch]` entry as unsupported, and text that is not
+        // TOML as unreadable. The read that skips the configuration gives, for every one of
+        // them, the workspace of the files alone: the same worn dependency, no refusal, and the
+        // root where the manifests are. The fixture is written once per text and read twice, so
+        // that the only difference between the two reads is the configuration.
+        for text in [
+            "paths = [\"../override\"]\n",
+            "[patch.crates-io]\nhouse-rules = { path = \"../override\" }\n",
+            "include = \"more.toml\"\n",
+            "paths = [\n",
+        ] {
+            let fixture = wearer_with_configuration(text);
+
+            let skipped = read_without_cargo_configuration(&fixture.root, &BTreeMap::new())
+                .expect("a workspace with its configuration left out");
+            let as_cargo_reads_it = read(&fixture);
+
+            assert_eq!(
+                outcomes(&skipped),
+                (
+                    vec!["app/Cargo.toml house-rules house-rules 4.5.6".to_owned()],
+                    vec![]
+                ),
+                "{text}"
+            );
+            assert_eq!(skipped.root, fixture.root, "{text}");
+            assert!(as_cargo_reads_it.is_err(), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_read_without_the_configuration_still_finds_a_missing_lockfile() {
+        // The configuration is not TOML and there is no lockfile. Read as Cargo reads it, the
+        // configuration is the first failure; with it left out, the next step runs, and it is
+        // the lockfile's.
+        let fixture = wearer_with_configuration("paths = [\n");
+        std::fs::remove_file(fixture.root.join("Cargo.lock")).expect("remove the lockfile");
+
+        let error = read_without_cargo_configuration(&fixture.root, &BTreeMap::new())
+            .err()
+            .expect("no lockfile");
+
+        assert_eq!(error, ReadWithoutCargoError::Lockfile);
+    }
+
+    #[test]
     fn the_workspace_is_found_from_a_directory_below_a_member() {
         let fixture = wearer(
             "{ path = \"../house-rules\" }",
@@ -686,8 +776,12 @@ mod tests {
         write_skeleton(&fixture, "house-rules");
         let below: PathBuf = fixture.root.join("app/src");
 
-        let workspace =
-            read_workspace(&below, &BTreeMap::new(), &HomeVariables::unset()).expect("a workspace");
+        let workspace = read_workspace(
+            &below,
+            &BTreeMap::new(),
+            &ConfigurationRead::AsCargoReadsIt(HomeVariables::unset()),
+        )
+        .expect("a workspace");
 
         assert_eq!(workspace.root, fixture.root);
     }

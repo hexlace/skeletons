@@ -1,14 +1,21 @@
 //! What a repository wears, read fresh on every run — nothing here is ever
 //! stored and read back.
 //!
-//! There are two readers. [`read`] asks `cargo metadata`. [`read_without_cargo`]
+//! There are three readers. [`read`] asks `cargo metadata`. [`read_without_cargo`]
 //! reads the manifests and `Cargo.lock` as files, and takes from its caller the
-//! directory of each locked package that is not a path on disk. Both build one
-//! document in the shape `cargo metadata` prints, and everything after it is
-//! shared, so the two give the same workspace for the same files, or, in the
-//! one stale shape the lockfile can be in, the workspace the first gives once
-//! Cargo brings the lock up to date. The one thing only the second can say is a
-//! wearing whose package has no location, which is [`WearingRefusal::Unlocated`].
+//! directory of each locked package that is not a path on disk.
+//! [`read_without_cargo_configuration`] is the second with no Cargo
+//! configuration file read. All three build one document in the shape `cargo
+//! metadata` prints, and everything after it is shared, so they give the same
+//! workspace for the same files, or, in the one stale shape the lockfile can be
+//! in, the workspace the first gives once Cargo brings the lock up to date. The
+//! exception is a Cargo configuration file. One that asks for `paths`, `[patch]`
+//! or `include`, the first follows, the second refuses and the third gives the
+//! workspace of the files with no such file. One that cannot be read, because it
+//! is not TOML or not a file, fails the first two and leaves the third giving
+//! the workspace of the files, since it opens none. The one thing only the last
+//! two can say is a wearing whose package has no
+//! location, which is [`WearingRefusal::Unlocated`].
 
 mod cargo_metadata;
 mod crate_name;
@@ -43,7 +50,9 @@ pub(crate) use wearing_table::OptionShapeRefusal;
 pub(crate) use wearing_table::RESERVED_WEARING_KEYS;
 #[cfg(test)]
 pub(crate) use wearing_table::ShapeFound;
-pub use without_cargo::{ReadWithoutCargoError, read_without_cargo};
+pub use without_cargo::{
+    ReadWithoutCargoError, read_without_cargo, read_without_cargo_configuration,
+};
 pub use worn::WornDependency;
 pub(crate) use worn::WornId;
 
@@ -130,7 +139,7 @@ pub(crate) enum WearingRefusal {
 /// and no command reads that way.
 #[cfg(feature = "commands")]
 pub(crate) const UNLOCATED_NEVER_MET: &str =
-    "only read_without_cargo makes an Unlocated refusal, and no command reads without cargo";
+    "only a read without cargo makes an Unlocated refusal, and no command reads without cargo";
 
 /// Whether [`read`] may let `cargo metadata` reach the network for a locked
 /// source it does not already have.

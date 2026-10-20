@@ -92,8 +92,9 @@ Three crates are published, and they release together:
 - `crates/skeletons` is the ritual bundle a project mounts: `task()` over the
   engine with `commands` on. It is supported.
 - `crates/skeletons-library` is the supported library for a program that wants
-  the verdict as data: `check` and `check_without_cargo` over the engine
-  without `commands`. It is supported.
+  the verdict as data: `check`, `check_without_cargo` and
+  `check_without_cargo_configuration` over the engine without `commands`. It
+  is supported.
 
 The library's tests go through its public API only. Each writes the workspace
 and the skeletons it reads into a temporary directory of its own and reaches

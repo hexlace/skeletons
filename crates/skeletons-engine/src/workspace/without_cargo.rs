@@ -38,4 +38,4 @@ mod differential;
 mod fixture;
 
 pub use error::ReadWithoutCargoError;
-pub use read::read_without_cargo;
+pub use read::{read_without_cargo, read_without_cargo_configuration};

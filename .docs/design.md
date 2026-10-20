@@ -2293,6 +2293,22 @@ manifest whose sources never are is read past the query, as cargo reads it: a
 located package's own, whose declarations are kept only for their names, and
 those the optional-dependency walk reaches.
 
+**The library also has `check_without_cargo_configuration`, the same read with
+no cargo configuration file read.** A caller that checks a skeleton without
+building with cargo gains nothing from cargo's configuration, because nothing
+it asks for is built, and the files make the verdict depend on the machine: the
+same workspace would be refused on a machine with a `paths` in its cargo home
+and reported on one without. That function lists no configuration file and reads
+neither `CARGO_HOME` nor `HOME`, so the same files give the same report
+anywhere. It is a second named function, not an option of the first, because
+each is the whole of one answer to the question of whose cargo configuration
+counts: a flag would give `check_without_cargo` two contracts, and its callers
+that build with cargo rely on the one it has. Under both names there is one
+read path. The configuration is a single value that path carries, either read
+as cargo reads it or skipped, so the two cannot drift in any other step, and
+every refusal that does not come from a configuration file is the same
+refusal in both.
+
 The optional-dependency refusal covers an optional dependency of a package
 outside the workspace, or of a path package one reaches, whose requirement on a
 worn package the locked version does not meet and cargo has no way to add beside

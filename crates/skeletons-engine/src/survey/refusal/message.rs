@@ -1318,7 +1318,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "no command reads without cargo")]
     fn an_unlocated_refusal_has_no_message() {
-        // Only `read_without_cargo` makes an unlocated refusal, and no command
+        // Only a read without cargo makes an unlocated refusal, and no command
         // reads without cargo, so asking one for its message is a bug in the
         // caller: the arm states it cannot happen, and this holds that it does.
         let refusal = Refusal::Wearing(WearingRefusal::Unlocated {

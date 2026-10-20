@@ -12,10 +12,11 @@ use crate::locked_package::LockedPackage;
 ///
 /// The names are the words `check --json` reports as a refusal's `kind`, in
 /// `UpperCamelCase`, except [`Unlocated`](Self::Unlocated), which only
-/// [`check_without_cargo`](crate::check_without_cargo) reports and the command
-/// line never prints. The first seven are about a wearing that resolved to no
-/// skeleton at all. The last four name one or more worn skeletons, and each of
-/// those skeletons holds the refusal in its
+/// [`check_without_cargo`](crate::check_without_cargo) and
+/// [`check_without_cargo_configuration`](crate::check_without_cargo_configuration)
+/// report and the command line never prints. The first seven are about a
+/// wearing that resolved to no skeleton at all. The last four name one or more
+/// worn skeletons, and each of those skeletons holds the refusal in its
 /// [`Files::Refused`](crate::Files::Refused).
 ///
 /// A kind has no `Display`, because this library says nothing in sentences:
@@ -62,7 +63,9 @@ pub enum RefusalKind {
     /// The dependency resolved to a locked package that was given no location,
     /// or whose given location holds no `Cargo.toml` naming it at its locked
     /// version, so whether it is a skeleton is unknown. Only
-    /// [`check_without_cargo`](crate::check_without_cargo) reports it.
+    /// [`check_without_cargo`](crate::check_without_cargo) and
+    /// [`check_without_cargo_configuration`](crate::check_without_cargo_configuration)
+    /// report it.
     Unlocated,
     /// A value recorded for one of the skeleton's options was refused.
     OptionRefused,

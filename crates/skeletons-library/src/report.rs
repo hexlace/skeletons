@@ -1,4 +1,5 @@
-//! Everything `check` or `check_without_cargo` found in a workspace.
+//! Everything `check`, `check_without_cargo` or `check_without_cargo_configuration`
+//! found in a workspace.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -10,8 +11,9 @@ use crate::refusal::Refusal;
 use crate::skeletons_named::SkeletonsNamed;
 use crate::worn_skeleton::WornSkeleton;
 
-/// What `check` or `check_without_cargo` found in a workspace: each wearing
-/// that resolved to a skeleton, and every refusal.
+/// What `check`, `check_without_cargo` or `check_without_cargo_configuration`
+/// found in a workspace: each wearing that resolved to a skeleton, and every
+/// refusal.
 ///
 /// There are two complete ways to read a report. For one package, use
 /// [`skeletons_named`](Self::skeletons_named). For the whole workspace, use
@@ -23,9 +25,10 @@ use crate::worn_skeleton::WornSkeleton;
 ///
 /// Where `check_without_cargo` gives a report, it is the report `check` gives
 /// on the same files, or, in the one stale shape its documentation describes,
-/// the one `check` gives once Cargo brings the lock up to date. So everything here
-/// reads the same whichever produced it, except that only
-/// `check_without_cargo` can report an
+/// the one `check` gives once Cargo brings the lock up to date, and so does
+/// `check_without_cargo_configuration` for a workspace with no Cargo
+/// configuration. So everything here reads the same whichever produced it,
+/// except that only the two reads without cargo can report an
 /// [`Unlocated`](crate::RefusalKind::Unlocated) refusal.
 ///
 /// A report never changes after the call that made it returns it.
@@ -164,7 +167,8 @@ impl Report {
 
     /// The workspace root: an absolute path, as cargo reports it for `check`
     /// and as the canonical directory holding the root manifest for
-    /// `check_without_cargo`. Every other path in a report is relative to it.
+    /// `check_without_cargo` and `check_without_cargo_configuration`. Every
+    /// other path in a report is relative to it.
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root

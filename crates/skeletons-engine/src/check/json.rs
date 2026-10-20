@@ -1412,7 +1412,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "no command reads without cargo")]
     fn an_unlocated_refusal_has_no_json_shape() {
-        // Only `read_without_cargo` makes an unlocated refusal, and no command
+        // Only a read without cargo makes an unlocated refusal, and no command
         // reads without cargo, so `check --json` has no shape for one. The
         // message is passed in directly because `Refusal::message` would panic
         // first, and this test is about the JSON arm.

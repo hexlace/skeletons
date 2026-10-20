@@ -1,15 +1,19 @@
 # skeletons-library
 
 The supported way for a program to ask what [skeletons](https://github.com/hexlace/skeletons#readme)
-would say about a workspace. Two functions read a workspace and return, as
+would say about a workspace. Three functions read a workspace and return, as
 data, which files its worn skeletons claim and whether each one matches.
 `check` asks cargo. `check_without_cargo` reads the manifests and `Cargo.lock`
-as files, for a program that builds without Cargo. Where
-`check_without_cargo` gives a report, it is the report `check` gives on the same
-files, or, in the one stale shape "Without Cargo" below names, the report
-`check` gives once Cargo brings the lock up to date. Neither writes anything in
-the workspace or makes a network request, and neither says anything in words: a
-caller decides what a drifted file or a refusal means to its own users.
+as files, and Cargo's configuration files, for a program that builds with Cargo
+and checks without running it. `check_without_cargo_configuration` reads the
+same files and none of Cargo's configuration, for a program that checks a
+skeleton without building with Cargo. Where either read without Cargo gives a
+report, it is the report `check` gives on the same files, or, in the one stale
+shape "Without Cargo" below names, the report `check` gives once Cargo brings
+the lock up to date; the second differs only where a Cargo configuration file
+asks for something, as "Without Cargo's configuration" below says. None writes
+anything in the workspace or makes a network request, and none says anything in
+words: a caller decides what a drifted file or a refusal means to its own users.
 
 A caller that wants the commands themselves, `check`, `sync`, `wear` and
 `remove` with their tables and messages, mounts
@@ -118,7 +122,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## What it needs
 
-The two functions need different things. Pick by what the program has.
+The functions need different things. Pick by what the program has and by
+whose Cargo configuration its verdict may depend on.
 
 ### With Cargo
 
@@ -155,9 +160,11 @@ framework.
 
 ### Without Cargo
 
-`check_without_cargo` runs no cargo, so it needs no cargo, no git and no `PATH`,
-and a cargo home need not exist. It reads `Cargo.toml` files, `Cargo.lock` and
-cargo's configuration files as files, and
+`check_without_cargo` is for a program that builds with Cargo and checks without
+running it, so the Cargo configuration that shapes its build counts: what in it
+only Cargo follows is refused rather than read past. It runs no cargo, so it
+needs no cargo, no git and no `PATH`, and a cargo home need not exist. It reads
+`Cargo.toml` files, `Cargo.lock` and cargo's configuration files as files, and
 returns the report `check` returns for the same workspace and files, or, in the
 one stale shape described at the end of this section, the report `check` returns
 once Cargo brings the lock up to date. It needs:
@@ -337,6 +344,56 @@ the newest compatible version. There is no report from `check` to equal, and
 dependency's requirement is in a manifest the function does not have. The
 report shows the version it read: `WornSkeleton::version` is the locked one, so
 a caller that cares which version was checked reads it there.
+
+### Without Cargo's configuration
+
+`check_without_cargo_configuration` is for a program that checks a skeleton
+without building with Cargo. Cargo's configuration changes nothing that such a
+program builds, so the verdict must not depend on the machine it runs on: with
+`check_without_cargo`, a `paths` in one machine's cargo home refuses a workspace
+that another machine reports on. This function reads no configuration file, and
+the same files give the same report anywhere.
+
+The three reads, by what each is for and what each reads:
+
+- `check` is for a program that builds with Cargo and has Cargo. It reads what
+  `cargo metadata` reads, Cargo's configuration files included.
+- `check_without_cargo` is for a program that builds with Cargo and checks
+  without running it. It reads each `Cargo.toml`, `Cargo.lock`, the locations it
+  is given, the files a worn skeleton claims, and Cargo's configuration files:
+  `.cargo/config` or `.cargo/config.toml` in the directory given and each
+  directory above it, then the cargo home's, found through `CARGO_HOME` or
+  `HOME`.
+- `check_without_cargo_configuration` is for a program that checks a skeleton
+  without building with Cargo. It reads each `Cargo.toml`, `Cargo.lock`, the
+  locations it is given and the files a worn skeleton claims, and nothing else.
+  It does not read a `.cargo/config` or `.cargo/config.toml` at or above the
+  directory, nor the cargo home's, and it does not look at `CARGO_HOME` or
+  `HOME`.
+
+Everything in "Without Cargo" holds for it, except the paragraph on
+configuration files and the three refusals that come from them: it never refuses
+a `paths`, a `[patch]` with an entry or an `include` in a configuration file, and
+never finds a configuration file unreadable, because it opens none. Its errors
+are the ones listed there for a manifest or the lockfile, and no configuration
+file appears in any. A `[patch]` in a `Cargo.toml` and a wearing declared with
+`registry =` are still refused.
+
+A configuration file that `check_without_cargo` refuses changes nothing here:
+the result is the one the workspace has with no such file. Where a Cargo
+configuration asks for `paths`, `[patch]` or `include`, the report is of the
+files as written, and not the one `check` gives.
+
+```rust,no_run
+use skeletons_library::PackageLocations;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let report =
+        skeletons_library::check_without_cargo_configuration(".", &PackageLocations::new())?;
+    println!("{} skeletons worn", report.skeletons().len());
+    Ok(())
+}
+```
 
 ## Support
 

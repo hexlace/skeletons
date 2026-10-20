@@ -22,8 +22,9 @@ enum ErrorKind {
 /// Why the workspace could not be read at all, as opposed to a wearing being
 /// refused, which still leaves every other wearing reported.
 ///
-/// Both [`check`](crate::check) and
-/// [`check_without_cargo`](crate::check_without_cargo) return it. `Display` is
+/// [`check`](crate::check), [`check_without_cargo`](crate::check_without_cargo)
+/// and [`check_without_cargo_configuration`](crate::check_without_cargo_configuration)
+/// return it. `Display` is
 /// a fixed phrase for each failure, with no remedy, so it can be compared
 /// exactly; everything that came from outside is in [`detail`](Self::detail).
 /// The seven `is_*` predicates are disjoint: no two are true of one error. A
@@ -36,9 +37,9 @@ enum ErrorKind {
 /// `cargo-unavailable`. The other two,
 /// [`is_manifest_or_lockfile_unreadable`](Self::is_manifest_or_lockfile_unreadable)
 /// and [`is_unsupported_without_cargo`](Self::is_unsupported_without_cargo),
-/// are failures only `check_without_cargo` has, and the command line reads
-/// through cargo, so it has no word for them. Of the other five,
-/// `check_without_cargo` makes true only
+/// are failures only the two reads without cargo have, and the command line
+/// reads through cargo, so it has no word for them. Of the other five, each
+/// read without cargo makes true only
 /// [`is_lockfile_not_current`](Self::is_lockfile_not_current) and
 /// [`is_directory_not_found`](Self::is_directory_not_found), since it runs no
 /// cargo.
@@ -113,9 +114,10 @@ impl ReadWorkspaceError {
     }
 
     /// Whether `Cargo.lock` is missing or out of date. Neither `check` nor
-    /// `check_without_cargo` writes one. This is the `lockfile` word.
+    /// `check_without_cargo` or `check_without_cargo_configuration` writes one.
+    /// This is the `lockfile` word.
     ///
-    /// For `check_without_cargo` it is also true when the manifests have
+    /// For the reads without cargo it is also true when the manifests have
     /// outgrown the lock in a way a reader of the files can see, such as a
     /// dependency added and not locked.
     #[must_use]
@@ -142,14 +144,15 @@ impl ReadWorkspaceError {
         matches!(self.kind, ErrorKind::CargoNotStarted)
     }
 
-    /// Whether no directory was found at the `directory` given to `check` or
-    /// `check_without_cargo`: nothing exists there, something other than a
-    /// directory does, or the path could not be looked at.
+    /// Whether no directory was found at the `directory` given to `check`,
+    /// `check_without_cargo` or `check_without_cargo_configuration`: nothing
+    /// exists there, something other than a directory does, or the path could
+    /// not be looked at.
     ///
     /// For `check` this is cargo that could not be started, and the look is
     /// made after the failure and describes the path as it was then; it is the
-    /// `cargo-unavailable` word, as `check --json` reports it. For
-    /// `check_without_cargo` the directory is looked at first, and
+    /// `cargo-unavailable` word, as `check --json` reports it. For the reads
+    /// without cargo the directory is looked at first, and
     /// [`detail`](Self::detail) holds the directory and the operating system's
     /// words.
     #[must_use]
@@ -165,23 +168,26 @@ impl ReadWorkspaceError {
         matches!(self.kind, ErrorKind::MetadataUnreadable)
     }
 
-    /// Whether `check_without_cargo` could not read a manifest, the lockfile
-    /// or a cargo configuration file, or found one cargo would refuse too: a
-    /// file that is missing, is not TOML or not in cargo's shape, a workspace
+    /// Whether `check_without_cargo` or `check_without_cargo_configuration`
+    /// could not read a manifest or the lockfile, or, for `check_without_cargo`
+    /// alone, a cargo configuration file, or found one cargo would refuse too:
+    /// a file that is missing, is not TOML or not in cargo's shape, a workspace
     /// member or path dependency with no `Cargo.toml`, a lock entry that names
     /// no package, a package with no target, no manifest at or above the
     /// directory, a configuration file whose `paths` is not an array or
-    /// whose `patch` is not a table, or a `git` dependency whose URL is not
-    /// one cargo reads, such as `git@github.com:foo/bar.git`.
-    /// [`detail`](Self::detail) names the file and what was wrong. `check`
-    /// never makes this true. The command line has no word for it.
+    /// whose `patch` is not a table (`check_without_cargo` alone), or a `git`
+    /// dependency whose URL is not one cargo reads, such as
+    /// `git@github.com:foo/bar.git`. [`detail`](Self::detail) names the file
+    /// and what was wrong. `check` never makes this true. The command line has
+    /// no word for it.
     #[must_use]
     pub fn is_manifest_or_lockfile_unreadable(&self) -> bool {
         matches!(self.kind, ErrorKind::ManifestOrLockfileUnreadable)
     }
 
     /// Whether the workspace uses something only cargo can read, so
-    /// `check_without_cargo` did not guess: `[patch]`, `[replace]`,
+    /// `check_without_cargo` or `check_without_cargo_configuration` did not
+    /// guess: `[patch]`, `[replace]`,
     /// `package.workspace`, one package under two dependency keys, two path
     /// packages with one name and version, a wearing whose own dependency is
     /// declared with `registry =`, a lockfile in a format other than 3 or 4, a
@@ -191,17 +197,18 @@ impl ReadWorkspaceError {
     /// outside the workspace, or of a path package it reaches, that asks a worn
     /// package for a version its locked one does not meet and cargo cannot add
     /// beside it (for a registry package, one its compatible range could meet;
-    /// for a path or git package, any), and in a cargo configuration file a
-    /// non-empty `paths`, a `[patch]` with an entry or any `include`.
+    /// for a path or git package, any), and, for `check_without_cargo` alone,
+    /// in a cargo configuration file a non-empty `paths`, a `[patch]` with an
+    /// entry or any `include`.
     /// [`detail`](Self::detail) names the manifest, lockfile or configuration
     /// file and what it uses. `check` reads such a workspace where cargo is
     /// available, except for that optional dependency once a feature enables
     /// it, where cargo cannot resolve the workspace and `check` fails with
     /// [`is_cargo_metadata_failed`](Self::is_cargo_metadata_failed).
-    /// The function does not resolve features, so it refuses that dependency
-    /// whenever a feature could enable it, and `check` reads the workspace
-    /// where nothing does. This never becomes true for `check`. The command
-    /// line has no word for it.
+    /// The reads without cargo do not resolve features, so they refuse that
+    /// dependency whenever a feature could enable it, and `check` reads the
+    /// workspace where nothing does. This never becomes true for `check`. The
+    /// command line has no word for it.
     #[must_use]
     pub fn is_unsupported_without_cargo(&self) -> bool {
         matches!(self.kind, ErrorKind::UnsupportedWithoutCargo)
@@ -211,7 +218,7 @@ impl ReadWorkspaceError {
     /// error when cargo ran and failed, `failed to run: ` followed by the
     /// operating system's words when cargo could not be started or the
     /// directory was not found, what was wrong when the output could not be
-    /// used, and for `check_without_cargo` the file and what was wrong with
+    /// used, and for the reads without cargo the file and what was wrong with
     /// it. `None` when nothing came, which is always so for a lockfile that is
     /// not current.
     #[must_use]

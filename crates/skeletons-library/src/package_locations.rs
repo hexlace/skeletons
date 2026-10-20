@@ -7,8 +7,12 @@ use skeletons_engine::LockedPackageId;
 
 use crate::locked_package::LockedPackage;
 
-/// Where the files of each locked package are, for the packages
-/// [`check_without_cargo`](crate::check_without_cargo) cannot find by itself.
+/// Where the files of each locked package are, for the packages a read without
+/// cargo cannot find by itself.
+///
+/// Both [`check_without_cargo`](crate::check_without_cargo) and
+/// [`check_without_cargo_configuration`](crate::check_without_cargo_configuration)
+/// take one.
 ///
 /// A package with a `source` in `Cargo.lock`, from a registry or a git
 /// repository, is not a path on disk, so the caller says where its files are.
@@ -18,7 +22,8 @@ use crate::locked_package::LockedPackage;
 /// key, so the files of another commit at the same version are read as given. A
 /// path package is found from the manifests and needs none. A relative
 /// directory is taken from the process's current directory when
-/// `check_without_cargo` reads it, not when it is inserted.
+/// `check_without_cargo` or `check_without_cargo_configuration` reads it, not
+/// when it is inserted.
 ///
 /// A location for a package no wearing resolves to is never read, and is not
 /// an error.

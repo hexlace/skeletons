@@ -2,16 +2,18 @@
 //!
 //! ## What this crate provides
 //!
-//! Two functions read a workspace and return a [`Report`]. [`check`] asks
+//! Three functions read a workspace and return a [`Report`]. [`check`] asks
 //! cargo. [`check_without_cargo`] reads the manifests and `Cargo.lock` as
 //! files, for a caller that has no cargo, and is told where the files of each
 //! locked package that is not a path on disk are ([`PackageLocations`],
-//! [`LockedPackage`]). The report holds each worn skeleton ([`WornSkeleton`])
-//! with the files it claims ([`Files`], [`ClaimedFile`], [`FileState`]), and
-//! every refusal ([`Refusal`], [`RefusalKind`], [`Wearing`]) the check could
-//! not get past. Nothing here writes, nothing needs the network, and nothing
-//! is a sentence about a workspace: the answer is data, and the words are the
-//! caller's.
+//! [`LockedPackage`]). [`check_without_cargo_configuration`] is that read with
+//! none of cargo's configuration files read, for a caller whose verdict must
+//! not depend on the machine. The report holds each worn skeleton
+//! ([`WornSkeleton`]) with the files it claims ([`Files`], [`ClaimedFile`],
+//! [`FileState`]), and every refusal ([`Refusal`], [`RefusalKind`],
+//! [`Wearing`]) the check could not get past. Nothing here writes, nothing
+//! needs the network, and nothing is a sentence about a workspace: the answer
+//! is data, and the words are the caller's.
 //!
 //! Every struct and enum is `#[non_exhaustive]`, so a new state, kind or field
 //! is not a breaking change. The one exception is [`LockedPackage`], whose
@@ -205,7 +207,10 @@ pub fn check(directory: impl AsRef<Path>) -> Result<Report, ReadWorkspaceError> 
 /// `CARGO_HOME` are not read, because they come from the caller's own
 /// invocation and not from the workspace. A `[source]` replacement is read
 /// past, because it moves where cargo reads a package and never which package
-/// is locked.
+/// is locked. A caller that checks a skeleton without building with cargo, for
+/// which a machine's cargo configuration changes nothing that is built, calls
+/// [`check_without_cargo_configuration`] instead, which reads none of these
+/// files.
 ///
 /// A git dependency's URL is compared with the lock's as cargo compares them,
 /// so two spellings of one repository are one source, and a `git` value cargo
@@ -279,5 +284,82 @@ pub fn check_without_cargo(
     let workspace =
         skeletons_engine::read_without_cargo(directory.as_ref(), &locations.to_engine())
             .map_err(ReadWorkspaceError::from_engine_without_cargo)?;
+    Ok(Report::from_survey(&survey(&workspace)))
+}
+
+/// Reads the workspace `directory` belongs to as [`check_without_cargo`] does,
+/// with none of cargo's configuration read, and compares every file its worn
+/// skeletons claim with what is on disk.
+///
+/// It reads each `Cargo.toml`, `Cargo.lock`, the files `locations` names and the
+/// files a worn skeleton claims, and nothing else. It does not read a
+/// `.cargo/config` or `.cargo/config.toml` in `directory` or in any directory
+/// above it, nor the cargo home's `config` or `config.toml`, and it does not
+/// look at `CARGO_HOME` or `HOME`. The same files therefore give the same
+/// verdict on any machine.
+///
+/// This is for a caller that checks a skeleton without building with cargo,
+/// for which cargo's configuration changes nothing that is built, so the
+/// verdict must not depend on whose machine it runs on. A caller that builds
+/// with cargo, and so has its configuration honoured, uses [`check`] where
+/// cargo is, or [`check_without_cargo`] where it is not.
+///
+/// A configuration file that [`check_without_cargo`] refuses, because it is not
+/// TOML or asks for `paths`, a `[patch]` with an entry or `include`, changes
+/// nothing here: the report is the one the workspace has with no such file.
+/// Where cargo's configuration does ask for those, the report is of the files
+/// as written, and not the one [`check`] gives.
+///
+/// Everything else [`check_without_cargo`] documents holds here: how a
+/// relative `directory` and the manifests above it are found, what `locations`
+/// holds and how a wearing it does not hold is an
+/// [`Unlocated`](RefusalKind::Unlocated) [`Refusal`], the lockfile that must be
+/// up to date, the one stale shape it reports through, and the workspaces it
+/// refuses rather than guesses at. A `[patch]` or `[replace]` in a `Cargo.toml`
+/// and a wearing whose own dependency is declared with `registry =` are
+/// refused here as they are there. The call writes nothing, runs no build
+/// script, needs no git and makes no network request.
+///
+/// # Errors
+///
+/// - [`is_lockfile_not_current`](ReadWorkspaceError::is_lockfile_not_current)
+///   when `Cargo.lock` is missing or out of date.
+/// - [`is_directory_not_found`](ReadWorkspaceError::is_directory_not_found)
+///   when `directory` cannot be read: nothing is there, it is not a directory,
+///   or it is not readable.
+/// - [`is_manifest_or_lockfile_unreadable`](ReadWorkspaceError::is_manifest_or_lockfile_unreadable)
+///   when a manifest or the lockfile cannot be read, or is one cargo would
+///   refuse too.
+/// - [`is_unsupported_without_cargo`](ReadWorkspaceError::is_unsupported_without_cargo)
+///   when the workspace uses something only cargo reads in a manifest or the
+///   lockfile, or a wearing whose own dependency is declared with `registry =`,
+///   among them. [`check_without_cargo`] lists them.
+///
+/// [`is_cargo_metadata_failed`](ReadWorkspaceError::is_cargo_metadata_failed),
+/// [`is_cargo_not_started`](ReadWorkspaceError::is_cargo_not_started) and
+/// [`is_metadata_unreadable`](ReadWorkspaceError::is_metadata_unreadable) are
+/// never true of these errors, since nothing is run.
+///
+/// # Examples
+///
+/// A workspace whose skeletons are all path dependencies needs no locations:
+///
+/// ```no_run
+/// use skeletons_library::PackageLocations;
+///
+/// let report =
+///     skeletons_library::check_without_cargo_configuration(".", &PackageLocations::new())?;
+/// println!("{} skeletons worn", report.skeletons().len());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn check_without_cargo_configuration(
+    directory: impl AsRef<Path>,
+    locations: &PackageLocations,
+) -> Result<Report, ReadWorkspaceError> {
+    let workspace = skeletons_engine::read_without_cargo_configuration(
+        directory.as_ref(),
+        &locations.to_engine(),
+    )
+    .map_err(ReadWorkspaceError::from_engine_without_cargo)?;
     Ok(Report::from_survey(&survey(&workspace)))
 }

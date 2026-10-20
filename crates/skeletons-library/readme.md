@@ -11,9 +11,10 @@ skeleton without building with Cargo. Where either read without Cargo gives a
 report, it is the report `check` gives on the same files, or, in the one stale
 shape "Without Cargo" below names, the report `check` gives once Cargo brings
 the lock up to date; the second differs only where a Cargo configuration file
-asks for something, as "Without Cargo's configuration" below says. None writes
-anything in the workspace or makes a network request, and none says anything in
-words: a caller decides what a drifted file or a refusal means to its own users.
+asks for something or cannot be read, as "Without Cargo's configuration" below
+says. None writes anything in the workspace or makes a network request, and
+none says anything in words: a caller decides what a drifted file or a refusal
+means to its own users.
 
 A caller that wants the commands themselves, `check`, `sync`, `wear` and
 `remove` with their tables and messages, mounts

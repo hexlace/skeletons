@@ -27,6 +27,13 @@ verdict for a file as a value.
 cargo add skeletons-library
 ```
 
+`skeletons-engine`, which this crate is built on, reaches `idna` through `url`,
+and `idna` uses whichever Unicode back end the `idna_adapter` version in the
+top-level application's `Cargo.lock` picks, ICU4X and its derive crates for
+1.2.x and unicode-rs for 1.1.x, so an application that wants ICU4X out of its
+build runs `cargo update -p idna_adapter --precise 1.1.0` in its top-level
+directory.
+
 Find a skeleton by its package name, never by the key the wearing project
 declares it under. A skeleton's files are read by matching `Files`, and a
 package is looked up by matching `SkeletonsNamed`, so each answer that could be
